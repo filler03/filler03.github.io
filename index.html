@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I love you Cara Joy</title>
+<style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        background: #fdf6e3;
+        font-family: 'Arial', sans-serif;
+    }
+    h1 {
+        position: absolute;
+        top: 20px;
+        width: 100%;
+        text-align: center;
+        font-size: 3rem;
+        color: #d6336c;
+        z-index: 10;
+    }
+    canvas {
+        display: block;
+    }
+</style>
+</head>
+<body>
+<h1>I love you Cara Joy</h1>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const platformY = canvas.height / 2;
+const platformHeight = 20;
+const platformWidth = canvas.width;
+
+class Chicken {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 30;
+        this.emoji = '🐓'; // Full chicken body
+        this.speed = 10; // Movement speed when clicked
+    }
+    draw() {
+        ctx.font = '40px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.emoji, this.x, this.y);
+    }
+    move(direction) {
+        this.x += direction * this.speed;
+        if (this.x < 40) this.x = 40;
+        if (this.x > canvas.width - 40) this.x = canvas.width - 40;
+    }
+}
+
+class Egg {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 15;
+        this.vy = 0;
+        this.gravity = 0.5;
+        this.bounce = 0.6;
+        this.stage = 0; // 0 = egg, 1 = hatching chick, 2 = chick
+        this.emoji = '🥚';
+        this.startTime = Date.now();
+        this.chickSpeed = 0;
+    }
+    draw() {
+        ctx.font = '30px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.emoji, this.x, this.y);
+    }
+    update() {
+        const elapsed = (Date.now() - this.startTime) / 1000;
+
+        if (this.stage < 2) {
+            this.vy += this.gravity;
+            this.y += this.vy;
+
+            if (this.y + this.radius > canvas.height) {
+                this.y = canvas.height - this.radius;
+                this.vy *= -this.bounce;
+            }
+
+            if (elapsed > 10 && this.stage < 2) {
+                this.stage = 2;
+                this.emoji = '🐥';
+                this.chickSpeed = (Math.random() * 2 + 1) * (Math.random() < 0.5 ? -1 : 1);
+            } else if (elapsed > 5 && this.stage < 1) {
+                this.stage = 1;
+                this.emoji = '🐣';
+            }
+        } else {
+            this.x += this.chickSpeed;
+            if (this.x < 20 || this.x > canvas.width - 20) {
+                this.chickSpeed *= -1;
+            }
+        }
+
+        this.draw();
+    }
+}
+
+const chicken = new Chicken(canvas.width / 2, platformY - 30);
+const eggs = [];
+
+// Handle clicks
+canvas.addEventListener('click', (e) => {
+    const dx = e.clientX - chicken.x;
+    const dy = e.clientY - chicken.y;
+
+    if (Math.sqrt(dx * dx + dy * dy) < chicken.radius) {
+        // Clicked on chicken → lay egg
+        eggs.push(new Egg(chicken.x, chicken.y));
+    } else {
+        // Move chicken based on side clicked
+        if (e.clientX < canvas.width / 2) {
+            chicken.move(-1);
+        } else {
+            chicken.move(1);
+        }
+    }
+});
+
+function drawPlatform() {
+    ctx.fillStyle = '#8b4513';
+    ctx.fillRect(0, platformY, platformWidth, platformHeight);
+}
+
+function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawPlatform();
+    chicken.draw();
+    for (let egg of eggs) {
+        egg.update();
+    }
+    requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
