@@ -72,6 +72,8 @@ html, body {
   font-size: 14px;
   color: #17310c;
   z-index: 10;
+  /* CHANGE: Hide the settings panel */
+  display: none; 
 }
 #controls h3 {
   margin: 6px 0 10px;
@@ -298,97 +300,45 @@ class Chicken {
   render() {
     this.element.style.left = `${this.x}px`;
     this.element.style.top = `${this.y}px`;
-    // Emoji faces left by default; flip when facing right
-    this.element.style.transform = `scaleX(${this.facing === 1 ? -1 : 1})`;
+    // Flip the chicken emoji based on direction
+    this.element.style.transform = `scaleX(${this.facing})`;
   }
-
-  layEgg(eggs) {
-  const minDistance = getCSSNumber('--egg-min-distance');
-
-  // Check distance to all existing eggs
-  for (const egg of eggs) {
-    const dx = (egg.x + egg.width / 2) - (this.x + this.element.offsetWidth / 2);
-    const dy = (egg.y + egg.height / 2) - (this.y + this.element.offsetHeight / 2);
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    if (distance < minDistance) {
-      return; // Too close, don't lay egg
-    }
-  }
-
-  const egg = new Egg(this.gameArea, this.x, this.y, this.element.offsetWidth, this.element.offsetHeight);
-  eggs.push(egg);
-  // Remove this line: egg.render();
-}
 }
 
 class Egg {
-  constructor(gameArea, chickenX, chickenY, chickenWidth, chickenHeight) {
+  constructor(gameArea, x, y, onHatch) {
     this.gameArea = gameArea;
+    this.onHatch = onHatch;
     this.element = document.createElement('div');
     this.element.className = 'egg';
     this.element.textContent = '🥚';
+    this.element.style.left = `${x}px`;
+    this.element.style.top = `${y}px`;
     this.gameArea.appendChild(this.element);
 
-    // Read current settings dynamically
-    const eggWidth = getCSSNumber('--egg-width');
-    const eggHeight = getCSSNumber('--egg-height');
-
-    this.x = chickenX + (chickenWidth / 2) - (eggWidth / 2);
-    this.y = chickenY + chickenHeight;
-    this.width = eggWidth;
-    this.height = eggHeight;
-    this.isHatching = false;
-
-    // Add click handler
     this.element.addEventListener('click', () => this.startHatching());
-    
-    // Apply size immediately
-    this.render();
+
+    this.isHatching = false;
+    this.hatchTimer = null;
   }
 
   startHatching() {
-    if (this.isHatching) return; // Already hatching
+    if (this.isHatching) return;
     this.isHatching = true;
-
-    // Change to hatching egg emoji and add shake animation
-    this.element.textContent = '🥚';
     this.element.classList.add('hatching');
-
-    // After 3 seconds, hatch into a chick
-    setTimeout(() => {
-      this.hatch();
-    }, 3000);
+    this.hatchTimer = setTimeout(() => this.hatch(), 1500); // Hatch after 1.5 seconds
   }
 
   hatch() {
-  // Get chick size to center it properly
-  const chickSize = getCSSNumber('--chick-size');
-  
-  // Calculate centered position based on egg position and sizes
-  const chickX = this.x + (this.width / 2) - (chickSize / 2);
-  const chickY = this.y + (this.height / 2) - (chickSize / 2);
-  
-  // Create a chick at the centered position
-  const chick = new Chick(this.gameArea, chickX, chickY);
-  chicks.push(chick);
-  chick.animate();
-
-  // Remove this egg from the eggs array and DOM
-  const index = eggs.indexOf(this);
-  if (index > -1) {
-    eggs.splice(index, 1);
-  }
-  this.remove();
-}
-
-  render() {
-    this.element.style.left = `${this.x}px`;
-    this.element.style.top = `${this.y}px`;
-  }
-
-  remove() {
+    clearTimeout(this.hatchTimer);
     this.element.remove();
+    this.onHatch(this.x, this.y);
   }
+
+  get x() { return parseFloat(this.element.style.left); }
+  get y() { return parseFloat(this.element.style.top); }
+  get width() { return this.element.offsetWidth; }
+  get height() { return this.element.offsetHeight; }
 }
 
 class Chick {
@@ -399,218 +349,181 @@ class Chick {
     this.element.textContent = '🐥';
     this.gameArea.appendChild(this.element);
 
-    const chickSize = getCSSNumber('--chick-size');
-    this.x = x;
-    this.y = y;
-    this.width = chickSize;
-    this.height = chickSize;
+    this.x = x + getCSSNumber('--egg-width') / 2 - getCSSNumber('--chick-size') / 2;
+    this.y = y + getCSSNumber('--egg-height') / 2 - getCSSNumber('--chick-size') / 2;
+    this.facing = Math.random() < 0.5 ? 1 : -1;
 
-    // Random direction (angle in radians)
-    this.direction = Math.random() * Math.PI * 2;
-    this.facing = 1; // 1 = right, -1 = left
-    
-    // Random time before changing direction (2-5 seconds)
-    this.changeDirectionTime = 2000 + Math.random() * 3000;
-    this.lastDirectionChange = Date.now();
+    this.setNewTarget();
+    this.animate();
+  }
 
-    this.render();
+  setNewTarget() {
+    const maxX = this.gameArea.clientWidth - this.element.offsetWidth;
+    const maxY = this.gameArea.clientHeight - this.element.offsetHeight;
+    this.targetX = Math.random() * maxX;
+    this.targetY = Math.random() * maxY;
   }
 
   animate() {
-    const speed = getCSSNumber('--chick-speed');
-    const now = Date.now();
+    const speed = parseFloat(getCSSRaw('--chick-speed')); // Read speed dynamically
 
-    // Change direction periodically
-    if (now - this.lastDirectionChange > this.changeDirectionTime) {
-      this.direction = Math.random() * Math.PI * 2;
-      this.changeDirectionTime = 2000 + Math.random() * 3000;
-      this.lastDirectionChange = now;
-    }
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
 
-    // Move in current direction
-    const dx = Math.cos(this.direction) * speed;
-    const dy = Math.sin(this.direction) * speed;
+    if (distance < 5) {
+      this.setNewTarget();
+    } else {
+      this.x += (dx / distance) * speed;
+      this.y += (dy / distance) * speed;
 
-    this.x += dx;
-    this.y += dy;
-
-    // Update facing based on horizontal movement
-    if (Math.abs(dx) > 0.1) {
-      this.facing = dx >= 0 ? 1 : -1;
-    }
-
-    // Bounce off walls
-    const maxX = this.gameArea.clientWidth - this.width;
-    const maxY = this.gameArea.clientHeight - this.height;
-
-    if (this.x < 0 || this.x > maxX) {
-      this.direction = Math.PI - this.direction;
-      this.x = Math.max(0, Math.min(maxX, this.x));
-    }
-    if (this.y < 0 || this.y > maxY) {
-      this.direction = -this.direction;
-      this.y = Math.max(0, Math.min(maxY, this.y));
+      // Update facing based on horizontal movement direction
+      if (Math.abs(dx) > 0.5) {
+        this.facing = dx >= 0 ? 1 : -1;
+      }
     }
 
     this.render();
-
-    // Continue animation if chick still exists
-    if (this.element.parentElement) {
-      requestAnimationFrame(() => this.animate());
-    }
+    requestAnimationFrame(() => this.animate());
   }
 
   render() {
-  this.element.style.left = `${this.x}px`;
-  this.element.style.top = `${this.y}px`;
-  this.element.style.width = `${this.width}px`;
-  this.element.style.height = `${this.height}px`;
-  this.element.style.fontSize = `${this.height}px`;
-}
-
-  remove() {
-    this.element.remove();
+    this.element.style.left = `${this.x}px`;
+    this.element.style.top = `${this.y}px`;
+    this.element.style.transform = `scaleX(${this.facing})`;
   }
 }
 
-/** Initialize game */
+
+/** Main Game Logic */
 const gameArea = document.getElementById('game-area');
 const chicken = new Chicken(gameArea);
-const eggs = [];
-const chicks = [];
+let eggs = [];
+let chicks = [];
+let lastEggTime = 0;
+const EGG_COOLDOWN = 300; // milliseconds
 
-/** Follow mouse smoothly */
+function handleHatch(x, y) {
+  // Filter out the hatched egg
+  eggs = eggs.filter(egg => egg.x !== x || egg.y !== y);
+  // Create a new chick
+  chicks.push(new Chick(gameArea, x, y));
+}
+
+function layEgg() {
+  const now = Date.now();
+  if (now - lastEggTime < EGG_COOLDOWN) return;
+
+  // Read min distance dynamically
+  const minDistance = getCSSNumber('--egg-min-distance');
+
+  const x = chicken.x + chicken.element.offsetWidth / 2 - getCSSNumber('--egg-width') / 2;
+  const y = chicken.y + chicken.element.offsetHeight / 2 - getCSSNumber('--egg-height') / 2;
+
+  // Check distance to all existing eggs
+  for (const egg of eggs) {
+    const dx = egg.x - x;
+    const dy = egg.y - y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < minDistance) {
+      return; // Too close to another egg, don't lay
+    }
+  }
+
+  eggs.push(new Egg(gameArea, x, y, handleHatch));
+  lastEggTime = now;
+}
+
+// Event listeners
 gameArea.addEventListener('mousemove', (e) => {
   chicken.moveTo(e.clientX, e.clientY);
 });
 
-/** Space to lay egg (with distance check) */
-window.addEventListener('keydown', (e) => {
-  if (e.key === ' ') {
-    e.preventDefault();
-    chicken.layEgg(eggs);
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault(); // Prevent scrolling
+    layEgg();
   }
 });
 
-/** Settings panel wiring (freeform fields) */
-const STORAGE_KEY = 'hen-eggs-config-freeform';
+// Update chicken position when window resizes (to stay on screen)
+window.addEventListener('resize', () => {
+  chicken.clampToBounds();
+});
 
-const inputs = {
-  chickenSize: document.getElementById('chickenSizeInput'),
-  eggWidth: document.getElementById('eggWidthInput'),
-  eggHeight: document.getElementById('eggHeightInput'),
-  speed: document.getElementById('speedInput'),
-  eggMinDistance: document.getElementById('eggMinDistanceInput'),
-  chickSize: document.getElementById('chickSizeInput'),
-  chickSpeed: document.getElementById('chickSpeedInput')
+
+/* 
+===========================================
+   SETTINGS UI LOGIC (now inactive/hidden)
+=========================================== 
+*/
+
+/* This JS logic is now redundant as the UI is hidden, but can remain if needed later */
+
+const defaultSettings = {
+  '--chicken-size': getCSSRaw('--chicken-size'),
+  '--egg-width': getCSSRaw('--egg-width'),
+  '--egg-height': getCSSRaw('--egg-height'),
+  '--speed': getCSSRaw('--speed'),
+  '--egg-min-distance': getCSSRaw('--egg-min-distance'),
+  '--chick-size': getCSSRaw('--chick-size'),
+  '--chick-speed': getCSSRaw('--chick-speed'),
 };
 
-function applyConfig(cfg, persist = true) {
-  // Update CSS variables from cfg (no clamping)
-  if (cfg.chickenSize != null) setCSSVar('--chicken-size', cfg.chickenSize, 'px');
-  if (cfg.eggWidth != null) setCSSVar('--egg-width', cfg.eggWidth, 'px');
-  if (cfg.eggHeight != null) setCSSVar('--egg-height', cfg.eggHeight, 'px');
-  if (cfg.speed != null) setCSSVar('--speed', cfg.speed, '');
-  if (cfg.eggMinDistance != null) setCSSVar('--egg-min-distance', cfg.eggMinDistance, 'px');
-  if (cfg.chickSize != null) setCSSVar('--chick-size', cfg.chickSize, 'px');
-  if (cfg.chickSpeed != null) setCSSVar('--chick-speed', cfg.chickSpeed, '');
+function updateCSSVarFromInput(inputElement, varName, unit = '') {
+  inputElement.addEventListener('input', (e) => {
+    let value = e.target.value;
+    // Basic validation for numbers
+    if (inputElement.type === 'number' && value !== '') {
+        value = parseFloat(value);
+    } else if (inputElement.inputmode === 'decimal' && value !== '') {
+        value = parseFloat(value);
+    }
 
-  // Update inputs to reflect current values
-  inputs.chickenSize.value = cfg.chickenSize ?? getCSSNumber('--chicken-size');
-  inputs.eggWidth.value = cfg.eggWidth ?? getCSSNumber('--egg-width');
-  inputs.eggHeight.value = cfg.eggHeight ?? getCSSNumber('--egg-height');
-  inputs.speed.value = cfg.speed ?? parseFloat(getCSSRaw('--speed'));
-  inputs.eggMinDistance.value = cfg.eggMinDistance ?? getCSSNumber('--egg-min-distance');
-  inputs.chickSize.value = cfg.chickSize ?? getCSSNumber('--chick-size');
-  inputs.chickSpeed.value = cfg.chickSpeed ?? getCSSNumber('--chick-speed');
-
-  // Keep chicken in bounds after size changes
-  chicken.clampToBounds();
-
-  if (persist) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      chickenSize: parseFloat(inputs.chickenSize.value),
-      eggWidth: parseFloat(inputs.eggWidth.value),
-      eggHeight: parseFloat(inputs.eggHeight.value),
-      speed: parseFloat(inputs.speed.value),
-      eggMinDistance: parseFloat(inputs.eggMinDistance.value),
-      chickSize: parseFloat(inputs.chickSize.value),
-      chickSpeed: parseFloat(inputs.chickSpeed.value)
-    }));
-  }
-}
-
-function loadConfig() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      const cfg = JSON.parse(saved);
-      applyConfig(cfg, false);
-      return;
-    } catch {}
-  }
-  // If no saved config, load from CSS defaults
-  applyConfig({
-    chickenSize: getCSSNumber('--chicken-size'),
-    eggWidth: getCSSNumber('--egg-width'),
-    eggHeight: getCSSNumber('--egg-height'),
-    speed: parseFloat(getCSSRaw('--speed')),
-    eggMinDistance: getCSSNumber('--egg-min-distance'),
-    chickSize: getCSSNumber('--chick-size'),
-    chickSpeed: getCSSNumber('--chick-speed')
-  }, false);
-}
-
-function bindInput(el, key, isNumber = true) {
-  function update() {
-    const valRaw = el.value;
-    if (valRaw === '') return; // ignore empty
-    const val = isNumber ? parseFloat(valRaw) : valRaw;
-    // Apply only the changed field; keep others unchanged
-    const cfg = {};
-    cfg[key] = val;
-    applyConfig(cfg, true);
-  }
-  el.addEventListener('change', update);
-  el.addEventListener('blur', update);
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      update();
-      el.blur();
+    if (!isNaN(value) && value !== '') {
+      setCSSVar(varName, value, unit);
     }
   });
 }
 
-bindInput(inputs.chickenSize, 'chickenSize', true);
-bindInput(inputs.eggWidth, 'eggWidth', true);
-bindInput(inputs.eggHeight, 'eggHeight', true);
-bindInput(inputs.speed, 'speed', true); // speed is decimal number
-bindInput(inputs.eggMinDistance, 'eggMinDistance', true);
-bindInput(inputs.chickSize, 'chickSize', true);
-bindInput(inputs.chickSpeed, 'chickSpeed', true);
+function loadSettings() {
+  document.getElementById('chickenSizeInput').value = getCSSNumber('--chicken-size');
+  document.getElementById('eggWidthInput').value = getCSSNumber('--egg-width');
+  document.getElementById('eggHeightInput').value = getCSSNumber('--egg-height');
+  document.getElementById('speedInput').value = getCSSRaw('--speed');
+  document.getElementById('eggMinDistanceInput').value = getCSSNumber('--egg-min-distance');
+  document.getElementById('chickSizeInput').value = getCSSNumber('--chick-size');
+  document.getElementById('chickSpeedInput').value = getCSSRaw('--chick-speed');
+}
 
-loadConfig();
-
-/** Buttons */
-document.getElementById('resetBtn').addEventListener('click', () => {
-  localStorage.removeItem(STORAGE_KEY);
-  // Reset to CSS defaults defined in :root
-  applyConfig({
-    chickenSize: getCSSNumber('--chicken-size'),
-    eggWidth: getCSSNumber('--egg-width'),
-    eggHeight: getCSSNumber('--egg-height'),
-    speed: parseFloat(getCSSRaw('--speed')),
-    eggMinDistance: getCSSNumber('--egg-min-distance'),
-    chickSize: getCSSNumber('--chick-size'),
-    chickSpeed: getCSSNumber('--chick-speed')
-  }, false);
-});
-
-document.getElementById('clearEggsBtn').addEventListener('click', () => {
-  while (eggs.length) {
-    eggs.pop().remove();
+function resetSettings() {
+  for (const [varName, defaultValue] of Object.entries(defaultSettings)) {
+    document.documentElement.style.setProperty(varName, defaultValue);
   }
-});
+  loadSettings();
+}
+
+function clearEggs() {
+  eggs.forEach(egg => egg.element.remove());
+  eggs = [];
+}
+
+// Initialize settings inputs with current values
+// loadSettings(); 
+
+// Hook up event listeners for inputs
+// updateCSSVarFromInput(document.getElementById('chickenSizeInput'), '--chicken-size', 'px');
+// updateCSSVarFromInput(document.getElementById('eggWidthInput'), '--egg-width', 'px');
+// updateCSSVarFromInput(document.getElementById('eggHeightInput'), '--egg-height', 'px');
+// updateCSSVarFromInput(document.getElementById('speedInput'), '--speed');
+// updateCSSVarFromInput(document.getElementById('eggMinDistanceInput'), '--egg-min-distance', 'px');
+// updateCSSVarFromInput(document.getElementById('chickSizeInput'), '--chick-size', 'px');
+// updateCSSVarFromInput(document.getElementById('chickSpeedInput'), '--chick-speed');
+
+// Hook up buttons
+// document.getElementById('resetBtn').addEventListener('click', resetSettings);
+// document.getElementById('clearEggsBtn').addEventListener('click', clearEggs);
+
 </script>
 </body>
 </html>
