@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Sheet Data</title>
+    <style>
+        table {
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Google Sheet Data</h1>
+    <div id="sheet-data"></div>
+
+    <script>
+        const sheetUrl = 'https://docs.google.com/spreadsheets/d/11amoOG-ZKDFAGbRtRIoWf27GTcCpqTZgVDm4u01KW94/edit?usp=drivesdk';                                                                               
+        fetch(sheetUrl)
+            .then(response => response.text())
+            .then(data => {
+                const jsonData = JSON.parse(data.substring(47).substring(0, data.length - 2));
+                const table = document.createElement('table');
+                const headers = jsonData.table.cols.map(col => col.label);
+                const rows = jsonData.table.rows;
+
+                                       
+                const headerRow = document.createElement('tr');
+                headers.forEach(header => {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                table.appendChild(headerRow);
+
+                                    
+                rows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    row.c.forEach(cell => {
+                        const td = document.createElement('td');
+                        td.textContent = cell.v;
+                        tr.appendChild(td);
+                    });
+                    table.appendChild(tr);
+                });
+
+                document.getElementById('sheet-data').appendChild(table);
+            })
+            .catch(error => console.error('Error fetching sheet data:', error));
+    </script>
+</body>
+</html>
