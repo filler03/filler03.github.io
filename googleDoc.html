@@ -12,11 +12,15 @@
  fetch(`https://docs.google.com/feeds/download/documents/export/Export?exportFormat=html&id=${docId}`)
  .then(response => response.text())
  .then(html => {
- // Render the HTML content
  const parser = new DOMParser();
  const doc = parser.parseFromString(html, 'text/html');
  const docContent = document.getElementById('doc-content');
- docContent.innerHTML = doc.body.innerHTML;
+ while (docContent.firstChild) {
+ docContent.removeChild(docContent.firstChild);
+ }
+ Array.from(doc.body.children).forEach(child => {
+ docContent.appendChild(child);
+ });
  })
  .catch(error => console.error('Error fetching Google Doc:', error));
  </script>
