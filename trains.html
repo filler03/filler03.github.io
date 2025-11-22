@@ -8,6 +8,8 @@
  padding: 0;
  overflow: auto;
  background-color: #f0f0f0;
+ width: 10000px;
+ height: 10000px;
  }
  #train {
  position: absolute;
@@ -26,7 +28,6 @@
  let train = document.getElementById('train');
  let cars = ['🚂', '🚃'];
  let currentTrain = [cars[0]];
- let trainWidth = 0;
  let isDragging = false;
  let offsetX = 0;
  let offsetY = 0;
@@ -34,10 +35,8 @@
  let scrollTop = 0;
 
  train.innerHTML = currentTrain.join('');
- train.style.left = (window.innerWidth / 2 - train.offsetWidth / 2 + window.scrollX) + 'px';
- train.style.top = (window.innerHeight / 2 - train.offsetHeight / 2 + window.scrollY) + 'px';
- document.body.style.width = '10000px';
- document.body.style.height = '10000px';
+ train.style.left = window.scrollX + window.innerWidth / 2 + 'px';
+ train.style.top = window.scrollY + window.innerHeight / 2 + 'px';
 
  document.addEventListener('mousedown', (e) => {
  isDragging = true;
@@ -56,4 +55,26 @@
  });
 
  document.addEventListener('mouseup', () => {
- isDragging
+ isDragging = false;
+ });
+
+ document.addEventListener('click', () => {
+ if (!isDragging) {
+ let newCar = cars[Math.floor(Math.random() * (cars.length - 1)) + 1];
+ currentTrain.push(newCar);
+ train.innerHTML = currentTrain.join('');
+ train.style.left = window.scrollX + window.innerWidth / 2 + 'px';
+ train.style.top = window.scrollY + window.innerHeight / 2 + 'px';
+ if (Math.random() < 0.1) {
+ let reindeer = document.createElement('div');
+ reindeer.className = 'reindeer';
+ reindeer.innerHTML = '🦌';
+ reindeer.style.left = (train.offsetLeft + (currentTrain.length - 1) * 50) + 'px';
+ reindeer.style.top = (train.offsetTop - 50) + 'px';
+ document.body.appendChild(reindeer);
+ }
+ }
+ });
+ </script>
+</body>
+</html>
