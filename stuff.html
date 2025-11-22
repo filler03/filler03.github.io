@@ -29,18 +29,22 @@
                 const container = document.getElementById('stuff-container');
 
                 lines.forEach((line, index) => {
-                    const list = document.createElement('ul');
-                    const color = getRandomColor(index);
-                    list.style.color = color;
+                    if (line.trim() !== '') {
+                        const lineDiv = document.createElement('div');
+                        const list = document.createElement('ul');
+                        const color = getRandomColor(index);
+                        list.style.color = color;
 
-                    const items = line.split(',');
-                    items.forEach(item => {
-                        const listItem = document.createElement('li');
-                        listItem.textContent = item.trim();
-                        list.appendChild(listItem);
-                    });
+                        const items = line.split(',');
+                        items.forEach(item => {
+                            const listItem = document.createElement('li');
+                            listItem.textContent = item.trim();
+                            list.appendChild(listItem);
+                        });
 
-                    container.appendChild(list);
+                        lineDiv.appendChild(list);
+                        container.appendChild(lineDiv);
+                    }
                 });
             })
             .catch(error => console.error('Error fetching stuff.txt:', error));
