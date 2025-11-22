@@ -7,13 +7,11 @@
  margin: 0;
  padding: 0;
  overflow: hidden;
- background-color: #f0f0f0;
  }
  #canvas {
  width: 100%;
  height: 100vh;
  display: block;
- background-color: #fff;
  }
  </style>
 </head>
@@ -26,19 +24,13 @@
  this.y = y;
  this.ctx = ctx;
  this.size = Math.random() * 50 + 20;
- this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
  }
 
  draw() {
- this.ctx.beginPath();
- this.ctx.moveTo(this.x, this.y);
- this.ctx.lineTo(this.x + this.size, this.y);
- this.ctx.lineTo(this.x + this.size / 2, this.y + this.size);
- this.ctx.closePath();
- this.ctx.fillStyle = this.color;
- this.ctx.fill();
- this.ctx.strokeStyle = 'black';
- this.ctx.stroke();
+ this.ctx.font = `${this.size}px Arial`;
+ this.ctx.textAlign = 'center';
+ this.ctx.textBaseline = 'middle';
+ this.ctx.fillText('🍕', this.x, this.y);
  }
  }
 
@@ -60,7 +52,11 @@
  }
 
  draw() {
- this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+ const gradient = this.ctx.createLinearGradient(0, 0, 0, this.canvas.height);
+ gradient.addColorStop(0, '                        
+ gradient.addColorStop(1, '#FF0000'); // red
+ this.ctx.fillStyle = gradient;
+ this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
  for (const pizzaSlice of this.pizzaSlices) {
  pizzaSlice.draw();
  }
