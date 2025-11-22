@@ -19,25 +19,40 @@
 </head>
 <body>
     <h1>Stuff List</h1>
-    <ul id="stuff-list"></ul>
+    <div id="stuff-container"></div>
 
     <script>
         fetch('stuff.txt')
             .then(response => response.text())
             .then(data => {
                 const lines = data.split('\n');
-                const list = document.getElementById('stuff-list');
+                const container = document.getElementById('stuff-container');
 
-                lines.forEach(line => {
+                lines.forEach((line, index) => {
+                    const list = document.createElement('ul');
+                    const color = getRandomColor(index);
+                    list.style.color = color;
+
                     const items = line.split(',');
                     items.forEach(item => {
                         const listItem = document.createElement('li');
                         listItem.textContent = item.trim();
                         list.appendChild(listItem);
                     });
+
+                    container.appendChild(list);
                 });
             })
             .catch(error => console.error('Error fetching stuff.txt:', error));
+
+        function getRandomColor(index) {
+            const time = new Date().getTime();
+            const seed = time + index;
+            const r = Math.sin(seed * 0.1) * 128 + 128;
+            const g = Math.sin(seed * 0.1 + 2) * 128 + 128;
+            const b = Math.sin(seed * 0.1 + 4) * 128 + 128;
+            return `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+        }
     </script>
 </body>
 </html>
