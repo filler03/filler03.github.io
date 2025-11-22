@@ -5,19 +5,18 @@
 </head>
 <body>
  <div id="doc-content"></div>
-
  <script>
  // Replace with your Google Doc ID
  const docId = '15rnYEgnscrFrz66Ac1Uoz_dJjP0-4e334TFHUzGehhY';
-'';
-
  // Fetch the Google Doc content
  fetch(`https://docs.google.com/feeds/download/documents/export/Export?exportFormat=html&id=${docId}`)
  .then(response => response.text())
  .then(html => {
  // Render the HTML content
+ const parser = new DOMParser();
+ const doc = parser.parseFromString(html, 'text/html');
  const docContent = document.getElementById('doc-content');
- docContent.innerHTML = html;
+ docContent.innerHTML = doc.body.innerHTML;
  })
  .catch(error => console.error('Error fetching Google Doc:', error));
  </script>
