@@ -13,6 +13,7 @@
  width: 100%;
  height: 100vh;
  display: block;
+ background-color: #fff;
  }
  </style>
 </head>
@@ -48,3 +49,27 @@
  this.pizzaSlices = [];
  this.canvas.width = window.innerWidth;
  this.canvas.height = window.innerHeight;
+ this.canvas.addEventListener('click', (e) => this.addPizzaSlice(e));
+ this.draw();
+ }
+
+ addPizzaSlice(e) {
+ const pizzaSlice = new PizzaSlice(e.clientX, e.clientY, this.ctx);
+ this.pizzaSlices.push(pizzaSlice);
+ pizzaSlice.draw();
+ }
+
+ draw() {
+ this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+ for (const pizzaSlice of this.pizzaSlices) {
+ pizzaSlice.draw();
+ }
+ requestAnimationFrame(() => this.draw());
+ }
+ }
+
+ const canvas = document.getElementById('canvas');
+ const game = new PizzaGame(canvas);
+ </script>
+</body>
+</html>
