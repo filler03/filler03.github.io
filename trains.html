@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+ <title>Train Builder</title>
+ <style>
+ body {
+ margin: 0;
+ padding: 0;
+ overflow: hidden;
+ background-color: #f0f0f0;
+ }
+ #train {
+ position: absolute;
+ bottom: 20px;
+ left: 20px;
+ font-size: 50px;
+ }
+ </style>
+</head>
+<body>
+ <div id="train"></div>
+ <script>
+ let train = document.getElementById('train');
+ let cars = ['🚂', '🚃', '🚃', '🚃'];
+ let xPosition = 0;
+
+ train.innerHTML = cars.join('');
+ train.style.transform = `translateX(${xPosition}px)`;
+
+ document.addEventListener('click', () => {
+ cars.push('🚃');
+ train.innerHTML = cars.join('');
+ xPosition -= 50;
+ train.style.transform = `translateX(${xPosition}px)`;
+ });
+ </script>
+</body>
+</html>
