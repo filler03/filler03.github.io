@@ -11,9 +11,12 @@
  }
  #train {
  position: absolute;
- bottom: 20px;
  font-size: 50px;
  white-space: nowrap;
+ }
+ .reindeer {
+ position: absolute;
+ font-size: 50px;
  }
  </style>
 </head>
@@ -31,9 +34,8 @@
  let scrollTop = 0;
 
  train.innerHTML = currentTrain.join('');
- train.style.left = (window.innerWidth / 2 - train.offsetWidth / 2) + 'px';
- train.style.top = (window.innerHeight / 2 - train.offsetHeight / 2) + 'px';
- trainWidth = train.offsetWidth;
+ train.style.left = '5000px';
+ train.style.top = '5000px';
  document.body.style.width = '10000px';
  document.body.style.height = '10000px';
 
@@ -62,6 +64,14 @@
  let newCar = cars[Math.floor(Math.random() * (cars.length - 1)) + 1];
  currentTrain.push(newCar);
  train.innerHTML = currentTrain.join('');
+ if (Math.random() < 0.2) {
+ let reindeer = document.createElement('div');
+ reindeer.className = 'reindeer';
+ reindeer.innerHTML = '🦌';
+ reindeer.style.left = (train.offsetLeft + (currentTrain.length - 1) * 50) + 'px';
+ reindeer.style.top = (train.offsetTop - 50) + 'px';
+ document.body.appendChild(reindeer);
+ }
  }
  });
  </script>
