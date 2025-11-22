@@ -6,14 +6,13 @@
  body {
  margin: 0;
  padding: 0;
- overflow-x: auto;
- overflow-y: hidden;
+ overflow: auto;
  background-color: #f0f0f0;
  }
  #train {
  position: absolute;
  bottom: 20px;
- font-size: 100px;
+ font-size: 50px;
  white-space: nowrap;
  }
  </style>
@@ -22,27 +21,35 @@
  <div id="train"></div>
  <script>
  let train = document.getElementById('train');
- let cars = ['🚂', '🚃', '🚃', '🚃'];
+ let cars = ['🚂', '🚃', '🚄', '🚅'];
+ let currentTrain = [cars[0]];
  let trainWidth = 0;
  let isDragging = false;
  let offsetX = 0;
+ let offsetY = 0;
  let scrollLeft = 0;
+ let scrollTop = 0;
 
- train.innerHTML = cars.join('');
+ train.innerHTML = currentTrain.join('');
  train.style.left = (window.innerWidth / 2 - train.offsetWidth / 2) + 'px';
+ train.style.top = (window.innerHeight / 2 - train.offsetHeight / 2) + 'px';
  trainWidth = train.offsetWidth;
- document.body.style.width = trainWidth + 'px';
+ document.body.style.width = '10000px';
+ document.body.style.height = '10000px';
 
  document.addEventListener('mousedown', (e) => {
  isDragging = true;
  offsetX = e.clientX;
+ offsetY = e.clientY;
  scrollLeft = window.scrollX;
+ scrollTop = window.scrollY;
  });
 
  document.addEventListener('mousemove', (e) => {
  if (isDragging) {
  let newX = scrollLeft + (offsetX - e.clientX);
- window.scrollTo(newX, 0);
+ let newY = scrollTop + (offsetY - e.clientY);
+ window.scrollTo(newX, newY);
  }
  });
 
@@ -52,10 +59,9 @@
 
  document.addEventListener('click', () => {
  if (!isDragging) {
- cars.push('🚃');
- train.innerHTML = cars.join('');
- trainWidth += 100; // approximate width of a train car
- document.body.style.width = trainWidth + 'px';
+ let newCar = cars[Math.floor(Math.random() * (cars.length - 1)) + 1];
+ currentTrain.push(newCar);
+ train.innerHTML = currentTrain.join('');
  }
  });
  </script>
