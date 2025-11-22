@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stuff List</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Stuff List</h1>
+    <ul id="stuff-list"></ul>
+
+    <script>
+        fetch('stuff.txt')
+            .then(response => response.text())
+            .then(data => {
+                const lines = data.split('\n');
+                const list = document.getElementById('stuff-list');
+
+                lines.forEach(line => {
+                    const items = line.split(',');
+                    items.forEach(item => {
+                        const listItem = document.createElement('li');
+                        listItem.textContent = item.trim();
+                        list.appendChild(listItem);
+                    });
+                });
+            })
+            .catch(error => console.error('Error fetching stuff.txt:', error));
+    </script>
+</body>
+</html>
