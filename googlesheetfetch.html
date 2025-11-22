@@ -165,33 +165,37 @@
         }
 
         function displayData(data) {
-            const table = data.table;
-            const cols = table.cols;
-            const rows = table.rows;
+    const table = data.table;
+    const cols = table.cols;
+    const rows = table.rows;
 
-            let html = '<div class="table-container"><table><thead><tr>';
-            
-            // Create header
-            cols.forEach(col => {
-                html += `<th>${col.label || 'Column'}</th>`;
-            });
-            html += '</tr></thead><tbody>';
-            
-            // Create rows
-            rows.forEach(row => {
-                html += '<tr>';
-                row.c.forEach(cell => {
-                    const value = cell ? (cell.f || cell.v || '') : '';
-                    html += `<td>${value}</td>`;
-                });
-                html += '</tr>';
-            });
-            
-            html += '</tbody></table></div>';
-            html += `<div class="stats">Showing ${rows.length} rows</div>`;
-            
-            document.getElementById('content').innerHTML = html;
-        }
+    let html = '<div class="table-container"><table><thead><tr>';
+    
+    // Create header from first row
+    if (rows.length > 0) {
+        rows[0].c.forEach(cell => {
+            const value = cell ? (cell.f || cell.v || '') : '';
+            html += `<th>${value}</th>`;
+        });
+    }
+    html += '</tr></thead><tbody>';
+    
+    // Create rows (skip first row since it's the header)
+    rows.slice(1).forEach(row => {
+        html += '<tr>';
+        row.c.forEach(cell => {
+            const value = cell ? (cell.f || cell.v || '') : '';
+            html += `<td>${value}</td>`;
+        });
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table></div>';
+    html += `<div class="stats">Showing ${rows.length - 1} rows</div>`;
+    
+    document.getElementById('content').innerHTML = html;
+}
+
 
         function displayError(message) {
             document.getElementById('content').innerHTML = `
