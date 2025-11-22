@@ -15,6 +15,16 @@
         li {
             margin-bottom: 10px;
         }
+        .line-div {
+            border-bottom: 1px dotted #ccc;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .line-div:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -31,6 +41,7 @@
                 lines.forEach((line, index) => {
                     if (line.trim() !== '') {
                         const lineDiv = document.createElement('div');
+                        lineDiv.className = 'line-div';
                         const list = document.createElement('ul');
                         const color = getRandomColor(index);
                         list.style.color = color;
