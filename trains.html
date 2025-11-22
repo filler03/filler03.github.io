@@ -11,7 +11,6 @@
  }
  #train {
  position: absolute;
- bottom: 20px;
  font-size: 50px;
  white-space: nowrap;
  }
@@ -36,4 +35,34 @@
  let reindeerCount = 0;
 
  train.innerHTML = currentTrain.join('');
- train.style.left = (window.innerWidth / 2 - train.offsetWidth / 2) +
+ train.style.left = (window.innerWidth / 2) + 'px';
+ train.style.top = (window.innerHeight / 2) + 'px';
+ trainWidth = train.offsetWidth;
+ document.body.style.width = '10000px';
+ document.body.style.height = '10000px';
+
+ document.addEventListener('mousedown', (e) => {
+ isDragging = true;
+ offsetX = e.clientX;
+ offsetY = e.clientY;
+ scrollLeft = window.scrollX;
+ scrollTop = window.scrollY;
+ });
+
+ document.addEventListener('mousemove', (e) => {
+ if (isDragging) {
+ let newX = scrollLeft + (offsetX - e.clientX);
+ let newY = scrollTop + (offsetY - e.clientY);
+ window.scrollTo(newX, newY);
+ }
+ });
+
+ document.addEventListener('mouseup', () => {
+ isDragging = false;
+ });
+
+ document.addEventListener('click', () => {
+ if (!isDragging) {
+ let newCar = cars[Math.floor(Math.random() * (cars.length - 1)) + 1];
+ currentTrain.push(newCar);
+ train.innerHTML =
