@@ -3,54 +3,213 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google Sheet Data</title>
+    <title>Google Sheets Data Display</title>
     <style>
-        table {
-            border-collapse: collapse;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        th, td {
-            border: 1px solid black;
-            padding: 10px;
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 1.2em;
+            color: #666;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #c33;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            padding: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95em;
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        tbody tr:hover {
+            background: #f5f5f5;
+            transition: background 0.2s ease;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        tbody tr:nth-child(even):hover {
+            background: #f0f0f0;
+        }
+
+        .stats {
+            padding: 20px;
+            background: #f9f9f9;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
         }
     </style>
 </head>
 <body>
-    <h1>Google Sheet Data</h1>
-    <div id="sheet-data"></div>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Google Sheets Data</h1>
+            <p>Live data display</p>
+        </div>
+        
+        <div id="content">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading data...</p>
+            </div>
+        </div>
+    </div>
 
     <script>
-        const sheetUrl = 'https://docs.google.com/spreadsheets/d/11amoOG-ZKDFAGbRtRIoWf27GTcCpqTZgVDm4u01KW94/edit?usp=drivesdk';                                                                               
-        fetch(sheetUrl)
-            .then(response => response.text())
-            .then(data => {
-                const jsonData = JSON.parse(data.substring(47).substring(0, data.length - 2));
-                const table = document.createElement('table');
-                const headers = jsonData.table.cols.map(col => col.label);
-                const rows = jsonData.table.rows;
+        const SHEET_ID = '11amoOG-ZKDFAGbRtRIoWf27GTcCpqTZgVDm4u01KW94';
+        const SHEET_NAME = 'Sheet1'; // Change this if your sheet has a different name
+        const API_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${SHEET_NAME}`;
 
-                                       
-                const headerRow = document.createElement('tr');
-                headers.forEach(header => {
-                    const th = document.createElement('th');
-                    th.textContent = header;
-                    headerRow.appendChild(th);
+        async function fetchSheetData() {
+            try {
+                const response = await fetch(API_URL);
+                const text = await response.text();
+                
+                // Google Sheets returns JSONP, we need to extract the JSON
+                const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/);
+                if (!jsonString) {
+                    throw new Error('Could not parse response from Google Sheets');
+                }
+                
+                const data = JSON.parse(jsonString[1]);
+                
+                if (data.status === 'error') {
+                    throw new Error(data.errors[0].detailed_message || 'Error fetching data');
+                }
+                
+                displayData(data);
+            } catch (error) {
+                displayError(error.message);
+            }
+        }
+
+        function displayData(data) {
+            const table = data.table;
+            const cols = table.cols;
+            const rows = table.rows;
+
+            let html = '<div class="table-container"><table><thead><tr>';
+            
+            // Create header
+            cols.forEach(col => {
+                html += `<th>${col.label || 'Column'}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            
+            // Create rows
+            rows.forEach(row => {
+                html += '<tr>';
+                row.c.forEach(cell => {
+                    const value = cell ? (cell.f || cell.v || '') : '';
+                    html += `<td>${value}</td>`;
                 });
-                table.appendChild(headerRow);
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table></div>';
+            html += `<div class="stats">Showing ${rows.length} rows</div>`;
+            
+            document.getElementById('content').innerHTML = html;
+        }
 
-                                    
-                rows.forEach(row => {
-                    const tr = document.createElement('tr');
-                    row.c.forEach(cell => {
-                        const td = document.createElement('td');
-                        td.textContent = cell.v;
-                        tr.appendChild(td);
-                    });
-                    table.appendChild(tr);
-                });
+        function displayError(message) {
+            document.getElementById('content').innerHTML = `
+                <div class="error">
+                    <strong>Error loading data:</strong> ${message}
+                    <br><br>
+                    <strong>Common fixes:</strong>
+                    <ul style="margin-top: 10px; margin-left: 20px;">
+                        <li>Make sure the Google Sheet is set to "Anyone with the link can view"</li>
+                        <li>Verify the Sheet ID in the URL is correct</li>
+                        <li>Check if the sheet name is "Sheet1" or update the SHEET_NAME variable</li>
+                    </ul>
+                </div>
+            `;
+        }
 
-                document.getElementById('sheet-data').appendChild(table);
-            })
-            .catch(error => console.error('Error fetching sheet data:', error));
+        // Fetch data when page loads
+        fetchSheetData();
     </script>
 </body>
 </html>
