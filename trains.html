@@ -13,7 +13,7 @@
  #train {
  position: absolute;
  bottom: 20px;
- font-size: 50px;
+ font-size: 100px;
  white-space: nowrap;
  }
  </style>
@@ -23,13 +23,40 @@
  <script>
  let train = document.getElementById('train');
  let cars = ['🚂', '🚃', '🚃', '🚃'];
+ let trainWidth = 0;
+ let isDragging = false;
+ let offsetX = 0;
+ let scrollLeft = 0;
 
  train.innerHTML = cars.join('');
  train.style.left = (window.innerWidth / 2 - train.offsetWidth / 2) + 'px';
+ trainWidth = train.offsetWidth;
+ document.body.style.width = trainWidth + 'px';
+
+ document.addEventListener('mousedown', (e) => {
+ isDragging = true;
+ offsetX = e.clientX;
+ scrollLeft = window.scrollX;
+ });
+
+ document.addEventListener('mousemove', (e) => {
+ if (isDragging) {
+ let newX = scrollLeft + (offsetX - e.clientX);
+ window.scrollTo(newX, 0);
+ }
+ });
+
+ document.addEventListener('mouseup', () => {
+ isDragging = false;
+ });
 
  document.addEventListener('click', () => {
+ if (!isDragging) {
  cars.push('🚃');
  train.innerHTML = cars.join('');
+ trainWidth += 100; // approximate width of a train car
+ document.body.style.width = trainWidth + 'px';
+ }
  });
  </script>
 </body>
