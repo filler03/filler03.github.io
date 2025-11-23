@@ -15,7 +15,7 @@
  // Render the HTML content
  const parser = new DOMParser();
  const doc = parser.parseFromString(html, 'text/html');
- document.body.replaceWith(doc.body);
+ document.innerText.replaceWith(doc.body);
  })
  .catch(error => console.error('Error fetching Google Doc:', error));
  </script>
