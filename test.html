@@ -1,66 +1,176 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Chat Window</title>
+  <title>Checkers Board</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, 50px);
+      grid-template-rows: repeat(8, 50px);
     }
-    #chat-window {
-      width: 400px;
-      height: 600px;
-      border: 1px solid #ccc;
-      padding: 10px;
-      overflow-y: auto;
+    .square {
+      width: 50px;
+      height: 50px;
+      border: 1px solid black;
+      position: relative;
     }
-    #input-field {
-      width: 100%;
-      height: 30px;
-      font-size: 18px;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
+    .black {
+      background-color: black;
     }
-    .user-message {
-      text-align: right;
-      margin-bottom: 10px;
+    .white {
+      background-color: white;
     }
-    .computer-message {
-      text-align: left;
-      margin-bottom: 10px;
+    .circle {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background-color: black;
+    }
+    .selected {
+      border: 5px solid yellow;
+    }
+    .highlight {
+      border: 5px solid blue;
     }
   </style>
 </head>
 <body>
-  <div id="chat-window"></div>
-  <input id="input-field" type="text">
+  <div class="board">
+    <!-- Create the board squares -->
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+    <div class="square white"></div>
+    <div class="square black"></div>
+  </div>
 
   <script>
-    const chatWindow = document.getElementById('chat-window');
-    const inputField = document.getElementById('input-field');
-    const answers = ["Because you like it in the butt”,
-“You like penis”,
-“It’s because you’re an idiot”,
-“You love men and weiner in your anus hole"];
+    const squares = document.querySelectorAll('.square');
+    let selectedSquare = null;
+    let highlightedSquares = [];
 
-    inputField.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        const userMessage = inputField.value;
-        const userMessageElement = document.createElement('div');
-        userMessageElement.className = 'user-message';
-        userMessageElement.textContent = 'You: ' + userMessage;
-        chatWindow.appendChild(userMessageElement);
+    // Add a circle to the 10th square
+    const circle = document.createElement('div');
+    circle.className = 'circle';
+    squares[10].appendChild(circle);
 
-        const computerAnswer = answers[Math.floor(Math.random() * answers.length)];
-        const computerMessageElement = document.createElement('div');
-        computerMessageElement.className = 'computer-message';
-        computerMessageElement.textContent = 'Computer: ' + computerAnswer;
-        chatWindow.appendChild(computerMessageElement);
-
-        inputField.value = '';
-        chatWindow.scrollTop = chatWindow.scrollHeight;
-      }
+    squares.forEach((square, index) => {
+      square.addEventListener('click', () => {
+        if (selectedSquare === null && square.querySelector('.circle')) {
+          // Select the square with the circle
+          selectedSquare = square;
+          selectedSquare.classList.add('selected');
+          highlightSquares(index);
+        } else if (highlightedSquares.includes(index)) {
+          // Move the circle to the highlighted square
+          moveCircle(index);
+        } else if (selectedSquare === square) {
+          // Deselect the square
+          selectedSquare.classList.remove('selected');
+          highlightedSquares.forEach(i => squares[i].classList.remove('highlight'));
+          selectedSquare = null;
+          highlightedSquares = [];
+        }
+      });
     });
+
+    function highlightSquares(index) {
+      highlightedSquares = [];
+      const row = Math.floor(index / 8);
+      const col = index % 8;
+      if (row > 0 && col > 0) {
+        highlightedSquares.push(index - 9);
+        squares[index - 9].classList.add('highlight');
+      }
+      if (row > 0 && col < 7) {
+        highlightedSquares.push(index - 7);
+        squares[index - 7].classList.add('highlight');
+      }
+      if (row < 7 && col > 0) {
+        highlightedSquares.push(index + 7);
+        squares[index + 7].classList.add('highlight');
+      }
+      if (row < 7 && col < 7) {
+        highlightedSquares.push(index + 9);
+        squares[index + 9].classList.add('highlight');
+      }
+    }
+
+    function moveCircle(index) {
+      const oldSquare = selectedSquare;
+      const newSquare = squares[index];
+      oldSquare.classList.remove('selected');
+      newSquare.classList.add('selected');
+      newSquare.appendChild(circle);
+      highlightedSquares.forEach(i => squares[i].classList.remove('highlight'));
+      setTimeout(() => {
+        newSquare.classList.remove('selected');
+      }, 500);
+      selectedSquare = null;
+      highlightedSquares = [];
+    }
   </script>
 </body>
 </html>
