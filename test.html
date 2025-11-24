@@ -35,6 +35,11 @@
     .highlight {
       border: 5px solid blue;
     }
+    #move-counter {
+      font-size: 24px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
   </style>
 </head>
 <body>
@@ -53,140 +58,3 @@
     <div class="square white"></div>
     <div class="square black"></div>
     <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-    <div class="square white"></div>
-    <div class="square black"></div>
-  </div>
-
-  <script>
-    const squares = document.querySelectorAll('.square');
-    let selectedSquare = null;
-    let highlightedSquares = [];
-
-    // Add a circle to the 10th square
-    const circle = document.createElement('div');
-    circle.className = 'circle';
-    squares[10].appendChild(circle);
-
-    squares.forEach((square, index) => {
-      square.addEventListener('click', () => {
-        if (selectedSquare === null && square.querySelector('.circle')) {
-          // Select the square with the circle
-          selectedSquare = square;
-          selectedSquare.classList.add('selected');
-          highlightSquares(index);
-        } else if (highlightedSquares.includes(index)) {
-          // Move the circle to the highlighted square
-          moveCircle(index);
-        } else if (selectedSquare === square) {
-          // Deselect the square
-          selectedSquare.classList.remove('selected');
-          highlightedSquares.forEach(i => squares[i].classList.remove('highlight'));
-          selectedSquare = null;
-          highlightedSquares = [];
-        }
-      });
-    });
-
-    function highlightSquares(index) {
-      highlightedSquares = [];
-      const row = Math.floor(index / 8);
-      const col = index % 8;
-      if (row > 0) {
-        highlightedSquares.push(index - 8);
-        squares[index - 8].classList.add('highlight');
-      }
-      if (row < 7) {
-        highlightedSquares.push(index + 8);
-        squares[index + 8].classList.add('highlight');
-      }
-      if (col > 0) {
-        highlightedSquares.push(index - 1);
-        squares[index - 1].classList.add('highlight');
-      }
-      if (col < 7) {
-        highlightedSquares.push(index + 1);
-        squares[index + 1].classList.add('highlight');
-      }
-      if (row > 0 && col > 0) {
-        highlightedSquares.push(index - 9);
-        squares[index - 9].classList.add('highlight');
-      }
-      if (row > 0 && col < 7) {
-        highlightedSquares.push(index - 7);
-        squares[index - 7].classList.add('highlight');
-      }
-      if (row < 7 && col > 0) {
-        highlightedSquares.push(index + 7);
-        squares[index + 7].classList.add('highlight');
-      }
-      if (row < 7 && col < 7) {
-        highlightedSquares.push(index + 9);
-        squares[index + 9].classList.add('highlight');
-      }
-    }
-
-    function moveCircle(index) {
-      const oldSquare = selectedSquare;
-      const newSquare = squares[index];
-      oldSquare.classList.remove('selected');
-      newSquare.classList.add('selected');
-      newSquare.appendChild(circle);
-      highlightedSquares.forEach(i => squares[i].classList.remove('highlight'));
-      setTimeout(() => {
-        newSquare.classList.remove('selected');
-      }, 500);
-      selectedSquare = null;
-      highlightedSquares = [];
-    }
-  </script>
-</body>
-</html>
