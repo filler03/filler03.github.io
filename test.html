@@ -15,7 +15,7 @@
       position: relative;
     }
     .black {
-      background-color: black;
+      background-color: grey;
     }
     .white {
       background-color: white;
@@ -140,6 +140,22 @@
       highlightedSquares = [];
       const row = Math.floor(index / 8);
       const col = index % 8;
+      if (row > 0) {
+        highlightedSquares.push(index - 8);
+        squares[index - 8].classList.add('highlight');
+      }
+      if (row < 7) {
+        highlightedSquares.push(index + 8);
+        squares[index + 8].classList.add('highlight');
+      }
+      if (col > 0) {
+        highlightedSquares.push(index - 1);
+        squares[index - 1].classList.add('highlight');
+      }
+      if (col < 7) {
+        highlightedSquares.push(index + 1);
+        squares[index + 1].classList.add('highlight');
+      }
       if (row > 0 && col > 0) {
         highlightedSquares.push(index - 9);
         squares[index - 9].classList.add('highlight');
