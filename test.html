@@ -12,8 +12,10 @@
       border-radius: 5px;
     }
     #display {
-      font-family: Arial, sans-serif;
+      font-family: 'Arial', sans-serif;
       margin-top: 20px;
+      width: 80%;
+      word-wrap: break-word;
     }
   </style>
 </head>
@@ -23,6 +25,8 @@
 
   <script>
     let previousString = '';
+    let previousColor = getRandomColor();
+    let previousFontSize = getRandomFontSize();
     const display = document.getElementById('display');
 
     document.getElementById('input-field').addEventListener('input', (e) => {
@@ -36,27 +40,41 @@
         const newChar = currentString[currentString.length - 1];
         const span = document.createElement('span');
         span.textContent = newChar;
-        span.style.color = getRandomColor();
-        span.style.fontSize = getRandomFontSize();
-        span.style.fontFamily = getRandomFontFamily();
+        span.style.fontFamily = 'Arial';
+        span.style.color = getSimilarColor(previousColor);
+        span.style.fontSize = getSimilarFontSize(previousFontSize);
+        previousColor = span.style.color;
+        previousFontSize = span.style.fontSize;
         display.appendChild(span);
       } else if (currentString.length < previousString.length) {
         display.lastChild.remove();
+        if (display.lastChild) {
+          previousColor = display.lastChild.style.color;
+          previousFontSize = display.lastChild.style.fontSize;
+        }
       }
     }
 
     function getRandomColor() {
-      const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
+      const colors = ['red', 'blue', 'green', 'purple', 'orange'];
       return colors[Math.floor(Math.random() * colors.length)];
     }
 
-    function getRandomFontSize() {
-      return Math.floor(Math.random() * 20) + 10 + 'px';
+    function getSimilarColor(color) {
+      const colors = ['red', 'blue', 'green', 'purple', 'orange'];
+      const index = colors.indexOf(color);
+      const newIndex = (index + Math.floor(Math.random() * 2) - 1 + colors.length) % colors.length;
+      return colors[newIndex];
     }
 
-    function getRandomFontFamily() {
-      const fonts = ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Helvetica'];
-      return fonts[Math.floor(Math.random() * fonts.length)];
+    function getRandomFontSize() {
+      return Math.floor(Math.random() * 10) + 16 + 'px';
+    }
+
+    function getSimilarFontSize(size) {
+      const numSize = parseInt(size);
+      const newSize = numSize + Math.floor(Math.random() * 4) - 2;
+      return Math.max(10, newSize) + 'px';
     }
   </script>
 </body>
