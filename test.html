@@ -1,81 +1,66 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>String Input</title>
+  <title>Chat Window</title>
   <style>
+    body {
+      font-family: Arial, sans-serif;
+    }
+    #chat-window {
+      width: 400px;
+      height: 600px;
+      border: 1px solid #ccc;
+      padding: 10px;
+      overflow-y: auto;
+    }
     #input-field {
-      width: 50%;
+      width: 100%;
       height: 30px;
       font-size: 18px;
       padding: 10px;
       border: 1px solid #ccc;
       border-radius: 5px;
     }
-    #display {
-      font-family: 'Arial', sans-serif;
-      margin-top: 20px;
-      width: 80%;
-      word-wrap: break-word;
+    .user-message {
+      text-align: right;
+      margin-bottom: 10px;
+    }
+    .computer-message {
+      text-align: left;
+      margin-bottom: 10px;
     }
   </style>
 </head>
 <body>
+  <div id="chat-window"></div>
   <input id="input-field" type="text">
-  <div id="display"></div>
 
   <script>
-    let previousString = '';
-    let previousColor = getRandomColor();
-    let previousFontSize = getRandomFontSize();
-    const display = document.getElementById('display');
+    const chatWindow = document.getElementById('chat-window');
+    const inputField = document.getElementById('input-field');
+    const answers = ["Because you like it in the butt”,
+“You like penis”,
+“It’s because you’re an idiot”,
+“You love men and weiner in your anus hole"];
 
-    document.getElementById('input-field').addEventListener('input', (e) => {
-      const currentString = e.target.value;
-      updateDisplay(currentString);
-      previousString = currentString;
-    });
+    inputField.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        const userMessage = inputField.value;
+        const userMessageElement = document.createElement('div');
+        userMessageElement.className = 'user-message';
+        userMessageElement.textContent = 'You: ' + userMessage;
+        chatWindow.appendChild(userMessageElement);
 
-    function updateDisplay(currentString) {
-      if (currentString.length > previousString.length) {
-        const newChar = currentString[currentString.length - 1];
-        const span = document.createElement('span');
-        span.textContent = newChar;
-        span.style.fontFamily = 'Arial';
-        span.style.color = getSimilarColor(previousColor);
-        span.style.fontSize = getSimilarFontSize(previousFontSize);
-        previousColor = span.style.color;
-        previousFontSize = span.style.fontSize;
-        display.appendChild(span);
-      } else if (currentString.length < previousString.length) {
-        display.lastChild.remove();
-        if (display.lastChild) {
-          previousColor = display.lastChild.style.color;
-          previousFontSize = display.lastChild.style.fontSize;
-        }
+        const computerAnswer = answers[Math.floor(Math.random() * answers.length)];
+        const computerMessageElement = document.createElement('div');
+        computerMessageElement.className = 'computer-message';
+        computerMessageElement.textContent = 'Computer: ' + computerAnswer;
+        chatWindow.appendChild(computerMessageElement);
+
+        inputField.value = '';
+        chatWindow.scrollTop = chatWindow.scrollHeight;
       }
-    }
-
-    function getRandomColor() {
-      const colors = ['red', 'blue', 'green', 'purple', 'orange'];
-      return colors[Math.floor(Math.random() * colors.length)];
-    }
-
-    function getSimilarColor(color) {
-      const colors = ['red', 'blue', 'green', 'purple', 'orange'];
-      const index = colors.indexOf(color);
-      const newIndex = (index + Math.floor(Math.random() * 2) - 1 + colors.length) % colors.length;
-      return colors[newIndex];
-    }
-
-    function getRandomFontSize() {
-      return Math.floor(Math.random() * 10) + 16 + 'px';
-    }
-
-    function getSimilarFontSize(size) {
-      const numSize = parseInt(size);
-      const newSize = numSize + Math.floor(Math.random() * 4) - 2;
-      return Math.max(10, newSize) + 'px';
-    }
+    });
   </script>
 </body>
 </html>
