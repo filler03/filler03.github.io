@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>String Input</title>
+  <style>
+    #display {
+      font-family: Arial, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <input id="input-field" type="text">
+  <div id="display"></div>
+
+  <script>
+    let previousString = '';
+    const display = document.getElementById('display');
+
+    document.getElementById('input-field').addEventListener('input', (e) => {
+      const currentString = e.target.value;
+      updateDisplay(currentString);
+      previousString = currentString;
+    });
+
+    function updateDisplay(currentString) {
+      if (currentString.length > previousString.length) {
+        const newChar = currentString[currentString.length - 1];
+        const span = document.createElement('span');
+        span.textContent = newChar;
+        span.style.color = getRandomColor();
+        span.style.fontSize = getRandomFontSize();
+        span.style.fontFamily = getRandomFontFamily();
+        display.appendChild(span);
+      } else if (currentString.length < previousString.length) {
+        display.lastChild.remove();
+      }
+    }
+
+    function getRandomColor() {
+      const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
+      return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    function getRandomFontSize() {
+      return Math.floor(Math.random() * 20) + 10 + 'px';
+    }
+
+    function getRandomFontFamily() {
+      const fonts = ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Helvetica'];
+      return fonts[Math.floor(Math.random() * fonts.length)];
+    }
+  </script>
+</body>
+</html>
