@@ -22,62 +22,68 @@
         }
         #player1-stats {
             position: absolute;
-            top: 20px;
-            left: 20px;
+            top: 8px;
+            left: 10px;
             color: white;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
             pointer-events: none;
-            padding: 10px 15px;
-            border-radius: 10px;
+            padding: 4px 8px;
+            border-radius: 6px;
             transition: background 0.3s, box-shadow 0.3s;
         }
         #player1-stats.active {
-            background: rgba(255,107,107,0.2);
-            box-shadow: 0 0 20px rgba(255,107,107,0.5);
+            background: rgba(255,107,107,0.25);
+            box-shadow: 0 0 12px rgba(255,107,107,0.5);
         }
         #player2-stats {
             position: absolute;
-            top: 20px;
-            right: 20px;
+            top: 8px;
+            right: 35px;
             color: white;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
             pointer-events: none;
             text-align: right;
-            padding: 10px 15px;
-            border-radius: 10px;
+            padding: 4px 8px;
+            border-radius: 6px;
             transition: background 0.3s, box-shadow 0.3s;
         }
         #player2-stats.active {
-            background: rgba(74,158,255,0.2);
-            box-shadow: 0 0 20px rgba(74,158,255,0.5);
+            background: rgba(74,158,255,0.25);
+            box-shadow: 0 0 12px rgba(74,158,255,0.5);
         }
         .player-name {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 5px;
+            font-size: 12px;
+            font-weight: normal;
+            display: inline;
         }
         .player-name.p1 { color: #ff6b6b; }
         .player-name.p2 { color: #4a9eff; }
         .player-score {
-            font-size: 36px;
+            font-size: 16px;
             font-weight: bold;
             color: #ffd700;
+            display: inline;
+            margin-left: 4px;
         }
-        .player-shots {
-            font-size: 14px;
-            color: rgba(255,255,255,0.7);
+        @keyframes pulse-grow {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); }
+            100% { transform: scale(1); }
+        }
+        #player1-stats.pulse, #player2-stats.pulse {
+            animation: pulse-grow 2s ease-in-out;
         }
         #settings-btn {
             position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 40px;
-            height: 40px;
-            background: rgba(255,255,255,0.15);
+            top: 5px;
+            right: 5px;
+            width: 28px;
+            height: 28px;
+            background: rgba(255,255,255,0.1);
             border: none;
             border-radius: 50%;
             cursor: pointer;
-            font-size: 22px;
+            font-size: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -157,7 +163,7 @@
             width: 100px;
             cursor: pointer;
         }
-        #speed-value, #shotclock-value {
+        #speed-value, #shotclock-value, #halftime-value {
             color: #ffd700;
             font-weight: bold;
             min-width: 40px;
@@ -199,14 +205,10 @@
 <body>
     <canvas id="game"></canvas>
     <div id="player1-stats">
-        <div class="player-name p1">🔴 Player 1</div>
-        <div class="player-score"><span id="p1-score">0</span></div>
-        <div class="player-shots">Shots: <span id="p1-shots">0</span></div>
+        <span class="player-name p1">Player 1:</span><span class="player-score" id="p1-score">0</span>
     </div>
     <div id="player2-stats">
-        <div class="player-name p2">Player 2 🔵</div>
-        <div class="player-score"><span id="p2-score">0</span></div>
-        <div class="player-shots">Shots: <span id="p2-shots">0</span></div>
+        <span class="player-name p2">Player 2:</span><span class="player-score" id="p2-score">0</span>
     </div>
     <button id="settings-btn">⚙️</button>
     <div id="settings-modal">
@@ -229,8 +231,15 @@
                     <span id="shotclock-value">3</span>
                 </div>
             </div>
+            <div class="setting-row">
+                <span class="setting-label">Half Length</span>
+                <div class="speed-control">
+                    <input type="range" id="halftime-slider" min="10" max="900" step="10" value="120">
+                    <span id="halftime-value">2:00</span>
+                </div>
+            </div>
             <button class="game-btn" id="reset-game-btn">🔄 New Game</button>
-            <div class="version-text">Version 1.2</div>
+            <div class="version-text">Version 1.3</div>
         </div>
     </div>
     <div id="instructions">Swipe anywhere to shoot! 🏀</div>
@@ -287,11 +296,15 @@
     // Settings (pending until new game) - load from localStorage
     const savedSpeed = localStorage.getItem('basketball2p_speed');
     const savedShotClock = localStorage.getItem('basketball2p_shotclock');
+    const savedHalfLength = localStorage.getItem('basketball2p_halflength');
     
     let pendingSpeed = savedSpeed !== null ? parseFloat(savedSpeed) : 1.1;
     let currentSpeed = pendingSpeed;
     
     let pendingShotClockSeconds = savedShotClock !== null ? parseInt(savedShotClock) : 3;
+    
+    let pendingHalfLength = savedHalfLength !== null ? parseInt(savedHalfLength) : 120;
+    let currentHalfLength = pendingHalfLength;
     
     // Update slider values from saved settings
     speedSlider.value = pendingSpeed;
@@ -302,6 +315,23 @@
     
     shotclockSlider.value = pendingShotClockSeconds;
     shotclockValue.textContent = pendingShotClockSeconds;
+    
+    const halftimeSlider = document.getElementById('halftime-slider');
+    const halftimeValue = document.getElementById('halftime-value');
+    
+    function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    halftimeSlider.value = pendingHalfLength;
+    halftimeValue.textContent = formatTime(pendingHalfLength);
+    
+    halftimeSlider.addEventListener('input', (e) => {
+        pendingHalfLength = parseInt(e.target.value);
+        halftimeValue.textContent = formatTime(pendingHalfLength);
+    });
     
     shotclockSlider.addEventListener('input', (e) => {
         pendingShotClockSeconds = parseInt(e.target.value);
@@ -314,6 +344,7 @@
     });
     
     settingsBtn.addEventListener('click', () => {
+        if (!gameStarted) return;
         settingsModal.classList.add('open');
     });
     
@@ -330,10 +361,12 @@
     resetGameBtn.addEventListener('click', () => {
         currentSpeed = pendingSpeed;
         currentShotClockSeconds = pendingShotClockSeconds;
+        currentHalfLength = pendingHalfLength;
         
         // Save settings to localStorage
         localStorage.setItem('basketball2p_speed', pendingSpeed);
         localStorage.setItem('basketball2p_shotclock', pendingShotClockSeconds);
+        localStorage.setItem('basketball2p_halflength', pendingHalfLength);
         
         resetGame();
         settingsModal.classList.remove('open');
@@ -354,6 +387,14 @@
     let shotClock = currentShotClockSeconds;
     let lastClockUpdate = Date.now();
     let shotClockActive = false;
+    
+    // Game timer and halves
+    let gameTimer = currentHalfLength;
+    let lastGameTimerUpdate = Date.now();
+    let currentHalf = 1;
+    let isHalftime = false;
+    let isGameOver = false;
+    let sidesSwapped = false;
     
     // Physics constants
     const GRAVITY = 0.55;
@@ -383,6 +424,7 @@
     
     // Score animation
     let scorePopups = [];
+    let turnAnimationStart = 0;
     
     function showTurnIndicator() {
         const p1Stats = document.getElementById('player1-stats');
@@ -391,17 +433,23 @@
         if (currentPlayer === 1) {
             p1Stats.classList.add('active');
             p2Stats.classList.remove('active');
+            // Trigger pulse animation
+            p1Stats.classList.remove('pulse');
+            void p1Stats.offsetWidth; // Force reflow
+            p1Stats.classList.add('pulse');
         } else {
             p1Stats.classList.remove('active');
             p2Stats.classList.add('active');
+            // Trigger pulse animation
+            p2Stats.classList.remove('pulse');
+            void p2Stats.offsetWidth; // Force reflow
+            p2Stats.classList.add('pulse');
         }
     }
     
     function updateStats() {
         document.getElementById('p1-score').textContent = players[1].score;
-        document.getElementById('p1-shots').textContent = players[1].shots;
         document.getElementById('p2-score').textContent = players[2].score;
-        document.getElementById('p2-shots').textContent = players[2].shots;
     }
     
     function resetBall() {
@@ -434,9 +482,46 @@
         shotClock = currentShotClockSeconds;
         lastClockUpdate = Date.now();
         shotClockActive = false;
+        gameTimer = currentHalfLength;
+        lastGameTimerUpdate = Date.now();
+        currentHalf = 1;
+        isHalftime = false;
+        isGameOver = false;
+        sidesSwapped = false;
         updateStats();
         dropBall();
         showTurnIndicator();
+    }
+    
+    function startSecondHalf() {
+        currentHalf = 2;
+        isHalftime = false;
+        sidesSwapped = true;
+        gameTimer = currentHalfLength;
+        lastGameTimerUpdate = Date.now();
+        currentPlayer = 1;
+        waitingForNextTurn = false;
+        initialDrop = true;
+        shotClock = currentShotClockSeconds;
+        lastClockUpdate = Date.now();
+        shotClockActive = false;
+        dropBall();
+        showTurnIndicator();
+    }
+    
+    function getTargetHoop(player) {
+        // Returns which hoop side the player should shoot at (opponent's hoop)
+        // First half: Left hoop is red (P1 home), right hoop is blue (P2 home)
+        // So P1 shoots at right (blue), P2 shoots at left (red)
+        // After halftime: colors swap, so targets swap too
+        if (sidesSwapped) {
+            // Second half: Left is blue (P2 home), right is red (P1 home)
+            // P1 shoots at left (blue), P2 shoots at right (red)
+            return player === 1 ? 'left' : 'right';
+        } else {
+            // First half: P1 shoots at right (blue), P2 shoots at left (red)
+            return player === 1 ? 'right' : 'left';
+        }
     }
     
     function init() {
@@ -456,6 +541,7 @@
     function onStart(e) {
         e.preventDefault();
         if (!gameStarted) return;
+        if (isHalftime || isGameOver) return;
         if (waitingForNextTurn) return;
         
         const pos = getPos(e);
@@ -497,6 +583,7 @@
                 
                 // Track where shot was taken from
                 shotOriginX = ball.x;
+                wentThroughFromBelow = false;
                 
                 ball.vx = dirX * speed;
                 ball.vy = dirY * speed;
@@ -538,6 +625,7 @@
     let lastBallY = 0;
     let scoredThisShot = false;
     let shotOriginX = 0;
+    let wentThroughFromBelow = false;
     
     function isThreePointer(shotX, targetHoop) {
         // Three point line is 200px arc from each hoop
@@ -599,16 +687,27 @@
             // Check if ball center is within the hoop opening
             const inHoopX = ball.x > rimLeftX && ball.x < rimRightX;
             // Ball crossed from above to at/below hoop level
-            const crossedHoop = lastBallY <= hoop.y && ball.y > hoop.y;
+            const crossedHoopDown = lastBallY <= hoop.y && ball.y > hoop.y;
+            // Ball crossed from below to above hoop level
+            const crossedHoopUp = lastBallY >= hoop.y && ball.y < hoop.y;
             const goingDown = ball.vy > 0;
+            const goingUp = ball.vy < 0;
             
-            // Player 1 (red) scores on left hoop (blue/opponent's)
-            // Player 2 (blue) scores on right hoop (red/opponent's)
-            const correctHoop = (currentPlayer === 1 && hoop.side === 'left') || 
-                               (currentPlayer === 2 && hoop.side === 'right');
+            // Check if this is the correct hoop for the current player (accounts for side swap)
+            const correctHoop = hoop.side === getTargetHoop(currentPlayer);
             
-            if (inHoopX && crossedHoop && goingDown && correctHoop) {
-                const points = isThreePointer(shotOriginX, hoop.side) ? 3 : 2;
+            // Track if ball went through from below
+            if (inHoopX && crossedHoopUp && goingUp && correctHoop) {
+                wentThroughFromBelow = true;
+            }
+            
+            if (inHoopX && crossedHoopDown && goingDown && correctHoop) {
+                let points;
+                if (wentThroughFromBelow) {
+                    points = 1;
+                } else {
+                    points = isThreePointer(shotOriginX, hoop.side) ? 3 : 2;
+                }
                 players[currentPlayer].score += points;
                 scoredThisShot = true;
                 updateStats();
@@ -733,6 +832,31 @@
                 }
             }
         }
+        
+        // Update game timer
+        if (gameStarted && !isHalftime && !isGameOver) {
+            const now = Date.now();
+            const elapsed = (now - lastGameTimerUpdate) / 1000;
+            if (elapsed >= 1) {
+                gameTimer -= Math.floor(elapsed);
+                lastGameTimerUpdate = now;
+                
+                if (gameTimer <= 0) {
+                    gameTimer = 0;
+                }
+            }
+            
+            // Only transition when timer is 0 AND ball is grounded
+            if (gameTimer <= 0 && ball.grounded) {
+                if (currentHalf === 1) {
+                    isHalftime = true;
+                    shotClockActive = false;
+                } else {
+                    isGameOver = true;
+                    shotClockActive = false;
+                }
+            }
+        }
     }
     
     function drawCourt() {
@@ -768,36 +892,174 @@
     }
     
     function drawShotClock() {
-        if (!shotClockActive || !ball.grounded || waitingForNextTurn) return;
+        // Shot clock is now drawn as part of drawGameTimer
+    }
+    
+    function drawGameTimer() {
+        if (!gameStarted || isHalftime || isGameOver) return;
         
-        const clockX = width / 2;
-        const clockY = 35;
+        const boardX = width / 2;
+        const boardY = 45;
+        const boardWidth = 140;
+        const boardHeight = 40;
         
-        // Background
-        ctx.fillStyle = shotClock <= 3 ? 'rgba(255,50,50,0.8)' : 'rgba(0,0,0,0.5)';
+        // Dark background (scoreboard)
+        ctx.fillStyle = '#1a1a1a';
         ctx.beginPath();
-        ctx.arc(clockX, clockY, 25, 0, Math.PI * 2);
+        ctx.roundRect(boardX - boardWidth/2, boardY - boardHeight/2, boardWidth, boardHeight, 6);
         ctx.fill();
         
         // Border
-        ctx.strokeStyle = shotClock <= 3 ? '#ff4444' : 'rgba(255,255,255,0.5)';
+        ctx.strokeStyle = '#333';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(clockX, clockY, 25, 0, Math.PI * 2);
+        ctx.roundRect(boardX - boardWidth/2, boardY - boardHeight/2, boardWidth, boardHeight, 6);
         ctx.stroke();
         
-        // Text
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 20px Arial';
+        // Half indicator (left side)
+        ctx.fillStyle = '#888';
+        ctx.font = 'bold 10px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(shotClock, clockX, clockY);
+        ctx.fillText(currentHalf === 1 ? '1st' : '2nd', boardX - 50, boardY);
+        
+        // Game timer (yellow, center)
+        ctx.fillStyle = '#ffcc00';
+        ctx.font = 'bold 22px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(formatTime(gameTimer), boardX, boardY);
+        
+        // Shot clock (red, right side) - only show when active and ball grounded
+        if (shotClockActive && ball.grounded && !waitingForNextTurn) {
+            ctx.fillStyle = shotClock <= 3 ? '#ff2222' : '#ff4444';
+            ctx.font = 'bold 18px "Courier New", monospace';
+            ctx.fillText(shotClock.toString().padStart(2, '0'), boardX + 50, boardY);
+        }
+    }
+    
+    function drawHalftimeScreen() {
+        if (!isHalftime) return;
+        
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(0, 0, width, height);
+        
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('HALFTIME', width / 2, height / 2 - 100);
+        
+        // Stats panel
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.roundRect(width / 2 - 150, height / 2 - 60, 300, 120, 10);
+        ctx.fill();
+        
+        // Player 1 stats
+        ctx.font = 'bold 24px Arial';
+        ctx.fillStyle = players[1].color;
+        ctx.textAlign = 'left';
+        ctx.fillText('Player 1', width / 2 - 130, height / 2 - 30);
+        ctx.fillStyle = '#ffd700';
+        ctx.textAlign = 'right';
+        ctx.fillText(players[1].score, width / 2 + 130, height / 2 - 30);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '14px Arial';
+        ctx.fillText(`${players[1].shots} shots`, width / 2 + 130, height / 2 - 10);
+        
+        // Player 2 stats
+        ctx.font = 'bold 24px Arial';
+        ctx.fillStyle = players[2].color;
+        ctx.textAlign = 'left';
+        ctx.fillText('Player 2', width / 2 - 130, height / 2 + 20);
+        ctx.fillStyle = '#ffd700';
+        ctx.textAlign = 'right';
+        ctx.fillText(players[2].score, width / 2 + 130, height / 2 + 20);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '14px Arial';
+        ctx.fillText(`${players[2].shots} shots`, width / 2 + 130, height / 2 + 40);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '18px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Sides will swap for 2nd half', width / 2, height / 2 + 90);
+        ctx.fillText('Tap to continue', width / 2, height / 2 + 120);
+    }
+    
+    function drawGameOverScreen() {
+        if (!isGameOver) return;
+        
+        ctx.fillStyle = 'rgba(0,0,0,0.9)';
+        ctx.fillRect(0, 0, width, height);
+        
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('GAME OVER', width / 2, height / 2 - 120);
+        
+        // Stats panel
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.roundRect(width / 2 - 150, height / 2 - 80, 300, 120, 10);
+        ctx.fill();
+        
+        // Player 1 stats
+        ctx.font = 'bold 24px Arial';
+        ctx.fillStyle = players[1].color;
+        ctx.textAlign = 'left';
+        ctx.fillText('Player 1', width / 2 - 130, height / 2 - 50);
+        ctx.fillStyle = '#ffd700';
+        ctx.textAlign = 'right';
+        ctx.fillText(players[1].score, width / 2 + 130, height / 2 - 50);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '14px Arial';
+        ctx.fillText(`${players[1].shots} shots`, width / 2 + 130, height / 2 - 30);
+        
+        // Player 2 stats
+        ctx.font = 'bold 24px Arial';
+        ctx.fillStyle = players[2].color;
+        ctx.textAlign = 'left';
+        ctx.fillText('Player 2', width / 2 - 130, height / 2);
+        ctx.fillStyle = '#ffd700';
+        ctx.textAlign = 'right';
+        ctx.fillText(players[2].score, width / 2 + 130, height / 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '14px Arial';
+        ctx.fillText(`${players[2].shots} shots`, width / 2 + 130, height / 2 + 20);
+        
+        // Show winner
+        ctx.font = 'bold 28px Arial';
+        ctx.textAlign = 'center';
+        let winnerText;
+        if (players[1].score > players[2].score) {
+            ctx.fillStyle = players[1].color;
+            winnerText = '🏆 Player 1 Wins! 🏆';
+        } else if (players[2].score > players[1].score) {
+            ctx.fillStyle = players[2].color;
+            winnerText = '🏆 Player 2 Wins! 🏆';
+        } else {
+            ctx.fillStyle = '#ffd700';
+            winnerText = "It's a Tie!";
+        }
+        ctx.fillText(winnerText, width / 2, height / 2 + 70);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '20px Arial';
+        ctx.fillText('Tap to play again', width / 2, height / 2 + 115);
     }
     
     function drawBackboard(hoop) {
         const isLeft = hoop.side === 'left';
         const boardX = isLeft ? 0 : width - 10;
-        const hoopColor = isLeft ? players[2].color : players[1].color;
+        // Left hoop is Player 1's (red) home, right hoop is Player 2's (blue) home
+        // After halftime, sides swap so colors swap too
+        let hoopColor;
+        if (sidesSwapped) {
+            hoopColor = isLeft ? players[2].color : players[1].color;
+        } else {
+            hoopColor = isLeft ? players[1].color : players[2].color;
+        }
         
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.fillRect(boardX, hoop.y - 50, 10, 75);
@@ -816,7 +1078,14 @@
         const rimLeftX = isLeft ? hoop.x : hoop.x - hoop.width;
         const rimRightX = isLeft ? hoop.x + hoop.width : hoop.x;
         const centerX = (rimLeftX + rimRightX) / 2;
-        const hoopColor = isLeft ? players[2].color : players[1].color;
+        // Left hoop is Player 1's (red) home, right hoop is Player 2's (blue) home
+        // After halftime, sides swap so colors swap too
+        let hoopColor;
+        if (sidesSwapped) {
+            hoopColor = isLeft ? players[2].color : players[1].color;
+        } else {
+            hoopColor = isLeft ? players[1].color : players[2].color;
+        }
         
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
         ctx.lineWidth = 1;
@@ -994,6 +1263,9 @@
         drawAimArrow();
         drawScorePopups();
         drawShotClock();
+        drawGameTimer();
+        drawHalftimeScreen();
+        drawGameOverScreen();
     }
     
     let gameStarted = false;
@@ -1003,20 +1275,36 @@
         ctx.fillRect(0, 0, width, height);
         
         ctx.fillStyle = 'white';
-        ctx.font = 'bold 48px Arial';
+        ctx.font = 'bold 36px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('🏀 Basketball 2P 🏀', width / 2, height / 2 - 50);
+        ctx.fillText('🏀 Basketball with 🏀', width / 2, height / 2 - 70);
+        
+        ctx.font = 'bold 52px Arial';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('MALACHI', width / 2, height / 2 - 20);
         
         ctx.font = '24px Arial';
         ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText('Tap anywhere to start', width / 2, height / 2 + 30);
+        ctx.fillText('Tap anywhere to start', width / 2, height / 2 + 40);
     }
     
     function startGame() {
-        if (gameStarted) return;
-        gameStarted = true;
-        resetGameBtn.click();
+        if (!gameStarted) {
+            gameStarted = true;
+            resetGameBtn.click();
+            return;
+        }
+        
+        if (isHalftime) {
+            startSecondHalf();
+            return;
+        }
+        
+        if (isGameOver) {
+            resetGameBtn.click();
+            return;
+        }
     }
     
     canvas.addEventListener('click', startGame);
