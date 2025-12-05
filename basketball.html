@@ -190,6 +190,12 @@
         .game-btn:hover {
             transform: scale(1.02);
         }
+        .version-text {
+            text-align: center;
+            color: rgba(255,255,255,0.4);
+            font-size: 12px;
+            margin-top: 15px;
+        }
         #instructions {
             position: absolute;
             bottom: 15px;
@@ -225,11 +231,12 @@
             <div class="setting-row">
                 <span class="setting-label">Simulation Speed</span>
                 <div class="speed-control">
-                    <input type="range" id="speed-slider" min="0.5" max="2" step="0.1" value="1">
-                    <span id="speed-value">1.0x</span>
+                    <input type="range" id="speed-slider" min="0.5" max="2" step="0.1" value="1.1">
+                    <span id="speed-value">1.1x</span>
                 </div>
             </div>
             <button class="game-btn" id="reset-game-btn">🔄 New Game</button>
+            <div class="version-text">Version 1.1</div>
         </div>
     </div>
     <div id="instructions">Swipe anywhere to shoot! 🏀</div>
@@ -284,8 +291,8 @@
     const speedValue = document.getElementById('speed-value');
     
     // Settings (pending until new game)
-    let pendingSpeed = 1.0;
-    let currentSpeed = 1.0;
+    let pendingSpeed = 1.1;
+    let currentSpeed = 1.1;
     
     speedSlider.addEventListener('input', (e) => {
         pendingSpeed = parseFloat(e.target.value);
@@ -320,6 +327,7 @@
     
     let currentPlayer = 1;
     let waitingForNextTurn = false;
+    let initialDrop = true;
     
     // Physics constants
     const GRAVITY = 0.55;
@@ -390,6 +398,7 @@
         players[2].shots = 0;
         currentPlayer = 1;
         waitingForNextTurn = false;
+        initialDrop = true;
         updateStats();
         dropBall();
         showTurnIndicator();
@@ -450,6 +459,9 @@
                 const maxSpeed = 55;
                 const speed = power * maxSpeed;
                 
+                // Track where shot was taken from
+                shotOriginX = ball.x;
+                
                 ball.vx = dirX * speed;
                 ball.vy = dirY * speed;
                 
@@ -488,6 +500,21 @@
     // Collision detection
     let lastBallY = 0;
     let scoredThisShot = false;
+    let shotOriginX = 0;
+    
+    function isThreePointer(shotX, targetHoop) {
+        // Three point line is 200px arc from each hoop
+        const threePointRadius = 200;
+        if (targetHoop === 'left') {
+            // Player 1 shooting at left hoop (blue) - 3pt if shot from right of the arc
+            const arcCenterX = hoopLeft.x + hoopLeft.width / 2;
+            return shotX > arcCenterX + threePointRadius;
+        } else {
+            // Player 2 shooting at right hoop (red) - 3pt if shot from left of the arc
+            const arcCenterX = hoopRight.x - hoopRight.width / 2;
+            return shotX < arcCenterX - threePointRadius;
+        }
+    }
     
     function checkHoopCollision(hoop) {
         const rimLeftX = hoop.side === 'left' ? hoop.x : hoop.x - hoop.width;
@@ -532,22 +559,27 @@
         });
         
         if (!scoredThisShot) {
-            const inHoopX = ball.x > rimLeftX + ball.radius && ball.x < rimRightX - ball.radius;
-            const crossedHoop = lastBallY < hoop.y && ball.y >= hoop.y;
+            // Check if ball center is within the hoop opening
+            const inHoopX = ball.x > rimLeftX && ball.x < rimRightX;
+            // Ball crossed from above to at/below hoop level
+            const crossedHoop = lastBallY <= hoop.y && ball.y > hoop.y;
             const goingDown = ball.vy > 0;
             
-            const correctHoop = (currentPlayer === 1 && hoop.side === 'right') || 
-                               (currentPlayer === 2 && hoop.side === 'left');
+            // Player 1 (red) scores on left hoop (blue/opponent's)
+            // Player 2 (blue) scores on right hoop (red/opponent's)
+            const correctHoop = (currentPlayer === 1 && hoop.side === 'left') || 
+                               (currentPlayer === 2 && hoop.side === 'right');
             
             if (inHoopX && crossedHoop && goingDown && correctHoop) {
-                players[currentPlayer].score++;
+                const points = isThreePointer(shotOriginX, hoop.side) ? 3 : 2;
+                players[currentPlayer].score += points;
                 scoredThisShot = true;
                 updateStats();
                 
                 scorePopups.push({
                     x: hoop.side === 'left' ? hoop.x + hoop.width / 2 : hoop.x,
                     y: hoop.y,
-                    text: '+1',
+                    text: `+${points}`,
                     life: 1,
                     vy: -2
                 });
@@ -579,6 +611,9 @@
     
     function update() {
         if (!ball.grounded) {
+            // Store previous Y position before moving
+            const prevBallY = ball.y;
+            
             ball.vy += GRAVITY * currentSpeed;
             ball.vx *= Math.pow(AIR_RESISTANCE, currentSpeed);
             ball.vy *= Math.pow(AIR_RESISTANCE, currentSpeed);
@@ -588,6 +623,9 @@
             
             ball.rotation += ball.angularVel * currentSpeed;
             ball.angularVel *= 0.99;
+            
+            // Update lastBallY before collision checks
+            lastBallY = prevBallY;
             
             checkHoopCollision(hoopLeft);
             checkHoopCollision(hoopRight);
@@ -603,7 +641,9 @@
                     ball.vx = 0;
                     ball.vy = 0;
                     
-                    if (!waitingForNextTurn) {
+                    if (initialDrop) {
+                        initialDrop = false;
+                    } else if (!waitingForNextTurn) {
                         waitingForNextTurn = true;
                         setTimeout(switchTurn, 800);
                     }
@@ -618,8 +658,6 @@
                 ball.x = width - ball.radius;
                 ball.vx *= -BOUNCE_DAMPING;
             }
-            
-            lastBallY = ball.y;
         }
         
         particles = particles.filter(p => {
@@ -662,10 +700,10 @@
         ctx.strokeStyle = 'rgba(255,255,255,0.15)';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(hoopLeft.x + hoopLeft.width / 2, height - 40, 120, Math.PI, 0);
+        ctx.arc(hoopLeft.x + hoopLeft.width / 2, height - 40, 200, Math.PI, 0);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(hoopRight.x - hoopRight.width / 2, height - 40, 120, Math.PI, 0);
+        ctx.arc(hoopRight.x - hoopRight.width / 2, height - 40, 200, Math.PI, 0);
         ctx.stroke();
     }
     
