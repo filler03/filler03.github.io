@@ -163,7 +163,7 @@
             width: 100px;
             cursor: pointer;
         }
-        #speed-value, #shotclock-value, #halftime-value {
+        #speed-value, #shotclock-value, #halftime-value, #bounce-value {
             color: #ffd700;
             font-weight: bold;
             min-width: 40px;
@@ -238,6 +238,13 @@
                     <span id="halftime-value">2:00</span>
                 </div>
             </div>
+            <div class="setting-row">
+                <span class="setting-label">Ball Bounciness</span>
+                <div class="speed-control">
+                    <input type="range" id="bounce-slider" min="0.1" max="1" step="0.05" value="0.7">
+                    <span id="bounce-value">0.7</span>
+                </div>
+            </div>
             <button class="game-btn" id="reset-game-btn">🔄 New Game</button>
             <div class="version-text">Version 1.3</div>
         </div>
@@ -297,6 +304,7 @@
     const savedSpeed = localStorage.getItem('basketball2p_speed');
     const savedShotClock = localStorage.getItem('basketball2p_shotclock');
     const savedHalfLength = localStorage.getItem('basketball2p_halflength');
+    const savedBounce = localStorage.getItem('basketball2p_bounce');
     
     let pendingSpeed = savedSpeed !== null ? parseFloat(savedSpeed) : 1.1;
     let currentSpeed = pendingSpeed;
@@ -305,6 +313,9 @@
     
     let pendingHalfLength = savedHalfLength !== null ? parseInt(savedHalfLength) : 120;
     let currentHalfLength = pendingHalfLength;
+    
+    let pendingBounce = savedBounce !== null ? parseFloat(savedBounce) : 0.7;
+    let currentBounce = pendingBounce;
     
     // Update slider values from saved settings
     speedSlider.value = pendingSpeed;
@@ -331,6 +342,17 @@
     halftimeSlider.addEventListener('input', (e) => {
         pendingHalfLength = parseInt(e.target.value);
         halftimeValue.textContent = formatTime(pendingHalfLength);
+    });
+    
+    const bounceSlider = document.getElementById('bounce-slider');
+    const bounceValue = document.getElementById('bounce-value');
+    
+    bounceSlider.value = pendingBounce;
+    bounceValue.textContent = pendingBounce.toFixed(2);
+    
+    bounceSlider.addEventListener('input', (e) => {
+        pendingBounce = parseFloat(e.target.value);
+        bounceValue.textContent = pendingBounce.toFixed(2);
     });
     
     shotclockSlider.addEventListener('input', (e) => {
@@ -362,11 +384,13 @@
         currentSpeed = pendingSpeed;
         currentShotClockSeconds = pendingShotClockSeconds;
         currentHalfLength = pendingHalfLength;
+        currentBounce = pendingBounce;
         
         // Save settings to localStorage
         localStorage.setItem('basketball2p_speed', pendingSpeed);
         localStorage.setItem('basketball2p_shotclock', pendingShotClockSeconds);
         localStorage.setItem('basketball2p_halflength', pendingHalfLength);
+        localStorage.setItem('basketball2p_bounce', pendingBounce);
         
         resetGame();
         settingsModal.classList.remove('open');
@@ -377,6 +401,10 @@
         1: { score: 0, shots: 0, color: '#ff6b6b' },
         2: { score: 0, shots: 0, color: '#4a9eff' }
     };
+    
+    // Detailed shot tracking
+    let shotHistory = [];
+    let currentShotData = null;
     
     let currentPlayer = 1;
     let waitingForNextTurn = false;
@@ -463,7 +491,7 @@
     
     function dropBall() {
         ball.x = width / 2;
-        ball.y = -ball.radius;
+        ball.y = height * 0.25;
         ball.vx = 0;
         ball.vy = 5 * currentSpeed;
         ball.angularVel = 0;
@@ -488,6 +516,8 @@
         isHalftime = false;
         isGameOver = false;
         sidesSwapped = false;
+        shotHistory = [];
+        currentShotData = null;
         updateStats();
         dropBall();
         showTurnIndicator();
@@ -585,6 +615,26 @@
                 shotOriginX = ball.x;
                 wentThroughFromBelow = false;
                 
+                // Calculate angle in degrees
+                const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                
+                // Start tracking this shot
+                currentShotData = {
+                    player: currentPlayer,
+                    half: currentHalf,
+                    gameTime: gameTimer,
+                    shotClock: shotClock,
+                    startX: Math.round(ball.x),
+                    startY: Math.round(ball.y),
+                    angle: Math.round(angle),
+                    power: Math.round(power * 100),
+                    bounces: [],
+                    scored: false,
+                    points: 0,
+                    endX: 0,
+                    endY: 0
+                };
+                
                 ball.vx = dirX * speed;
                 ball.vy = dirY * speed;
                 
@@ -663,8 +713,8 @@
                 ball.y += ny * overlap;
                 
                 const dot = ball.vx * nx + ball.vy * ny;
-                ball.vx = (ball.vx - 2 * dot * nx) * BOUNCE_DAMPING;
-                ball.vy = (ball.vy - 2 * dot * ny) * BOUNCE_DAMPING;
+                ball.vx = (ball.vx - 2 * dot * nx) * currentBounce;
+                ball.vy = (ball.vy - 2 * dot * ny) * currentBounce;
                 
                 ball.angularVel = ball.vx * 0.03;
                 
@@ -710,6 +760,13 @@
                 }
                 players[currentPlayer].score += points;
                 scoredThisShot = true;
+                
+                // Track score in shot data
+                if (currentShotData) {
+                    currentShotData.scored = true;
+                    currentShotData.points = points;
+                }
+                
                 updateStats();
                 
                 scorePopups.push({
@@ -772,14 +829,30 @@
             
             if (ball.y + ball.radius > height - 40) {
                 ball.y = height - 40 - ball.radius;
-                ball.vy *= -BOUNCE_DAMPING;
+                ball.vy *= -currentBounce;
                 ball.vx *= FRICTION;
                 ball.angularVel = ball.vx * 0.03;
+                
+                // Track bounce position
+                if (currentShotData && Math.abs(ball.vy) > 1) {
+                    currentShotData.bounces.push({
+                        x: Math.round(ball.x),
+                        y: Math.round(ball.y)
+                    });
+                }
                 
                 if (Math.abs(ball.vy) < 1 && Math.abs(ball.vx) < 0.5) {
                     ball.grounded = true;
                     ball.vx = 0;
                     ball.vy = 0;
+                    
+                    // Finalize shot data
+                    if (currentShotData) {
+                        currentShotData.endX = Math.round(ball.x);
+                        currentShotData.endY = Math.round(ball.y);
+                        shotHistory.push(currentShotData);
+                        currentShotData = null;
+                    }
                     
                     if (initialDrop) {
                         initialDrop = false;
@@ -794,11 +867,27 @@
             
             if (ball.x - ball.radius < 0) {
                 ball.x = ball.radius;
-                ball.vx *= -BOUNCE_DAMPING;
+                ball.vx *= -currentBounce;
+                // Track wall bounce
+                if (currentShotData) {
+                    currentShotData.bounces.push({
+                        x: Math.round(ball.x),
+                        y: Math.round(ball.y),
+                        wall: 'left'
+                    });
+                }
             }
             if (ball.x + ball.radius > width) {
                 ball.x = width - ball.radius;
-                ball.vx *= -BOUNCE_DAMPING;
+                ball.vx *= -currentBounce;
+                // Track wall bounce
+                if (currentShotData) {
+                    currentShotData.bounces.push({
+                        x: Math.round(ball.x),
+                        y: Math.round(ball.y),
+                        wall: 'right'
+                    });
+                }
             }
         }
         
@@ -993,43 +1082,43 @@
         ctx.fillRect(0, 0, width, height);
         
         ctx.fillStyle = '#ffd700';
-        ctx.font = 'bold 48px Arial';
+        ctx.font = 'bold 42px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('GAME OVER', width / 2, height / 2 - 120);
+        ctx.fillText('GAME OVER', width / 2, 60);
         
         // Stats panel
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.beginPath();
-        ctx.roundRect(width / 2 - 150, height / 2 - 80, 300, 120, 10);
+        ctx.roundRect(width / 2 - 150, 95, 300, 100, 10);
         ctx.fill();
         
         // Player 1 stats
-        ctx.font = 'bold 24px Arial';
+        ctx.font = 'bold 22px Arial';
         ctx.fillStyle = players[1].color;
         ctx.textAlign = 'left';
-        ctx.fillText('Player 1', width / 2 - 130, height / 2 - 50);
+        ctx.fillText('Player 1', width / 2 - 130, 125);
         ctx.fillStyle = '#ffd700';
         ctx.textAlign = 'right';
-        ctx.fillText(players[1].score, width / 2 + 130, height / 2 - 50);
+        ctx.fillText(players[1].score, width / 2 + 130, 125);
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.font = '14px Arial';
-        ctx.fillText(`${players[1].shots} shots`, width / 2 + 130, height / 2 - 30);
+        ctx.font = '12px Arial';
+        ctx.fillText(`${players[1].shots} shots`, width / 2 + 130, 142);
         
         // Player 2 stats
-        ctx.font = 'bold 24px Arial';
+        ctx.font = 'bold 22px Arial';
         ctx.fillStyle = players[2].color;
         ctx.textAlign = 'left';
-        ctx.fillText('Player 2', width / 2 - 130, height / 2);
+        ctx.fillText('Player 2', width / 2 - 130, 168);
         ctx.fillStyle = '#ffd700';
         ctx.textAlign = 'right';
-        ctx.fillText(players[2].score, width / 2 + 130, height / 2);
+        ctx.fillText(players[2].score, width / 2 + 130, 168);
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.font = '14px Arial';
-        ctx.fillText(`${players[2].shots} shots`, width / 2 + 130, height / 2 + 20);
+        ctx.font = '12px Arial';
+        ctx.fillText(`${players[2].shots} shots`, width / 2 + 130, 185);
         
         // Show winner
-        ctx.font = 'bold 28px Arial';
+        ctx.font = 'bold 26px Arial';
         ctx.textAlign = 'center';
         let winnerText;
         if (players[1].score > players[2].score) {
@@ -1042,11 +1131,20 @@
             ctx.fillStyle = '#ffd700';
             winnerText = "It's a Tie!";
         }
-        ctx.fillText(winnerText, width / 2, height / 2 + 70);
+        ctx.fillText(winnerText, width / 2, 230);
+        
+        // Settings section - subtle horizontal layout
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        
+        const settingsY = 275;
+        const settingsText = `${currentSpeed.toFixed(1)}x speed  •  ${currentShotClockSeconds}s shot clock  •  ${formatTime(currentHalfLength)} halves  •  ${currentBounce.toFixed(2)} bounce`;
+        ctx.fillText(settingsText, width / 2, settingsY);
         
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.font = '20px Arial';
-        ctx.fillText('Tap to play again', width / 2, height / 2 + 115);
+        ctx.font = '18px Arial';
+        ctx.fillText('Tap to play again', width / 2, 310);
     }
     
     function drawBackboard(hoop) {
