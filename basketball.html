@@ -27,15 +27,29 @@
             color: white;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
             pointer-events: none;
+            padding: 10px 15px;
+            border-radius: 10px;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        #player1-stats.active {
+            background: rgba(255,107,107,0.2);
+            box-shadow: 0 0 20px rgba(255,107,107,0.5);
         }
         #player2-stats {
             position: absolute;
             top: 20px;
-            right: 70px;
+            right: 20px;
             color: white;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
             pointer-events: none;
             text-align: right;
+            padding: 10px 15px;
+            border-radius: 10px;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        #player2-stats.active {
+            background: rgba(74,158,255,0.2);
+            box-shadow: 0 0 20px rgba(74,158,255,0.5);
         }
         .player-name {
             font-size: 20px;
@@ -52,32 +66,6 @@
         .player-shots {
             font-size: 14px;
             color: rgba(255,255,255,0.7);
-        }
-        #turn-indicator {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 24px;
-            font-weight: bold;
-            color: white;
-            text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
-            pointer-events: none;
-            text-align: center;
-            padding: 10px 25px;
-            border-radius: 30px;
-            background: rgba(0,0,0,0.4);
-            transition: background 0.3s, box-shadow 0.3s;
-        }
-        #turn-indicator.p1 { 
-            color: #ff6b6b; 
-            background: rgba(255,107,107,0.2);
-            box-shadow: 0 0 20px rgba(255,107,107,0.4);
-        }
-        #turn-indicator.p2 { 
-            color: #4a9eff; 
-            background: rgba(74,158,255,0.2);
-            box-shadow: 0 0 20px rgba(74,158,255,0.4);
         }
         #settings-btn {
             position: absolute;
@@ -169,7 +157,7 @@
             width: 100px;
             cursor: pointer;
         }
-        #speed-value {
+        #speed-value, #shotclock-value {
             color: #ffd700;
             font-weight: bold;
             min-width: 40px;
@@ -220,7 +208,6 @@
         <div class="player-score"><span id="p2-score">0</span></div>
         <div class="player-shots">Shots: <span id="p2-shots">0</span></div>
     </div>
-    <div id="turn-indicator">Player 1's Turn</div>
     <button id="settings-btn">⚙️</button>
     <div id="settings-modal">
         <div class="modal-content">
@@ -235,8 +222,15 @@
                     <span id="speed-value">1.1x</span>
                 </div>
             </div>
+            <div class="setting-row">
+                <span class="setting-label">Shot Clock (seconds)</span>
+                <div class="speed-control">
+                    <input type="range" id="shotclock-slider" min="1" max="24" step="1" value="3">
+                    <span id="shotclock-value">3</span>
+                </div>
+            </div>
             <button class="game-btn" id="reset-game-btn">🔄 New Game</button>
-            <div class="version-text">Version 1.1</div>
+            <div class="version-text">Version 1.2</div>
         </div>
     </div>
     <div id="instructions">Swipe anywhere to shoot! 🏀</div>
@@ -290,9 +284,29 @@
     const speedSlider = document.getElementById('speed-slider');
     const speedValue = document.getElementById('speed-value');
     
-    // Settings (pending until new game)
-    let pendingSpeed = 1.1;
-    let currentSpeed = 1.1;
+    // Settings (pending until new game) - load from localStorage
+    const savedSpeed = localStorage.getItem('basketball2p_speed');
+    const savedShotClock = localStorage.getItem('basketball2p_shotclock');
+    
+    let pendingSpeed = savedSpeed !== null ? parseFloat(savedSpeed) : 1.1;
+    let currentSpeed = pendingSpeed;
+    
+    let pendingShotClockSeconds = savedShotClock !== null ? parseInt(savedShotClock) : 3;
+    
+    // Update slider values from saved settings
+    speedSlider.value = pendingSpeed;
+    speedValue.textContent = pendingSpeed.toFixed(1) + 'x';
+    
+    const shotclockSlider = document.getElementById('shotclock-slider');
+    const shotclockValue = document.getElementById('shotclock-value');
+    
+    shotclockSlider.value = pendingShotClockSeconds;
+    shotclockValue.textContent = pendingShotClockSeconds;
+    
+    shotclockSlider.addEventListener('input', (e) => {
+        pendingShotClockSeconds = parseInt(e.target.value);
+        shotclockValue.textContent = pendingShotClockSeconds;
+    });
     
     speedSlider.addEventListener('input', (e) => {
         pendingSpeed = parseFloat(e.target.value);
@@ -315,6 +329,12 @@
     
     resetGameBtn.addEventListener('click', () => {
         currentSpeed = pendingSpeed;
+        currentShotClockSeconds = pendingShotClockSeconds;
+        
+        // Save settings to localStorage
+        localStorage.setItem('basketball2p_speed', pendingSpeed);
+        localStorage.setItem('basketball2p_shotclock', pendingShotClockSeconds);
+        
         resetGame();
         settingsModal.classList.remove('open');
     });
@@ -328,6 +348,12 @@
     let currentPlayer = 1;
     let waitingForNextTurn = false;
     let initialDrop = true;
+    
+    // Shot clock - initialized after settings are loaded
+    let currentShotClockSeconds = pendingShotClockSeconds;
+    let shotClock = currentShotClockSeconds;
+    let lastClockUpdate = Date.now();
+    let shotClockActive = false;
     
     // Physics constants
     const GRAVITY = 0.55;
@@ -358,12 +384,17 @@
     // Score animation
     let scorePopups = [];
     
-    // Turn indicator
-    const turnIndicator = document.getElementById('turn-indicator');
-    
     function showTurnIndicator() {
-        turnIndicator.textContent = `🏀 Player ${currentPlayer}'s Turn`;
-        turnIndicator.className = `p${currentPlayer}`;
+        const p1Stats = document.getElementById('player1-stats');
+        const p2Stats = document.getElementById('player2-stats');
+        
+        if (currentPlayer === 1) {
+            p1Stats.classList.add('active');
+            p2Stats.classList.remove('active');
+        } else {
+            p1Stats.classList.remove('active');
+            p2Stats.classList.add('active');
+        }
     }
     
     function updateStats() {
@@ -386,12 +417,13 @@
         ball.x = width / 2;
         ball.y = -ball.radius;
         ball.vx = 0;
-        ball.vy = 5;
+        ball.vy = 5 * currentSpeed;
         ball.angularVel = 0;
         ball.grounded = false;
     }
     
     function resetGame() {
+        positionHoops();
         players[1].score = 0;
         players[1].shots = 0;
         players[2].score = 0;
@@ -399,6 +431,9 @@
         currentPlayer = 1;
         waitingForNextTurn = false;
         initialDrop = true;
+        shotClock = currentShotClockSeconds;
+        lastClockUpdate = Date.now();
+        shotClockActive = false;
         updateStats();
         dropBall();
         showTurnIndicator();
@@ -420,6 +455,7 @@
     
     function onStart(e) {
         e.preventDefault();
+        if (!gameStarted) return;
         if (waitingForNextTurn) return;
         
         const pos = getPos(e);
@@ -467,6 +503,7 @@
                 
                 ball.angularVel = ball.vx * 0.05;
                 ball.grounded = false;
+                shotClockActive = false;
                 
                 players[currentPlayer].shots++;
                 updateStats();
@@ -577,11 +614,12 @@
                 updateStats();
                 
                 scorePopups.push({
-                    x: hoop.side === 'left' ? hoop.x + hoop.width / 2 : hoop.x,
-                    y: hoop.y,
+                    x: hoop.side === 'left' ? hoop.x + hoop.width / 2 : hoop.x - hoop.width / 2,
+                    y: hoop.y + 60,
                     text: `+${points}`,
                     life: 1,
-                    vy: -2
+                    scale: 0.5,
+                    color: players[currentPlayer].color
                 });
                 
                 for (let i = 0; i < 20; i++) {
@@ -606,6 +644,9 @@
         currentPlayer = currentPlayer === 1 ? 2 : 1;
         scoredThisShot = false;
         waitingForNextTurn = false;
+        shotClock = currentShotClockSeconds;
+        lastClockUpdate = Date.now();
+        shotClockActive = true;
         showTurnIndicator();
     }
     
@@ -643,6 +684,8 @@
                     
                     if (initialDrop) {
                         initialDrop = false;
+                        shotClockActive = true;
+                        lastClockUpdate = Date.now();
                     } else if (!waitingForNextTurn) {
                         waitingForNextTurn = true;
                         setTimeout(switchTurn, 800);
@@ -669,10 +712,27 @@
         });
         
         scorePopups = scorePopups.filter(s => {
-            s.y += s.vy * currentSpeed;
-            s.life -= 0.02 * currentSpeed;
+            s.scale += 0.015 * currentSpeed;
+            s.life -= 0.004 * currentSpeed;
             return s.life > 0;
         });
+        
+        // Update shot clock
+        if (shotClockActive && ball.grounded) {
+            const now = Date.now();
+            const elapsed = (now - lastClockUpdate) / 1000;
+            if (elapsed >= 1) {
+                shotClock -= Math.floor(elapsed);
+                lastClockUpdate = now;
+                
+                if (shotClock <= 0) {
+                    shotClock = 0;
+                    shotClockActive = false;
+                    waitingForNextTurn = true;
+                    setTimeout(switchTurn, 500);
+                }
+            }
+        }
     }
     
     function drawCourt() {
@@ -705,6 +765,33 @@
         ctx.beginPath();
         ctx.arc(hoopRight.x - hoopRight.width / 2, height - 40, 200, Math.PI, 0);
         ctx.stroke();
+    }
+    
+    function drawShotClock() {
+        if (!shotClockActive || !ball.grounded || waitingForNextTurn) return;
+        
+        const clockX = width / 2;
+        const clockY = 35;
+        
+        // Background
+        ctx.fillStyle = shotClock <= 3 ? 'rgba(255,50,50,0.8)' : 'rgba(0,0,0,0.5)';
+        ctx.beginPath();
+        ctx.arc(clockX, clockY, 25, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Border
+        ctx.strokeStyle = shotClock <= 3 ? '#ff4444' : 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(clockX, clockY, 25, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Text
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(shotClock, clockX, clockY);
     }
     
     function drawBackboard(hoop) {
@@ -884,9 +971,10 @@
     function drawScorePopups() {
         scorePopups.forEach(s => {
             ctx.globalAlpha = s.life;
-            ctx.fillStyle = '#ffd700';
-            ctx.font = 'bold 40px Arial';
+            ctx.fillStyle = s.color;
+            ctx.font = `bold ${Math.floor(40 * s.scale)}px Arial`;
             ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
             ctx.fillText(s.text, s.x, s.y);
         });
         ctx.globalAlpha = 1;
@@ -905,15 +993,46 @@
         drawBallOffscreenIndicator();
         drawAimArrow();
         drawScorePopups();
+        drawShotClock();
     }
+    
+    let gameStarted = false;
+    
+    function drawStartScreen() {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, width, height);
+        
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🏀 Basketball 2P 🏀', width / 2, height / 2 - 50);
+        
+        ctx.font = '24px Arial';
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fillText('Tap anywhere to start', width / 2, height / 2 + 30);
+    }
+    
+    function startGame() {
+        if (gameStarted) return;
+        gameStarted = true;
+        resetGameBtn.click();
+    }
+    
+    canvas.addEventListener('click', startGame);
+    canvas.addEventListener('touchstart', startGame);
     
     function gameLoop() {
         update();
         draw();
+        if (!gameStarted) {
+            drawStartScreen();
+        }
         requestAnimationFrame(gameLoop);
     }
     
-    init();
+    // Initialize hoops position but don't start the game
+    positionHoops();
     gameLoop();
 </script>
 ```
