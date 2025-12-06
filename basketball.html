@@ -20,18 +20,18 @@
         canvas {
             display: block;
         }
-        #top-panel {
+        #bottom-panel {
             position: absolute;
-            top: 0;
+            bottom: 0;
             left: 0;
             right: 0;
             height: 50px;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.7) 100%);
+            background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.7) 100%);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 50px 0 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            padding: 0 15px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
             z-index: 10;
         }
         #player1-stats {
@@ -507,7 +507,7 @@
 </head>
 <body>
     <canvas id="game"></canvas>
-    <div id="top-panel">
+    <div id="bottom-panel">
         <div id="player1-stats">
             <span class="player-name p1" id="p1-name-display">Player 1:</span><span class="player-score" id="p1-score">0</span>
         </div>
@@ -578,7 +578,7 @@
             <button class="game-btn" id="reset-game-btn">▶️ Start Game</button>
             <button class="game-btn" id="reset-defaults-btn" style="background: linear-gradient(135deg, #888 0%, #555 100%); color: white;">↩️ Reset to Defaults</button>
             <button class="game-btn" id="view-history-btn" style="background: linear-gradient(135deg, #4a9eff 0%, #2a7ed8 100%); color: white;">📜 Game History</button>
-            <div class="version-text">Version 3.0</div>
+            <div class="version-text">Version 3.1</div>
         </div>
     </div>
 
@@ -1100,13 +1100,24 @@
     
     // Input handlers
     function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        let clientX, clientY;
+        
         if (e.touches && e.touches.length > 0) {
-            return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+            clientX = e.changedTouches[0].clientX;
+            clientY = e.changedTouches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
         }
-        if (e.changedTouches && e.changedTouches.length > 0) {
-            return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-        }
-        return { x: e.clientX, y: e.clientY };
+        
+        return { 
+            x: clientX - rect.left, 
+            y: clientY - rect.top 
+        };
     }
     
     function onStart(e) {
@@ -1339,6 +1350,9 @@
     }
     
     function switchTurn() {
+        // Don't switch turns if game is at halftime or over
+        if (isHalftime || isGameOver) return;
+        
         // Cancel any in-progress shot setup
         if (isDragging) {
             isDragging = false;
@@ -1378,8 +1392,8 @@
             checkHoopCollision(hoopLeft);
             checkHoopCollision(hoopRight);
             
-            if (ball.y + ball.radius > height - 40) {
-                ball.y = height - 40 - ball.radius;
+            if (ball.y + ball.radius > height - 90) {
+                ball.y = height - 90 - ball.radius;
                 ball.vy *= -currentBounce;
                 ball.vx *= FRICTION;
                 ball.angularVel = ball.vx * 0.03;
@@ -1457,7 +1471,7 @@
         });
         
         // Update shot clock
-        if (shotClockActive && ball.grounded) {
+        if (shotClockActive && ball.grounded && !isHalftime && !isGameOver) {
             const now = Date.now();
             const elapsed = (now - lastClockUpdate) / 1000;
             if (elapsed >= 1) {
@@ -1748,13 +1762,13 @@
     
     function drawCourt() {
         ctx.fillStyle = '#8B4513';
-        ctx.fillRect(0, height - 40, width, 40);
+        ctx.fillRect(0, height - 90, width, 40);
         
         ctx.strokeStyle = '#a0522d';
         ctx.lineWidth = 2;
         for (let x = 0; x < width; x += 80) {
             ctx.beginPath();
-            ctx.moveTo(x, height - 40);
+            ctx.moveTo(x, height - 90);
             ctx.lineTo(x, height);
             ctx.stroke();
         }
@@ -1764,7 +1778,7 @@
         ctx.setLineDash([10, 10]);
         ctx.beginPath();
         ctx.moveTo(width / 2, 0);
-        ctx.lineTo(width / 2, height - 40);
+        ctx.lineTo(width / 2, height - 90);
         ctx.stroke();
         ctx.setLineDash([]);
         
@@ -1772,10 +1786,10 @@
         ctx.lineWidth = 3;
         const threePointRadius = width / 3;
         ctx.beginPath();
-        ctx.arc(hoopLeft.x + hoopLeft.width / 2, height - 40, threePointRadius, Math.PI, 0);
+        ctx.arc(hoopLeft.x + hoopLeft.width / 2, height - 90, threePointRadius, Math.PI, 0);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(hoopRight.x - hoopRight.width / 2, height - 40, threePointRadius, Math.PI, 0);
+        ctx.arc(hoopRight.x - hoopRight.width / 2, height - 90, threePointRadius, Math.PI, 0);
         ctx.stroke();
     }
     
