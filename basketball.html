@@ -492,6 +492,47 @@
         padding: 40px 20px;
         font-style: italic;
     }
+    .overlay-btn {
+        position: absolute;
+        padding: 12px 24px;
+        border: 2px solid;
+        border-radius: 10px;
+        font-size: 18px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .overlay-btn:hover {
+        transform: scale(1.05);
+    }
+    .overlay-btn.stats-btn {
+        background: rgba(255,215,0,0.3);
+        border-color: #ffd700;
+        color: #ffd700;
+    }
+    .overlay-btn.continue-btn {
+        background: rgba(0,255,136,0.3);
+        border-color: #00ff88;
+        color: #00ff88;
+    }
+    #halftime-stats-btn, #gameover-stats-btn {
+        left: 50%;
+        transform: translateX(calc(-50% - 85px));
+        top: calc(50% + 95px);
+    }
+    #halftime-continue-btn, #gameover-continue-btn {
+        left: 50%;
+        transform: translateX(calc(-50% + 85px));
+        top: calc(50% + 95px);
+    }
+    #halftime-stats-btn:hover, #gameover-stats-btn:hover {
+        transform: translateX(calc(-50% - 85px)) scale(1.05);
+        box-shadow: 0 0 15px rgba(255,215,0,0.5);
+    }
+    #halftime-continue-btn:hover, #gameover-continue-btn:hover {
+        transform: translateX(calc(-50% + 85px)) scale(1.05);
+        box-shadow: 0 0 15px rgba(0,255,136,0.5);
+    }
     .history-footer {
         margin-top: 15px;
         flex-shrink: 0;
@@ -556,7 +597,7 @@
             <div class="setting-row">
                 <span class="setting-label">Half Length</span>
                 <div class="speed-control">
-                    <input type="range" id="halftime-slider" min="10" max="900" step="10" value="60">
+                    <input type="range" id="halftime-slider" min="3" max="900" step="1" value="60">
                     <span id="halftime-value">2:00</span>
                 </div>
             </div>
@@ -578,7 +619,7 @@
             <button class="game-btn" id="reset-game-btn">▶️ Start Game</button>
             <button class="game-btn" id="reset-defaults-btn" style="background: linear-gradient(135deg, #888 0%, #555 100%); color: white;">↩️ Reset to Defaults</button>
             <button class="game-btn" id="view-history-btn" style="background: linear-gradient(135deg, #4a9eff 0%, #2a7ed8 100%); color: white;">📜 Game History</button>
-            <div class="version-text">Version 3.1</div>
+            <div class="version-text">Version 3.2</div>
         </div>
     </div>
 
@@ -613,6 +654,18 @@
 </div>
 
 <div id="instructions">Swipe anywhere to shoot! 🏀</div>
+
+<!-- Halftime Overlay Buttons -->
+<div id="halftime-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none;">
+    <button id="halftime-stats-btn" class="overlay-btn stats-btn" style="pointer-events: auto;">📊 Stats</button>
+    <button id="halftime-continue-btn" class="overlay-btn continue-btn" style="pointer-events: auto;">▶ Continue</button>
+</div>
+
+<!-- Game Over Overlay Buttons -->
+<div id="gameover-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none;">
+    <button id="gameover-stats-btn" class="overlay-btn stats-btn" style="pointer-events: auto;">📊 Stats</button>
+    <button id="gameover-continue-btn" class="overlay-btn continue-btn" style="pointer-events: auto;">➡️ Continue</button>
+</div>
 
 <!-- Game History Modal -->
 <div id="history-modal">
@@ -901,6 +954,35 @@
             historyModal.classList.remove('open');
         }
     });
+    
+    // Halftime and Game Over overlay buttons
+    const halftimeOverlay = document.getElementById('halftime-overlay');
+    const gameoverOverlay = document.getElementById('gameover-overlay');
+    const halftimeStatsBtn = document.getElementById('halftime-stats-btn');
+    const halftimeContinueBtn = document.getElementById('halftime-continue-btn');
+    const gameoverStatsBtn = document.getElementById('gameover-stats-btn');
+    const gameoverContinueBtn = document.getElementById('gameover-continue-btn');
+    
+    halftimeStatsBtn.addEventListener('click', () => {
+        showStatsModal(true);
+    });
+    
+    halftimeContinueBtn.addEventListener('click', () => {
+        startSecondHalf();
+    });
+    
+    gameoverStatsBtn.addEventListener('click', () => {
+        showStatsModal(false);
+    });
+    
+    gameoverContinueBtn.addEventListener('click', () => {
+        settingsModal.classList.add('open');
+    });
+    
+    function updateOverlays() {
+        halftimeOverlay.style.display = isHalftime ? 'block' : 'none';
+        gameoverOverlay.style.display = isGameOver ? 'block' : 'none';
+    }
     
     // Player stats
     const players = {
@@ -1864,57 +1946,15 @@
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText('Sides will swap for 2nd half', width / 2, height / 2 + 65);
-        
-        // Draw buttons
-        const buttonY = height / 2 + 95;
-        const buttonHeight = 44;
-        const buttonWidth = 130;
-        const buttonGap = 20;
-        
-        // Stats button
-        const statsX = width / 2 - buttonWidth - buttonGap / 2;
-        halftimeButtons.stats = { x: statsX, y: buttonY, width: buttonWidth, height: buttonHeight };
-        
-        ctx.fillStyle = 'rgba(255,215,0,0.2)';
-        ctx.beginPath();
-        ctx.roundRect(statsX, buttonY, buttonWidth, buttonHeight, 10);
-        ctx.fill();
-        ctx.strokeStyle = '#ffd700';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        ctx.fillStyle = '#ffd700';
-        ctx.font = 'bold 18px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🔢 Stats', statsX + buttonWidth / 2, buttonY + buttonHeight / 2);
-        
-        // Continue button
-        const continueX = width / 2 + buttonGap / 2;
-        halftimeButtons.continue = { x: continueX, y: buttonY, width: buttonWidth, height: buttonHeight };
-        
-        ctx.fillStyle = 'rgba(0,255,136,0.2)';
-        ctx.beginPath();
-        ctx.roundRect(continueX, buttonY, buttonWidth, buttonHeight, 10);
-        ctx.fill();
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        ctx.fillStyle = '#00ff88';
-        ctx.font = 'bold 18px Arial';
-        ctx.fillText('▶ Continue', continueX + buttonWidth / 2, buttonY + buttonHeight / 2);
     }
     
     // Button hit areas for game over screen
     let gameOverButtons = {
-        stats: { x: 0, y: 0, width: 0, height: 0 },
         playAgain: { x: 0, y: 0, width: 0, height: 0 }
     };
     
     // Button hit areas for halftime screen
     let halftimeButtons = {
-        stats: { x: 0, y: 0, width: 0, height: 0 },
         continue: { x: 0, y: 0, width: 0, height: 0 }
     };
     
@@ -1984,46 +2024,6 @@
         const settingsY = 270;
         const settingsText = `${currentSpeed.toFixed(1)}x speed  •  ${currentShotClockSeconds}s shot clock  •  ${formatTime(currentHalfLength)} halves  •  ${currentBounce.toFixed(2)} bounce`;
         ctx.fillText(settingsText, width / 2, settingsY);
-        
-        // Draw buttons
-        const buttonY = 310;
-        const buttonHeight = 44;
-        const buttonWidth = 130;
-        const buttonGap = 20;
-        
-        // Stats button
-        const statsX = width / 2 - buttonWidth - buttonGap / 2;
-        gameOverButtons.stats = { x: statsX, y: buttonY, width: buttonWidth, height: buttonHeight };
-        
-        ctx.fillStyle = 'rgba(255,215,0,0.2)';
-        ctx.beginPath();
-        ctx.roundRect(statsX, buttonY, buttonWidth, buttonHeight, 10);
-        ctx.fill();
-        ctx.strokeStyle = '#ffd700';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        ctx.fillStyle = '#ffd700';
-        ctx.font = 'bold 18px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🔢 Stats', statsX + buttonWidth / 2, buttonY + buttonHeight / 2);
-        
-        // Continue button (opens settings)
-        const playX = width / 2 + buttonGap / 2;
-        gameOverButtons.playAgain = { x: playX, y: buttonY, width: buttonWidth, height: buttonHeight };
-        
-        ctx.fillStyle = 'rgba(0,255,136,0.2)';
-        ctx.beginPath();
-        ctx.roundRect(playX, buttonY, buttonWidth, buttonHeight, 10);
-        ctx.fill();
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        ctx.fillStyle = '#00ff88';
-        ctx.font = 'bold 18px Arial';
-        ctx.fillText('➡️ Continue', playX + buttonWidth / 2, buttonY + buttonHeight / 2);
     }
     
     function drawBackboard(hoop) {
@@ -2337,35 +2337,7 @@
             return;
         }
         
-        if (isHalftime) {
-            // Check if stats button was clicked
-            if (isPointInRect(pos.x, pos.y, halftimeButtons.stats)) {
-                showStatsModal(true); // true = halftime mode
-                return;
-            }
-            // Check if continue button was clicked
-            if (isPointInRect(pos.x, pos.y, halftimeButtons.continue)) {
-                startSecondHalf();
-                return;
-            }
-            // Don't do anything if clicking elsewhere on halftime screen
-            return;
-        }
-        
-        if (isGameOver) {
-            // Check if stats button was clicked
-            if (isPointInRect(pos.x, pos.y, gameOverButtons.stats)) {
-                showStatsModal(false); // false = game over mode
-                return;
-            }
-            // Check if continue button was clicked - opens settings
-            if (isPointInRect(pos.x, pos.y, gameOverButtons.playAgain)) {
-                settingsModal.classList.add('open');
-                return;
-            }
-            // Don't do anything if clicking elsewhere on game over screen
-            return;
-        }
+        // Halftime and game over buttons are now HTML elements, no canvas click handling needed
     }
     
     canvas.addEventListener('click', handleCanvasClick);
@@ -2374,6 +2346,7 @@
         update();
         draw();
         updateTopPanel();
+        updateOverlays();
         if (!gameStarted) {
             drawStartScreen();
         }
