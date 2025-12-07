@@ -1223,6 +1223,11 @@
     canvas.addEventListener('touchmove', onMove);
     canvas.addEventListener('touchend', (e) => {
         e.preventDefault();
+        // During halftime or game over, always handle as button click
+        if (isHalftime || isGameOver || !gameStarted) {
+            handleCanvasClick(e);
+            return;
+        }
         // Handle shooting if dragging
         if (isDragging) {
             onEnd(e);
@@ -1530,9 +1535,13 @@
                 if (currentHalf === 1) {
                     isHalftime = true;
                     shotClockActive = false;
+                    isDragging = false;
+                    dragPoints = [];
                 } else {
                     isGameOver = true;
                     shotClockActive = false;
+                    isDragging = false;
+                    dragPoints = [];
                     // Save game to history
                     saveGameToHistory();
                 }
