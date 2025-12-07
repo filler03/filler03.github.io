@@ -1146,7 +1146,6 @@
     }
     
     function onEnd(e) {
-        e.preventDefault();
         if (!isDragging) return;
         isDragging = false;
         
@@ -1222,7 +1221,16 @@
     canvas.addEventListener('mouseleave', onEnd);
     canvas.addEventListener('touchstart', onStart);
     canvas.addEventListener('touchmove', onMove);
-    canvas.addEventListener('touchend', onEnd);
+    canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        // Handle shooting if dragging
+        if (isDragging) {
+            onEnd(e);
+        } else {
+            // Handle button clicks if not dragging
+            handleCanvasClick(e);
+        }
+    });
     
     // Collision detection
     let lastBallY = 0;
@@ -2352,11 +2360,6 @@
     }
     
     canvas.addEventListener('click', handleCanvasClick);
-    canvas.addEventListener('touchend', (e) => {
-        // Prevent duplicate handling from touchstart
-        if (e.cancelable) e.preventDefault();
-        handleCanvasClick(e);
-    });
     
     function gameLoop() {
         update();
