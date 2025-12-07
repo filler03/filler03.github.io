@@ -630,7 +630,7 @@
             <button class="game-btn" id="reset-game-btn">▶️ Start Game</button>
             <button class="game-btn" id="reset-defaults-btn" style="background: linear-gradient(135deg, #888 0%, #555 100%); color: white;">↩️ Reset to Defaults</button>
             <button class="game-btn" id="view-history-btn" style="background: linear-gradient(135deg, #4a9eff 0%, #2a7ed8 100%); color: white;">📜 Game History</button>
-            <div class="version-text">Version 3.3</div>
+            <div class="version-text">Version 3.3.1</div>
         </div>
     </div>
 
@@ -1515,6 +1515,7 @@
                         initialDrop = false;
                         shotClockActive = true;
                         lastClockUpdate = Date.now();
+                        lastGameTimerUpdate = Date.now();
                     } else if (!waitingForNextTurn) {
                         waitingForNextTurn = true;
                         setTimeout(switchTurn, 800);
@@ -1596,7 +1597,7 @@
             }
         }
         
-        if (gameStarted && !isHalftime && !isGameOver) {
+        if (gameStarted && !isHalftime && !isGameOver && !initialDrop) {
             var now = Date.now();
             var elapsed = (now - lastGameTimerUpdate) / 1000;
             if (elapsed >= 1) {
