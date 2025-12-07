@@ -254,290 +254,297 @@
             text-align: center;
             pointer-events: none;
         }
-        #stats-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.9);
-            z-index: 200;
-            align-items: center;
-            justify-content: center;
-        }
-        #stats-modal.open {
-            display: flex;
-        }
-        .stats-content {
-            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
-            padding: 20px;
-            border-radius: 20px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 85vh;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.1);
-            display: flex;
-            flex-direction: column;
-        }
-        .stats-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            flex-shrink: 0;
-        }
-        .stats-header h2 {
-            color: #ffd700;
-            margin: 0;
-            font-size: 22px;
-        }
-        .stats-summary {
-            display: flex;
-            justify-content: space-around;
-            margin-bottom: 15px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            flex-shrink: 0;
-        }
-        .player-summary {
-            text-align: center;
-        }
-        .player-summary h3 {
-            font-size: 14px;
-            margin-bottom: 5px;
-        }
-        .player-summary.p1 h3 { color: #ff6b6b; }
-        .player-summary.p2 h3 { color: #4a9eff; }
-        .player-summary .big-score {
-            font-size: 32px;
-            font-weight: bold;
-            color: #ffd700;
-        }
-        .player-summary .stat-line {
-            font-size: 12px;
-            color: rgba(255,255,255,0.7);
-            margin-top: 3px;
-        }
-        .shot-log-container {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-        }
-        .shot-log-title {
-            color: rgba(255,255,255,0.9);
-            font-size: 14px;
-            margin-bottom: 10px;
-            position: sticky;
-            top: 0;
-            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
-            padding: 5px 0;
-        }
-        .shot-entry {
-            background: rgba(255,255,255,0.05);
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 8px;
-            border-left: 3px solid;
-        }
-        .shot-entry.p1 { border-left-color: #ff6b6b; }
-        .shot-entry.p2 { border-left-color: #4a9eff; }
-        .shot-entry.scored { background: rgba(255,215,0,0.1); }
-        .shot-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 5px;
-        }
-        .shot-player {
-            font-weight: bold;
-            font-size: 13px;
-        }
-        .shot-entry.p1 .shot-player { color: #ff6b6b; }
-        .shot-entry.p2 .shot-player { color: #4a9eff; }
-        .shot-result {
-            font-weight: bold;
-            font-size: 14px;
-        }
-        .shot-result.made { color: #00ff88; }
-        .shot-result.missed { color: #ff4444; }
-        .shot-details {
-            font-size: 11px;
-            color: rgba(255,255,255,0.6);
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 3px;
-        }
-        .stats-footer {
-            margin-top: 15px;
-            flex-shrink: 0;
-        }
-        .stats-footer .game-btn {
-            margin-top: 0;
-        }
-        .no-shots {
-            color: rgba(255,255,255,0.5);
-            text-align: center;
-            padding: 20px;
-            font-style: italic;
-        }
-        #history-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.9);
-            z-index: 200;
-            align-items: center;
-            justify-content: center;
-        }
-        #history-modal.open {
-            display: flex;
-        }
-        .history-content {
-            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
-            padding: 20px;
-            border-radius: 20px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 85vh;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.1);
-            display: flex;
-            flex-direction: column;
-        }
-        .history-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            flex-shrink: 0;
-        }
-        .history-header h2 {
-            color: #ffd700;
-            margin: 0;
-            font-size: 22px;
-        }
-        .history-list-container {
-            flex: 1;
-            overflow-y: auto;
-            min-height: 0;
-        }
-        .history-entry {
-            background: rgba(255,255,255,0.05);
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .history-entry:hover {
-            background: rgba(255,255,255,0.1);
-        }
-        .history-entry-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .history-date {
-            color: rgba(255,255,255,0.6);
-            font-size: 12px;
-        }
-        .history-winner {
-            font-size: 12px;
-            font-weight: bold;
-            padding: 2px 8px;
-            border-radius: 10px;
-        }
-        .history-winner.p1 {
-            background: rgba(255,107,107,0.3);
-            color: #ff6b6b;
-        }
-        .history-winner.p2 {
-            background: rgba(74,158,255,0.3);
-            color: #4a9eff;
-        }
-        .history-winner.tie {
-            background: rgba(255,215,0,0.3);
-            color: #ffd700;
-        }
-        .history-scores {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            font-size: 18px;
-            font-weight: bold;
-        }
-        .history-scores .p1-score { color: #ff6b6b; }
-        .history-scores .p2-score { color: #4a9eff; }
-        .history-scores .vs { color: rgba(255,255,255,0.4); font-size: 14px; }
-        .history-details {
-            font-size: 11px;
-            color: rgba(255,255,255,0.5);
-            margin-top: 6px;
-            text-align: center;
-        }
-        .no-history {
-            color: rgba(255,255,255,0.5);
-            text-align: center;
-            padding: 40px 20px;
-            font-style: italic;
-        }
-        .overlay-btn {
-            position: absolute;
-            padding: 12px 24px;
-            border: 2px solid;
-            border-radius: 10px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .overlay-btn:hover {
-            transform: scale(1.05);
-        }
-        .overlay-btn.stats-btn {
-            background: rgba(255,215,0,0.3);
-            border-color: #ffd700;
-            color: #ffd700;
-        }
-        .overlay-btn.continue-btn {
-            background: rgba(0,255,136,0.3);
-            border-color: #00ff88;
-            color: #00ff88;
-        }
-        #halftime-stats-btn, #gameover-stats-btn {
-            left: 50%;
-            transform: translateX(calc(-50% - 85px));
-            top: calc(50% + 95px);
-        }
-        #halftime-continue-btn, #gameover-continue-btn {
-            left: 50%;
-            transform: translateX(calc(-50% + 85px));
-            top: calc(50% + 95px);
-        }
-        #halftime-stats-btn:hover, #gameover-stats-btn:hover {
-            transform: translateX(calc(-50% - 85px)) scale(1.05);
-            box-shadow: 0 0 15px rgba(255,215,0,0.5);
-        }
-        #halftime-continue-btn:hover, #gameover-continue-btn:hover {
-            transform: translateX(calc(-50% + 85px)) scale(1.05);
-            box-shadow: 0 0 15px rgba(0,255,136,0.5);
-        }
-        .history-footer {
-            margin-top: 15px;
-            flex-shrink: 0;
-            display: flex;
-            gap: 10px;
-        }
-        .history-footer .game-btn {
-            margin-top: 0;
-        }
-    </style>
+
+```
+    /* Stats Modal Styles */
+    #stats-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.9);
+        z-index: 200;
+        align-items: center;
+        justify-content: center;
+    }
+    #stats-modal.open {
+        display: flex;
+    }
+    .stats-content {
+        background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
+        padding: 20px;
+        border-radius: 20px;
+        width: 90%;
+        max-width: 500px;
+        max-height: 85vh;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        border: 1px solid rgba(255,255,255,0.1);
+        display: flex;
+        flex-direction: column;
+    }
+    .stats-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        flex-shrink: 0;
+    }
+    .stats-header h2 {
+        color: #ffd700;
+        margin: 0;
+        font-size: 22px;
+    }
+    .stats-summary {
+        display: flex;
+        justify-content: space-around;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        flex-shrink: 0;
+    }
+    .player-summary {
+        text-align: center;
+    }
+    .player-summary h3 {
+        font-size: 14px;
+        margin-bottom: 5px;
+    }
+    .player-summary.p1 h3 { color: #ff6b6b; }
+    .player-summary.p2 h3 { color: #4a9eff; }
+    .player-summary .big-score {
+        font-size: 32px;
+        font-weight: bold;
+        color: #ffd700;
+    }
+    .player-summary .stat-line {
+        font-size: 12px;
+        color: rgba(255,255,255,0.7);
+        margin-top: 3px;
+    }
+    .shot-log-container {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+    .shot-log-title {
+        color: rgba(255,255,255,0.9);
+        font-size: 14px;
+        margin-bottom: 10px;
+        position: sticky;
+        top: 0;
+        background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
+        padding: 5px 0;
+    }
+    .shot-entry {
+        background: rgba(255,255,255,0.05);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+        border-left: 3px solid;
+    }
+    .shot-entry.p1 { border-left-color: #ff6b6b; }
+    .shot-entry.p2 { border-left-color: #4a9eff; }
+    .shot-entry.scored { background: rgba(255,215,0,0.1); }
+    .shot-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+    .shot-player {
+        font-weight: bold;
+        font-size: 13px;
+    }
+    .shot-entry.p1 .shot-player { color: #ff6b6b; }
+    .shot-entry.p2 .shot-player { color: #4a9eff; }
+    .shot-result {
+        font-weight: bold;
+        font-size: 14px;
+    }
+    .shot-result.made { color: #00ff88; }
+    .shot-result.missed { color: #ff4444; }
+    .shot-details {
+        font-size: 11px;
+        color: rgba(255,255,255,0.6);
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 3px;
+    }
+    .stats-footer {
+        margin-top: 15px;
+        flex-shrink: 0;
+    }
+    .stats-footer .game-btn {
+        margin-top: 0;
+    }
+    .no-shots {
+        color: rgba(255,255,255,0.5);
+        text-align: center;
+        padding: 20px;
+        font-style: italic;
+    }
+    
+    /* Game History Modal Styles */
+    #history-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.9);
+        z-index: 200;
+        align-items: center;
+        justify-content: center;
+    }
+    #history-modal.open {
+        display: flex;
+    }
+    .history-content {
+        background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
+        padding: 20px;
+        border-radius: 20px;
+        width: 90%;
+        max-width: 500px;
+        max-height: 85vh;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        border: 1px solid rgba(255,255,255,0.1);
+        display: flex;
+        flex-direction: column;
+    }
+    .history-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        flex-shrink: 0;
+    }
+    .history-header h2 {
+        color: #ffd700;
+        margin: 0;
+        font-size: 22px;
+    }
+    .history-list-container {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+    .history-entry {
+        background: rgba(255,255,255,0.05);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .history-entry:hover {
+        background: rgba(255,255,255,0.1);
+    }
+    .history-entry-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .history-date {
+        color: rgba(255,255,255,0.6);
+        font-size: 12px;
+    }
+    .history-winner {
+        font-size: 12px;
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 10px;
+    }
+    .history-winner.p1 {
+        background: rgba(255,107,107,0.3);
+        color: #ff6b6b;
+    }
+    .history-winner.p2 {
+        background: rgba(74,158,255,0.3);
+        color: #4a9eff;
+    }
+    .history-winner.tie {
+        background: rgba(255,215,0,0.3);
+        color: #ffd700;
+    }
+    .history-scores {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        font-size: 18px;
+        font-weight: bold;
+    }
+    .history-scores .p1-score { color: #ff6b6b; }
+    .history-scores .p2-score { color: #4a9eff; }
+    .history-scores .vs { color: rgba(255,255,255,0.4); font-size: 14px; }
+    .history-details {
+        font-size: 11px;
+        color: rgba(255,255,255,0.5);
+        margin-top: 6px;
+        text-align: center;
+    }
+    .no-history {
+        color: rgba(255,255,255,0.5);
+        text-align: center;
+        padding: 40px 20px;
+        font-style: italic;
+    }
+    .overlay-btn {
+        position: absolute;
+        padding: 12px 24px;
+        border: 2px solid;
+        border-radius: 10px;
+        font-size: 18px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .overlay-btn:hover {
+        transform: scale(1.05);
+    }
+    .overlay-btn.stats-btn {
+        background: rgba(255,215,0,0.3);
+        border-color: #ffd700;
+        color: #ffd700;
+    }
+    .overlay-btn.continue-btn {
+        background: rgba(0,255,136,0.3);
+        border-color: #00ff88;
+        color: #00ff88;
+    }
+    #halftime-stats-btn, #gameover-stats-btn {
+        left: 50%;
+        transform: translateX(calc(-50% - 85px));
+        top: calc(50% + 95px);
+    }
+    #halftime-continue-btn, #gameover-continue-btn {
+        left: 50%;
+        transform: translateX(calc(-50% + 85px));
+        top: calc(50% + 95px);
+    }
+    #halftime-stats-btn:hover, #gameover-stats-btn:hover {
+        transform: translateX(calc(-50% - 85px)) scale(1.05);
+        box-shadow: 0 0 15px rgba(255,215,0,0.5);
+    }
+    #halftime-continue-btn:hover, #gameover-continue-btn:hover {
+        transform: translateX(calc(-50% + 85px)) scale(1.05);
+        box-shadow: 0 0 15px rgba(0,255,136,0.5);
+    }
+    .history-footer {
+        margin-top: 15px;
+        flex-shrink: 0;
+        display: flex;
+        gap: 10px;
+    }
+    .history-footer .game-btn {
+        margin-top: 0;
+    }
+</style>
+```
+
 </head>
 <body>
     <canvas id="game"></canvas>
@@ -618,88 +625,110 @@
             <button class="game-btn" id="reset-game-btn">▶️ Start Game</button>
             <button class="game-btn" id="reset-defaults-btn" style="background: linear-gradient(135deg, #888 0%, #555 100%); color: white;">↩️ Reset to Defaults</button>
             <button class="game-btn" id="view-history-btn" style="background: linear-gradient(135deg, #4a9eff 0%, #2a7ed8 100%); color: white;">📜 Game History</button>
-            <div class="version-text">Version 3.2.1</div>
+            <div class="version-text">Version 3.2</div>
         </div>
     </div>
-    <div id="stats-modal">
-        <div class="stats-content">
-            <div class="stats-header">
-                <h2>📊 Game Stats</h2>
-                <button class="close-btn" id="stats-close-btn">&times;</button>
-            </div>
-            <div class="stats-summary">
-                <div class="player-summary p1">
-                    <h3 id="stats-p1-name">Player 1</h3>
-                    <div class="big-score" id="stats-p1-score">0</div>
-                    <div class="stat-line" id="stats-p1-line">0/0 (0%)</div>
-                </div>
-                <div class="player-summary p2">
-                    <h3 id="stats-p2-name">Player 2</h3>
-                    <div class="big-score" id="stats-p2-score">0</div>
-                    <div class="stat-line" id="stats-p2-line">0/0 (0%)</div>
-                </div>
-            </div>
-            <div class="shot-log-container">
-                <div class="shot-log-title">Shot-by-Shot Log</div>
-                <div id="shot-log"></div>
-            </div>
-            <div class="stats-footer">
-                <button class="game-btn" id="play-again-btn">🔄 Play Again</button>
-            </div>
-        </div>
-    </div>
-    <div id="instructions">Swipe anywhere to shoot! 🏀</div>
-    <div id="halftime-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none;">
-        <button id="halftime-stats-btn" class="overlay-btn stats-btn" style="pointer-events: auto;">📊 Stats</button>
-        <button id="halftime-continue-btn" class="overlay-btn continue-btn" style="pointer-events: auto;">▶ Continue</button>
-    </div>
-    <div id="gameover-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none;">
-        <button id="gameover-stats-btn" class="overlay-btn stats-btn" style="pointer-events: auto;">📊 Stats</button>
-        <button id="gameover-continue-btn" class="overlay-btn continue-btn" style="pointer-events: auto;">➡️ Continue</button>
-    </div>
-    <div id="history-modal">
-        <div class="history-content">
-            <div class="history-header">
-                <h2>📜 Game History</h2>
-                <button class="close-btn" id="history-close-btn">&times;</button>
-            </div>
-            <div class="history-list-container">
-                <div id="history-list"></div>
-            </div>
-            <div class="history-footer">
-                <button class="game-btn" id="history-back-btn">← Back</button>
-            </div>
-        </div>
-    </div>
-    <script>
-        // Polyfill for roundRect (iOS compatibility)
-        if (!CanvasRenderingContext2D.prototype.roundRect) {
-            CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
-                if (w < 2 * r) r = w / 2;
-                if (h < 2 * r) r = h / 2;
-                this.moveTo(x + r, y);
-                this.arcTo(x + w, y, x + w, y + h, r);
-                this.arcTo(x + w, y + h, x, y + h, r);
-                this.arcTo(x, y + h, x, y, r);
-                this.arcTo(x, y, x + w, y, r);
-                this.closePath();
-                return this;
-            };
-        }
 
 ```
+<!-- Stats Modal -->
+<div id="stats-modal">
+    <div class="stats-content">
+        <div class="stats-header">
+            <h2>📊 Game Stats</h2>
+            <button class="close-btn" id="stats-close-btn">&times;</button>
+        </div>
+        <div class="stats-summary">
+            <div class="player-summary p1">
+                <h3 id="stats-p1-name">Player 1</h3>
+                <div class="big-score" id="stats-p1-score">0</div>
+                <div class="stat-line" id="stats-p1-line">0/0 (0%)</div>
+            </div>
+            <div class="player-summary p2">
+                <h3 id="stats-p2-name">Player 2</h3>
+                <div class="big-score" id="stats-p2-score">0</div>
+                <div class="stat-line" id="stats-p2-line">0/0 (0%)</div>
+            </div>
+        </div>
+        <div class="shot-log-container">
+            <div class="shot-log-title">Shot-by-Shot Log</div>
+            <div id="shot-log"></div>
+        </div>
+        <div class="stats-footer">
+            <button class="game-btn" id="play-again-btn">🔄 Play Again</button>
+        </div>
+    </div>
+</div>
+
+<div id="instructions">Swipe anywhere to shoot! 🏀</div>
+
+<!-- Halftime Overlay Buttons -->
+<div id="halftime-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none;">
+    <button id="halftime-stats-btn" class="overlay-btn stats-btn" style="pointer-events: auto;">📊 Stats</button>
+    <button id="halftime-continue-btn" class="overlay-btn continue-btn" style="pointer-events: auto;">▶ Continue</button>
+</div>
+
+<!-- Game Over Overlay Buttons -->
+<div id="gameover-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none;">
+    <button id="gameover-stats-btn" class="overlay-btn stats-btn" style="pointer-events: auto;">📊 Stats</button>
+    <button id="gameover-continue-btn" class="overlay-btn continue-btn" style="pointer-events: auto;">➡️ Continue</button>
+</div>
+
+<!-- Game History Modal -->
+<div id="history-modal">
+    <div class="history-content">
+        <div class="history-header">
+            <h2>📜 Game History</h2>
+            <button class="close-btn" id="history-close-btn">&times;</button>
+        </div>
+        <div class="history-list-container">
+            <div id="history-list"></div>
+        </div>
+        <div class="history-footer">
+            <button class="game-btn" id="history-back-btn">← Back</button>
+        </div>
+    </div>
+</div>
+```
+
+<script>
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     
     let width, height;
     
-    const hoopLeft = { x: 0, y: 0, width: 60, rimRadius: 5, netHeight: 30, side: 'left' };
-    const hoopRight = { x: 0, y: 0, width: 60, rimRadius: 5, netHeight: 30, side: 'right' };
+    // Hoops (one on each side) - define before resize
+    const hoopLeft = {
+        x: 0,
+        y: 0,
+        width: 60,
+        rimRadius: 5,
+        netHeight: 30,
+        side: 'left'
+    };
     
+    const hoopRight = {
+        x: 0,
+        y: 0,
+        width: 60,
+        rimRadius: 5,
+        netHeight: 30,
+        side: 'right'
+    };
+    
+    // Debug mode
     let debugMode = localStorage.getItem('basketball2p_debug') === 'true';
     
-    function debugLog(...args) { if (debugMode) console.log('[DEBUG]', ...args); }
-    function debugError(...args) { if (debugMode) console.error('[ERROR]', ...args); }
+    function debugLog(...args) {
+        if (debugMode) {
+            console.log('[DEBUG]', ...args);
+        }
+    }
+    
+    function debugError(...args) {
+        if (debugMode) {
+            console.error('[ERROR]', ...args);
+        }
+    }
     
     function positionHoops() {
         hoopLeft.x = 15;
@@ -716,31 +745,45 @@
     resize();
     window.addEventListener('resize', resize);
     
+    // Settings modal
     const settingsBtn = document.getElementById('settings-btn');
     const settingsModal = document.getElementById('settings-modal');
     const closeBtn = document.querySelector('.close-btn');
     const resetGameBtn = document.getElementById('reset-game-btn');
     const speedSlider = document.getElementById('speed-slider');
     const speedValue = document.getElementById('speed-value');
+    
+    // Stats modal
     const statsModal = document.getElementById('stats-modal');
     const statsCloseBtn = document.getElementById('stats-close-btn');
     const playAgainBtn = document.getElementById('play-again-btn');
+    
+    // History modal
     const historyModal = document.getElementById('history-modal');
     const historyCloseBtn = document.getElementById('history-close-btn');
     const historyBackBtn = document.getElementById('history-back-btn');
     const viewHistoryBtn = document.getElementById('view-history-btn');
     const resetDefaultsBtn = document.getElementById('reset-defaults-btn');
     
-    const DEFAULT_SPEED = 1.1, DEFAULT_SHOT_CLOCK = 10, DEFAULT_HALF_LENGTH = 60, DEFAULT_BOUNCE = 0.7;
-    const DEFAULT_P1_NAME = 'Player 1', DEFAULT_P2_NAME = 'Player 2';
+    // Default settings values
+    const DEFAULT_SPEED = 1.1;
+    const DEFAULT_SHOT_CLOCK = 10;
+    const DEFAULT_HALF_LENGTH = 60;
+    const DEFAULT_BOUNCE = 0.7;
+    const DEFAULT_P1_NAME = 'Player 1';
+    const DEFAULT_P2_NAME = 'Player 2';
     
+    // Load saved player names
     const savedP1Name = localStorage.getItem('basketball2p_p1name');
     const savedP2Name = localStorage.getItem('basketball2p_p2name');
+    
     let p1Name = savedP1Name !== null ? savedP1Name : DEFAULT_P1_NAME;
     let p2Name = savedP2Name !== null ? savedP2Name : DEFAULT_P2_NAME;
     
+    // Game history storage
     let gameHistory = JSON.parse(localStorage.getItem('basketball2p_history') || '[]');
     
+    // Settings (pending until new game) - load from localStorage
     const savedSpeed = localStorage.getItem('basketball2p_speed');
     const savedShotClock = localStorage.getItem('basketball2p_shotclock');
     const savedHalfLength = localStorage.getItem('basketball2p_halflength');
@@ -748,15 +791,20 @@
     
     let pendingSpeed = savedSpeed !== null ? parseFloat(savedSpeed) : DEFAULT_SPEED;
     let currentSpeed = pendingSpeed;
+    
     let pendingShotClockSeconds = savedShotClock !== null ? parseInt(savedShotClock) : DEFAULT_SHOT_CLOCK;
+    
     let pendingHalfLength = savedHalfLength !== null ? parseInt(savedHalfLength) : DEFAULT_HALF_LENGTH;
     let currentHalfLength = pendingHalfLength;
+    
     let pendingBounce = savedBounce !== null ? parseFloat(savedBounce) : DEFAULT_BOUNCE;
     let currentBounce = pendingBounce;
     
+    // Update slider values from saved settings
     speedSlider.value = pendingSpeed;
     speedValue.textContent = pendingSpeed.toFixed(1) + 'x';
     
+    // Player name inputs
     const p1NameInput = document.getElementById('p1-name-input');
     const p2NameInput = document.getElementById('p2-name-input');
     p1NameInput.value = p1Name;
@@ -770,6 +818,7 @@
     
     const shotclockSlider = document.getElementById('shotclock-slider');
     const shotclockValue = document.getElementById('shotclock-value');
+    
     shotclockSlider.value = pendingShotClockSeconds;
     shotclockValue.textContent = pendingShotClockSeconds;
     
@@ -779,7 +828,7 @@
     function formatTime(seconds) {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
-        return mins + ':' + secs.toString().padStart(2, '0');
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
     
     halftimeSlider.value = pendingHalfLength;
@@ -792,6 +841,7 @@
     
     const bounceSlider = document.getElementById('bounce-slider');
     const bounceValue = document.getElementById('bounce-value');
+    
     bounceSlider.value = pendingBounce;
     bounceValue.textContent = pendingBounce.toFixed(2);
     
@@ -810,18 +860,26 @@
         speedValue.textContent = pendingSpeed.toFixed(1) + 'x';
     });
     
+    // Debug mode checkbox
     const debugCheckbox = document.getElementById('debug-checkbox');
     debugCheckbox.checked = debugMode;
+    
     debugCheckbox.addEventListener('change', (e) => {
         debugMode = e.target.checked;
         localStorage.setItem('basketball2p_debug', debugMode);
-        if (debugMode) console.log('[DEBUG] Debug mode enabled');
+        if (debugMode) {
+            console.log('[DEBUG] Debug mode enabled');
+        }
     });
     
-    settingsBtn.addEventListener('click', () => { isPaused = true; settingsModal.classList.add('open'); });
+    settingsBtn.addEventListener('click', () => {
+        isPaused = true;
+        settingsModal.classList.add('open');
+    });
     
     closeBtn.addEventListener('click', () => {
         isPaused = false;
+        // Reset the clock update times so we don't lose time while paused
         lastClockUpdate = Date.now();
         lastGameTimerUpdate = Date.now();
         settingsModal.classList.remove('open');
@@ -830,6 +888,7 @@
     settingsModal.addEventListener('click', (e) => {
         if (e.target === settingsModal) {
             isPaused = false;
+            // Reset the clock update times so we don't lose time while paused
             lastClockUpdate = Date.now();
             lastGameTimerUpdate = Date.now();
             settingsModal.classList.remove('open');
@@ -841,50 +900,95 @@
         currentShotClockSeconds = pendingShotClockSeconds;
         currentHalfLength = pendingHalfLength;
         currentBounce = pendingBounce;
+        
+        // Save player names
         p1Name = p1NameInput.value.trim() || DEFAULT_P1_NAME;
         p2Name = p2NameInput.value.trim() || DEFAULT_P2_NAME;
         localStorage.setItem('basketball2p_p1name', p1Name);
         localStorage.setItem('basketball2p_p2name', p2Name);
         updatePlayerNameDisplays();
+        
+        // Save settings to localStorage
         localStorage.setItem('basketball2p_speed', pendingSpeed);
         localStorage.setItem('basketball2p_shotclock', pendingShotClockSeconds);
         localStorage.setItem('basketball2p_halflength', pendingHalfLength);
         localStorage.setItem('basketball2p_bounce', pendingBounce);
-        if (!gameStarted) gameStarted = true;
+        
+        // Start the game if not already started
+        if (!gameStarted) {
+            gameStarted = true;
+        }
+        
         isPaused = false;
         resetGame();
         settingsModal.classList.remove('open');
     });
     
-    statsCloseBtn.addEventListener('click', () => { statsModal.classList.remove('open'); });
-    playAgainBtn.addEventListener('click', () => { statsModal.classList.remove('open'); resetGameBtn.click(); });
-    statsModal.addEventListener('click', (e) => { if (e.target === statsModal) statsModal.classList.remove('open'); });
+    // Stats modal event handlers
+    statsCloseBtn.addEventListener('click', () => {
+        statsModal.classList.remove('open');
+    });
     
-    viewHistoryBtn.addEventListener('click', () => { settingsModal.classList.remove('open'); showHistoryModal(); });
+    playAgainBtn.addEventListener('click', () => {
+        statsModal.classList.remove('open');
+        resetGameBtn.click();
+    });
+    
+    statsModal.addEventListener('click', (e) => {
+        if (e.target === statsModal) {
+            statsModal.classList.remove('open');
+        }
+    });
+    
+    // History modal event handlers
+    viewHistoryBtn.addEventListener('click', () => {
+        settingsModal.classList.remove('open');
+        showHistoryModal();
+    });
     
     resetDefaultsBtn.addEventListener('click', () => {
+        // Reset pending values to defaults
         pendingSpeed = DEFAULT_SPEED;
         pendingShotClockSeconds = DEFAULT_SHOT_CLOCK;
         pendingHalfLength = DEFAULT_HALF_LENGTH;
         pendingBounce = DEFAULT_BOUNCE;
+        
+        // Update sliders
         speedSlider.value = DEFAULT_SPEED;
         speedValue.textContent = DEFAULT_SPEED.toFixed(1) + 'x';
+        
         shotclockSlider.value = DEFAULT_SHOT_CLOCK;
         shotclockValue.textContent = DEFAULT_SHOT_CLOCK;
+        
         halftimeSlider.value = DEFAULT_HALF_LENGTH;
         halftimeValue.textContent = formatTime(DEFAULT_HALF_LENGTH);
+        
         bounceSlider.value = DEFAULT_BOUNCE;
         bounceValue.textContent = DEFAULT_BOUNCE.toFixed(2);
+        
+        // Remove saved settings from localStorage (but keep history and player names)
         localStorage.removeItem('basketball2p_speed');
         localStorage.removeItem('basketball2p_shotclock');
         localStorage.removeItem('basketball2p_halflength');
         localStorage.removeItem('basketball2p_bounce');
     });
     
-    historyCloseBtn.addEventListener('click', () => { historyModal.classList.remove('open'); });
-    historyBackBtn.addEventListener('click', () => { historyModal.classList.remove('open'); settingsModal.classList.add('open'); });
-    historyModal.addEventListener('click', (e) => { if (e.target === historyModal) historyModal.classList.remove('open'); });
+    historyCloseBtn.addEventListener('click', () => {
+        historyModal.classList.remove('open');
+    });
     
+    historyBackBtn.addEventListener('click', () => {
+        historyModal.classList.remove('open');
+        settingsModal.classList.add('open');
+    });
+    
+    historyModal.addEventListener('click', (e) => {
+        if (e.target === historyModal) {
+            historyModal.classList.remove('open');
+        }
+    });
+    
+    // Halftime and Game Over overlay buttons
     const halftimeOverlay = document.getElementById('halftime-overlay');
     const gameoverOverlay = document.getElementById('gameover-overlay');
     const halftimeStatsBtn = document.getElementById('halftime-stats-btn');
@@ -892,30 +996,52 @@
     const gameoverStatsBtn = document.getElementById('gameover-stats-btn');
     const gameoverContinueBtn = document.getElementById('gameover-continue-btn');
     
-    halftimeStatsBtn.addEventListener('click', () => { debugLog('Halftime stats button clicked'); showStatsModal(true); });
-    halftimeContinueBtn.addEventListener('click', () => { debugLog('Halftime continue button clicked'); startSecondHalf(); });
-    gameoverStatsBtn.addEventListener('click', () => { debugLog('Game over stats button clicked'); showStatsModal(false); });
-    gameoverContinueBtn.addEventListener('click', () => { debugLog('Game over continue button clicked'); settingsModal.classList.add('open'); });
+    halftimeStatsBtn.addEventListener('click', () => {
+        debugLog('Halftime stats button clicked');
+        showStatsModal(true);
+    });
+    
+    halftimeContinueBtn.addEventListener('click', () => {
+        debugLog('Halftime continue button clicked');
+        startSecondHalf();
+    });
+    
+    gameoverStatsBtn.addEventListener('click', () => {
+        debugLog('Game over stats button clicked');
+        showStatsModal(false);
+    });
+    
+    gameoverContinueBtn.addEventListener('click', () => {
+        debugLog('Game over continue button clicked');
+        settingsModal.classList.add('open');
+    });
     
     function updateOverlays() {
         halftimeOverlay.style.display = isHalftime ? 'block' : 'none';
         gameoverOverlay.style.display = isGameOver ? 'block' : 'none';
     }
     
+    // Player stats
     const players = {
         1: { score: 0, shots: 0, turnovers: 0, color: '#ff6b6b' },
         2: { score: 0, shots: 0, turnovers: 0, color: '#4a9eff' }
     };
     
+    // Detailed shot tracking
     let shotHistory = [];
     let currentShotData = null;
+    
     let currentPlayer = 1;
     let waitingForNextTurn = false;
     let initialDrop = true;
+    
+    // Shot clock - initialized after settings are loaded
     let currentShotClockSeconds = pendingShotClockSeconds;
     let shotClock = currentShotClockSeconds;
     let lastClockUpdate = Date.now();
     let shotClockActive = false;
+    
+    // Game timer and halves
     let gameTimer = currentHalfLength;
     let lastGameTimerUpdate = Date.now();
     let currentHalf = 1;
@@ -923,34 +1049,60 @@
     let isGameOver = false;
     let sidesSwapped = false;
     
-    const GRAVITY = 0.55, BOUNCE_DAMPING = 0.7, AIR_RESISTANCE = 0.997, FRICTION = 0.98;
+    // Physics constants
+    const GRAVITY = 0.55;
+    const BOUNCE_DAMPING = 0.7;
+    const AIR_RESISTANCE = 0.997;
+    const FRICTION = 0.98;
     
-    const ball = { x: 0, y: 0, vx: 0, vy: 0, radius: 18, rotation: 0, angularVel: 0, grounded: false };
+    // Ball
+    const ball = {
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        radius: 18,
+        rotation: 0,
+        angularVel: 0,
+        grounded: false
+    };
     
+    // Swipe tracking
     let isDragging = false;
     let dragStart = { x: 0, y: 0, time: 0 };
     let dragPoints = [];
+    
+    // Particles for effects
     let particles = [];
+    
+    // Score animation
     let scorePopups = [];
     let turnAnimationStart = 0;
+    
+    // Turnover animation
     let showingTurnover = false;
     let turnoverStartTime = 0;
+    
+    // Game pause state
     let isPaused = false;
     
     function showTurnIndicator() {
         const p1Stats = document.getElementById('player1-stats');
         const p2Stats = document.getElementById('player2-stats');
+        
         if (currentPlayer === 1) {
             p1Stats.classList.add('active');
             p2Stats.classList.remove('active');
+            // Trigger pulse animation
             p1Stats.classList.remove('pulse');
-            void p1Stats.offsetWidth;
+            void p1Stats.offsetWidth; // Force reflow
             p1Stats.classList.add('pulse');
         } else {
             p1Stats.classList.remove('active');
             p2Stats.classList.add('active');
+            // Trigger pulse animation
             p2Stats.classList.remove('pulse');
-            void p2Stats.offsetWidth;
+            void p2Stats.offsetWidth; // Force reflow
             p2Stats.classList.add('pulse');
         }
     }
@@ -961,13 +1113,21 @@
     }
     
     function updateTopPanel() {
+        // Update game timer
         document.getElementById('game-timer-display').textContent = formatTime(gameTimer);
+        
+        // Update half indicator
         document.getElementById('half-display').textContent = currentHalf === 1 ? '1st' : '2nd';
+        
+        // Update shot clock
         const shotClockEl = document.getElementById('shot-clock-display');
         if (shotClockActive && ball.grounded && !waitingForNextTurn) {
             shotClockEl.textContent = shotClock.toString().padStart(2, '0');
-            if (shotClock <= 3) shotClockEl.classList.add('warning');
-            else shotClockEl.classList.remove('warning');
+            if (shotClock <= 3) {
+                shotClockEl.classList.add('warning');
+            } else {
+                shotClockEl.classList.remove('warning');
+            }
         } else {
             shotClockEl.textContent = '';
             shotClockEl.classList.remove('warning');
@@ -975,49 +1135,108 @@
     }
     
     function resetBall() {
-        ball.x = width / 2; ball.y = -ball.radius; ball.vx = 0; ball.vy = 0;
-        ball.angularVel = 0; ball.grounded = false;
+        ball.x = width / 2;
+        ball.y = -ball.radius;
+        ball.vx = 0;
+        ball.vy = 0;
+        ball.angularVel = 0;
+        ball.grounded = false;
     }
     
     function dropBall() {
-        ball.x = width / 2; ball.y = height * 0.25; ball.vx = 0; ball.vy = 5 * currentSpeed;
-        ball.angularVel = 0; ball.grounded = false;
+        ball.x = width / 2;
+        ball.y = height * 0.25;
+        ball.vx = 0;
+        ball.vy = 5 * currentSpeed;
+        ball.angularVel = 0;
+        ball.grounded = false;
     }
     
     function resetGame() {
         positionHoops();
-        players[1].score = 0; players[1].shots = 0; players[1].turnovers = 0;
-        players[2].score = 0; players[2].shots = 0; players[2].turnovers = 0;
-        currentPlayer = 1; waitingForNextTurn = false; initialDrop = true;
-        shotClock = currentShotClockSeconds; lastClockUpdate = Date.now(); shotClockActive = false;
-        gameTimer = currentHalfLength; lastGameTimerUpdate = Date.now();
-        currentHalf = 1; isHalftime = false; isGameOver = false; sidesSwapped = false;
-        shotHistory = []; currentShotData = null;
-        updateStats(); dropBall(); showTurnIndicator();
+        players[1].score = 0;
+        players[1].shots = 0;
+        players[1].turnovers = 0;
+        players[2].score = 0;
+        players[2].shots = 0;
+        players[2].turnovers = 0;
+        currentPlayer = 1;
+        waitingForNextTurn = false;
+        initialDrop = true;
+        shotClock = currentShotClockSeconds;
+        lastClockUpdate = Date.now();
+        shotClockActive = false;
+        gameTimer = currentHalfLength;
+        lastGameTimerUpdate = Date.now();
+        currentHalf = 1;
+        isHalftime = false;
+        isGameOver = false;
+        sidesSwapped = false;
+        shotHistory = [];
+        currentShotData = null;
+        updateStats();
+        dropBall();
+        showTurnIndicator();
     }
     
     function startSecondHalf() {
-        currentHalf = 2; isHalftime = false; sidesSwapped = true;
-        gameTimer = currentHalfLength; lastGameTimerUpdate = Date.now();
-        currentPlayer = 2; waitingForNextTurn = false; initialDrop = true;
-        shotClock = currentShotClockSeconds; lastClockUpdate = Date.now(); shotClockActive = false;
-        dropBall(); showTurnIndicator();
+        currentHalf = 2;
+        isHalftime = false;
+        sidesSwapped = true;
+        gameTimer = currentHalfLength;
+        lastGameTimerUpdate = Date.now();
+        // Player 2 goes first in second half (opposite of first half)
+        currentPlayer = 2;
+        waitingForNextTurn = false;
+        initialDrop = true;
+        shotClock = currentShotClockSeconds;
+        lastClockUpdate = Date.now();
+        shotClockActive = false;
+        dropBall();
+        showTurnIndicator();
     }
     
     function getTargetHoop(player) {
-        if (sidesSwapped) return player === 1 ? 'left' : 'right';
-        else return player === 1 ? 'right' : 'left';
+        // Returns which hoop side the player should shoot at (opponent's hoop)
+        // First half: Left hoop is red (P1 home), right hoop is blue (P2 home)
+        // So P1 shoots at right (blue), P2 shoots at left (red)
+        // After halftime: colors swap, so targets swap too
+        if (sidesSwapped) {
+            // Second half: Left is blue (P2 home), right is red (P1 home)
+            // P1 shoots at left (blue), P2 shoots at right (red)
+            return player === 1 ? 'left' : 'right';
+        } else {
+            // First half: P1 shoots at right (blue), P2 shoots at left (red)
+            return player === 1 ? 'right' : 'left';
+        }
     }
     
-    function init() { positionHoops(); dropBall(); showTurnIndicator(); }
+    function init() {
+        positionHoops();
+        dropBall();
+        showTurnIndicator();
+    }
     
+    // Input handlers
     function getPos(e) {
         const rect = canvas.getBoundingClientRect();
         let clientX, clientY;
-        if (e.touches && e.touches.length > 0) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
-        else if (e.changedTouches && e.changedTouches.length > 0) { clientX = e.changedTouches[0].clientX; clientY = e.changedTouches[0].clientY; }
-        else { clientX = e.clientX; clientY = e.clientY; }
-        return { x: clientX - rect.left, y: clientY - rect.top };
+        
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+            clientX = e.changedTouches[0].clientX;
+            clientY = e.changedTouches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        
+        return { 
+            x: clientX - rect.left, 
+            y: clientY - rect.top 
+        };
     }
     
     function onStart(e) {
@@ -1026,7 +1245,9 @@
         if (isHalftime || isGameOver) return;
         if (waitingForNextTurn) return;
         if (showingTurnover) return;
+        
         const pos = getPos(e);
+        
         if (ball.grounded) {
             isDragging = true;
             dragStart = { x: pos.x, y: pos.y, time: Date.now() };
@@ -1037,6 +1258,7 @@
     function onMove(e) {
         e.preventDefault();
         if (!isDragging) return;
+        
         const pos = getPos(e);
         dragPoints.push({ x: pos.x, y: pos.y, time: Date.now() });
         if (dragPoints.length > 10) dragPoints.shift();
@@ -1045,42 +1267,70 @@
     function onEnd(e) {
         if (!isDragging) return;
         isDragging = false;
+        
         if (dragPoints.length >= 2) {
             const lastPoint = dragPoints[dragPoints.length - 1];
             const dx = lastPoint.x - dragStart.x;
             const dy = lastPoint.y - dragStart.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
+            
             if (dist > 10) {
                 const dirX = dx / dist;
                 const dirY = dy / dist;
+                
                 const power = Math.min(dist / 200, 1);
                 const maxSpeed = 55;
                 const speed = power * maxSpeed;
+                
+                // Track where shot was taken from
                 shotOriginX = ball.x;
                 wentThroughFromBelow = false;
+                
+                // Calculate angle in degrees
                 const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                
+                // Start tracking this shot
                 currentShotData = {
-                    player: currentPlayer, half: currentHalf, gameTime: gameTimer, shotClock: shotClock,
-                    startX: Math.round(ball.x), startY: Math.round(ball.y), angle: Math.round(angle),
-                    power: Math.round(power * 100), bounces: [], scored: false, points: 0, endX: 0, endY: 0
+                    player: currentPlayer,
+                    half: currentHalf,
+                    gameTime: gameTimer,
+                    shotClock: shotClock,
+                    startX: Math.round(ball.x),
+                    startY: Math.round(ball.y),
+                    angle: Math.round(angle),
+                    power: Math.round(power * 100),
+                    bounces: [],
+                    scored: false,
+                    points: 0,
+                    endX: 0,
+                    endY: 0
                 };
+                
                 ball.vx = dirX * speed;
                 ball.vy = dirY * speed;
+                
                 ball.angularVel = ball.vx * 0.05;
                 ball.grounded = false;
                 shotClockActive = false;
+                
                 players[currentPlayer].shots++;
                 updateStats();
+                
                 for (let i = 0; i < 5; i++) {
                     particles.push({
-                        x: ball.x, y: ball.y,
+                        x: ball.x,
+                        y: ball.y,
                         vx: -ball.vx * 0.2 + (Math.random() - 0.5) * 2,
                         vy: -ball.vy * 0.2 + (Math.random() - 0.5) * 2,
-                        life: 1, decay: 0.03, size: Math.random() * 8 + 4, color: players[currentPlayer].color
+                        life: 1,
+                        decay: 0.03,
+                        size: Math.random() * 8 + 4,
+                        color: players[currentPlayer].color
                     });
                 }
             }
         }
+        
         dragPoints = [];
     }
     
@@ -1092,22 +1342,35 @@
     canvas.addEventListener('touchmove', onMove);
     canvas.addEventListener('touchend', (e) => {
         e.preventDefault();
-        if (isHalftime || isGameOver || !gameStarted) { handleCanvasClick(e); return; }
-        if (isDragging) onEnd(e);
-        else handleCanvasClick(e);
+        // During halftime or game over, always handle as button click
+        if (isHalftime || isGameOver || !gameStarted) {
+            handleCanvasClick(e);
+            return;
+        }
+        // Handle shooting if dragging
+        if (isDragging) {
+            onEnd(e);
+        } else {
+            // Handle button clicks if not dragging
+            handleCanvasClick(e);
+        }
     });
     
+    // Collision detection
     let lastBallY = 0;
     let scoredThisShot = false;
     let shotOriginX = 0;
     let wentThroughFromBelow = false;
     
     function isThreePointer(shotX, targetHoop) {
+        // Three point line extends 1/3 of screen width from each hoop
         const threePointRadius = width / 3;
         if (targetHoop === 'left') {
+            // Player 1 shooting at left hoop (blue) - 3pt if shot from right of the arc
             const arcCenterX = hoopLeft.x + hoopLeft.width / 2;
             return shotX > arcCenterX + threePointRadius;
         } else {
+            // Player 2 shooting at right hoop (red) - 3pt if shot from left of the arc
             const arcCenterX = hoopRight.x - hoopRight.width / 2;
             return shotX < arcCenterX - threePointRadius;
         }
@@ -1116,57 +1379,101 @@
     function checkHoopCollision(hoop) {
         const rimLeftX = hoop.side === 'left' ? hoop.x : hoop.x - hoop.width;
         const rimRightX = hoop.side === 'left' ? hoop.x + hoop.width : hoop.x;
+        
         const rimLeft = { x: rimLeftX, y: hoop.y };
         const rimRight = { x: rimRightX, y: hoop.y };
+        
         [rimLeft, rimRight].forEach(rim => {
             const dx = ball.x - rim.x;
             const dy = ball.y - rim.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             const minDist = ball.radius + hoop.rimRadius;
+            
             if (dist < minDist && dist > 0) {
                 const nx = dx / dist;
                 const ny = dy / dist;
+                
                 const overlap = minDist - dist;
                 ball.x += nx * overlap;
                 ball.y += ny * overlap;
+                
                 const dot = ball.vx * nx + ball.vy * ny;
                 ball.vx = (ball.vx - 2 * dot * nx) * currentBounce;
                 ball.vy = (ball.vy - 2 * dot * ny) * currentBounce;
+                
                 ball.angularVel = ball.vx * 0.03;
+                
                 for (let i = 0; i < 3; i++) {
                     particles.push({
-                        x: rim.x, y: rim.y, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
-                        life: 1, decay: 0.05, size: Math.random() * 6 + 2, color: '#ff4444'
+                        x: rim.x,
+                        y: rim.y,
+                        vx: (Math.random() - 0.5) * 5,
+                        vy: (Math.random() - 0.5) * 5,
+                        life: 1,
+                        decay: 0.05,
+                        size: Math.random() * 6 + 2,
+                        color: '#ff4444'
                     });
                 }
             }
         });
+        
         if (!scoredThisShot) {
+            // Check if ball center is within the hoop opening
             const inHoopX = ball.x > rimLeftX && ball.x < rimRightX;
+            // Ball crossed from above to at/below hoop level
             const crossedHoopDown = lastBallY <= hoop.y && ball.y > hoop.y;
+            // Ball crossed from below to above hoop level
             const crossedHoopUp = lastBallY >= hoop.y && ball.y < hoop.y;
             const goingDown = ball.vy > 0;
             const goingUp = ball.vy < 0;
+            
+            // Check if this is the correct hoop for the current player (accounts for side swap)
             const correctHoop = hoop.side === getTargetHoop(currentPlayer);
-            if (inHoopX && crossedHoopUp && goingUp && correctHoop) wentThroughFromBelow = true;
+            
+            // Track if ball went through from below
+            if (inHoopX && crossedHoopUp && goingUp && correctHoop) {
+                wentThroughFromBelow = true;
+            }
+            
             if (inHoopX && crossedHoopDown && goingDown && correctHoop) {
                 let points;
-                if (wentThroughFromBelow) points = 1;
-                else points = isThreePointer(shotOriginX, hoop.side) ? 3 : 2;
+                if (wentThroughFromBelow) {
+                    points = 1;
+                } else {
+                    points = isThreePointer(shotOriginX, hoop.side) ? 3 : 2;
+                }
                 players[currentPlayer].score += points;
                 scoredThisShot = true;
-                if (currentShotData) { currentShotData.scored = true; currentShotData.points = points; }
+                
+                // Track score in shot data
+                if (currentShotData) {
+                    currentShotData.scored = true;
+                    currentShotData.points = points;
+                }
+                
                 updateStats();
+                
                 scorePopups.push({
                     x: hoop.side === 'left' ? hoop.x + hoop.width / 2 : hoop.x - hoop.width / 2,
-                    y: hoop.y + 60, text: '+' + points, life: 1, scale: 0.5, color: players[currentPlayer].color
+                    y: hoop.y + 60,
+                    text: `+${points}`,
+                    life: 1,
+                    scale: 0.5,
+                    color: players[currentPlayer].color
                 });
+                
                 for (let i = 0; i < 20; i++) {
                     const angle = Math.random() * Math.PI * 2;
                     const speed = Math.random() * 8 + 2;
                     particles.push({
-                        x: ball.x, y: ball.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-                        life: 1, decay: 0.02, size: Math.random() * 10 + 5,
+                        x: ball.x,
+                        y: ball.y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        life: 1,
+                        decay: 0.02,
+                        size: Math.random() * 10 + 5,
                         color: ['#ffd700', players[currentPlayer].color, '#00ff88'][Math.floor(Math.random() * 3)]
                     });
                 }
@@ -1175,8 +1482,15 @@
     }
     
     function switchTurn() {
+        // Don't switch turns if game is at halftime or over
         if (isHalftime || isGameOver) return;
-        if (isDragging) { isDragging = false; dragPoints = []; }
+        
+        // Cancel any in-progress shot setup
+        if (isDragging) {
+            isDragging = false;
+            dragPoints = [];
+        }
+        
         currentPlayer = currentPlayer === 1 ? 2 : 1;
         scoredThisShot = false;
         waitingForNextTurn = false;
@@ -1187,37 +1501,56 @@
     }
     
     function update() {
+        // Don't update if paused
         if (isPaused) return;
+        
         if (!ball.grounded) {
+            // Store previous Y position before moving
             const prevBallY = ball.y;
+            
             ball.vy += GRAVITY * currentSpeed;
             ball.vx *= Math.pow(AIR_RESISTANCE, currentSpeed);
             ball.vy *= Math.pow(AIR_RESISTANCE, currentSpeed);
+            
             ball.x += ball.vx * currentSpeed;
             ball.y += ball.vy * currentSpeed;
+            
             ball.rotation += ball.angularVel * currentSpeed;
             ball.angularVel *= 0.99;
+            
+            // Update lastBallY before collision checks
             lastBallY = prevBallY;
+            
             checkHoopCollision(hoopLeft);
             checkHoopCollision(hoopRight);
+            
             if (ball.y + ball.radius > height - 90) {
                 ball.y = height - 90 - ball.radius;
                 ball.vy *= -currentBounce;
                 ball.vx *= FRICTION;
                 ball.angularVel = ball.vx * 0.03;
+                
+                // Track bounce position
                 if (currentShotData && Math.abs(ball.vy) > 1) {
-                    currentShotData.bounces.push({ x: Math.round(ball.x), y: Math.round(ball.y) });
+                    currentShotData.bounces.push({
+                        x: Math.round(ball.x),
+                        y: Math.round(ball.y)
+                    });
                 }
+                
                 if (Math.abs(ball.vy) < 1 && Math.abs(ball.vx) < 0.5) {
                     ball.grounded = true;
                     ball.vx = 0;
                     ball.vy = 0;
+                    
+                    // Finalize shot data
                     if (currentShotData) {
                         currentShotData.endX = Math.round(ball.x);
                         currentShotData.endY = Math.round(ball.y);
                         shotHistory.push(currentShotData);
                         currentShotData = null;
                     }
+                    
                     if (initialDrop) {
                         initialDrop = false;
                         shotClockActive = true;
@@ -1228,17 +1561,33 @@
                     }
                 }
             }
+            
             if (ball.x - ball.radius < 0) {
                 ball.x = ball.radius;
                 ball.vx *= -currentBounce;
-                if (currentShotData) currentShotData.bounces.push({ x: Math.round(ball.x), y: Math.round(ball.y), wall: 'left' });
+                // Track wall bounce
+                if (currentShotData) {
+                    currentShotData.bounces.push({
+                        x: Math.round(ball.x),
+                        y: Math.round(ball.y),
+                        wall: 'left'
+                    });
+                }
             }
             if (ball.x + ball.radius > width) {
                 ball.x = width - ball.radius;
                 ball.vx *= -currentBounce;
-                if (currentShotData) currentShotData.bounces.push({ x: Math.round(ball.x), y: Math.round(ball.y), wall: 'right' });
+                // Track wall bounce
+                if (currentShotData) {
+                    currentShotData.bounces.push({
+                        x: Math.round(ball.x),
+                        y: Math.round(ball.y),
+                        wall: 'right'
+                    });
+                }
             }
         }
+        
         particles = particles.filter(p => {
             p.x += p.vx * currentSpeed;
             p.y += p.vy * currentSpeed;
@@ -1246,37 +1595,61 @@
             p.life -= p.decay * currentSpeed;
             return p.life > 0;
         });
+        
         scorePopups = scorePopups.filter(s => {
             s.scale += 0.015 * currentSpeed;
             s.life -= 0.004 * currentSpeed;
             return s.life > 0;
         });
+        
+        // Update shot clock
         if (shotClockActive && ball.grounded && !isHalftime && !isGameOver) {
             const now = Date.now();
             const elapsed = (now - lastClockUpdate) / 1000;
             if (elapsed >= 1) {
                 shotClock -= Math.floor(elapsed);
                 lastClockUpdate = now;
+                
                 if (shotClock <= 0) {
                     shotClock = 0;
                     shotClockActive = false;
-                    if (isDragging) { isDragging = false; dragPoints = []; }
+                    
+                    // Cancel any in-progress shot setup
+                    if (isDragging) {
+                        isDragging = false;
+                        dragPoints = [];
+                    }
+                    
+                    // Track turnover
                     players[currentPlayer].turnovers++;
+                    
+                    // Show turnover animation
                     showingTurnover = true;
                     turnoverStartTime = Date.now();
                     waitingForNextTurn = true;
-                    setTimeout(() => { showingTurnover = false; switchTurn(); }, 1000);
+                    
+                    setTimeout(() => {
+                        showingTurnover = false;
+                        switchTurn();
+                    }, 1000);
                 }
             }
         }
+        
+        // Update game timer
         if (gameStarted && !isHalftime && !isGameOver) {
             const now = Date.now();
             const elapsed = (now - lastGameTimerUpdate) / 1000;
             if (elapsed >= 1) {
                 gameTimer -= Math.floor(elapsed);
                 lastGameTimerUpdate = now;
-                if (gameTimer <= 0) gameTimer = 0;
+                
+                if (gameTimer <= 0) {
+                    gameTimer = 0;
+                }
             }
+            
+            // Only transition when timer is 0 AND ball is grounded
             if (gameTimer <= 0 && ball.grounded) {
                 if (currentHalf === 1) {
                     debugLog('Entering halftime');
@@ -1290,6 +1663,7 @@
                     shotClockActive = false;
                     isDragging = false;
                     dragPoints = [];
+                    // Save game to history
                     saveGameToHistory();
                 }
             }
@@ -1298,140 +1672,294 @@
     
     function showStatsModal(isHalftimeMode = false) {
         debugLog('showStatsModal called, isHalftimeMode:', isHalftimeMode);
+        
+        // Update player names
         document.getElementById('stats-p1-name').textContent = p1Name;
         document.getElementById('stats-p2-name').textContent = p2Name;
+        
+        // Update summary stats
         document.getElementById('stats-p1-score').textContent = players[1].score;
         document.getElementById('stats-p2-score').textContent = players[2].score;
+        
         const p1Made = shotHistory.filter(s => s.player === 1 && s.scored).length;
         const p1Total = players[1].shots;
         const p1Pct = p1Total > 0 ? Math.round((p1Made / p1Total) * 100) : 0;
-        document.getElementById('stats-p1-line').textContent = p1Made + '/' + p1Total + ' (' + p1Pct + '%) • turnovers: ' + players[1].turnovers;
+        document.getElementById('stats-p1-line').textContent = `${p1Made}/${p1Total} (${p1Pct}%) • turnovers: ${players[1].turnovers}`;
+        
         const p2Made = shotHistory.filter(s => s.player === 2 && s.scored).length;
         const p2Total = players[2].shots;
         const p2Pct = p2Total > 0 ? Math.round((p2Made / p2Total) * 100) : 0;
-        document.getElementById('stats-p2-line').textContent = p2Made + '/' + p2Total + ' (' + p2Pct + '%) • turnovers: ' + players[2].turnovers;
-        if (isHalftimeMode) playAgainBtn.style.display = 'none';
-        else playAgainBtn.style.display = 'block';
+        document.getElementById('stats-p2-line').textContent = `${p2Made}/${p2Total} (${p2Pct}%) • turnovers: ${players[2].turnovers}`;
+        
+        // Show/hide play again button based on mode
+        if (isHalftimeMode) {
+            playAgainBtn.style.display = 'none';
+        } else {
+            playAgainBtn.style.display = 'block';
+        }
+        
+        // Build shot log
         const shotLog = document.getElementById('shot-log');
         shotLog.innerHTML = '';
+        
         if (shotHistory.length === 0) {
             shotLog.innerHTML = '<div class="no-shots">No shots taken</div>';
         } else {
             shotHistory.forEach((shot, index) => {
                 const entry = document.createElement('div');
-                entry.className = 'shot-entry p' + shot.player + (shot.scored ? ' scored' : '');
-                const pointsText = shot.scored ? (shot.points === 3 ? '3PT' : shot.points === 2 ? '2PT' : '1PT') : 'MISS';
+                entry.className = `shot-entry p${shot.player}${shot.scored ? ' scored' : ''}`;
+                
+                const pointsText = shot.scored 
+                    ? (shot.points === 3 ? '3PT' : shot.points === 2 ? '2PT' : '1PT') 
+                    : 'MISS';
+                
                 const halfText = shot.half === 1 ? '1st' : '2nd';
                 const bounceCount = shot.bounces.length;
                 const wallBounces = shot.bounces.filter(b => b.wall).length;
                 const playerName = shot.player === 1 ? p1Name : p2Name;
-                entry.innerHTML = '<div class="shot-header"><span class="shot-player">' + playerName + ' - Shot #' + (index + 1) + '</span><span class="shot-result ' + (shot.scored ? 'made' : 'missed') + '">' + pointsText + '</span></div><div class="shot-details"><span>⏱️ ' + halfText + ' ' + formatTime(shot.gameTime) + '</span><span>💪 ' + shot.power + '% power</span><span>📐 ' + shot.angle + '° angle</span><span>🏀 ' + bounceCount + ' bounce' + (bounceCount !== 1 ? 's' : '') + (wallBounces > 0 ? ' (' + wallBounces + ' wall)' : '') + '</span><span>🚀 From: (' + shot.startX + ', ' + shot.startY + ')</span><span>🎯 To: (' + shot.endX + ', ' + shot.endY + ')</span></div>';
+                
+                entry.innerHTML = `
+                    <div class="shot-header">
+                        <span class="shot-player">${playerName} - Shot #${index + 1}</span>
+                        <span class="shot-result ${shot.scored ? 'made' : 'missed'}">${pointsText}</span>
+                    </div>
+                    <div class="shot-details">
+                        <span>⏱️ ${halfText} ${formatTime(shot.gameTime)}</span>
+                        <span>💪 ${shot.power}% power</span>
+                        <span>📐 ${shot.angle}° angle</span>
+                        <span>🏀 ${bounceCount} bounce${bounceCount !== 1 ? 's' : ''}${wallBounces > 0 ? ` (${wallBounces} wall)` : ''}</span>
+                        <span>🚀 From: (${shot.startX}, ${shot.startY})</span>
+                        <span>🎯 To: (${shot.endX}, ${shot.endY})</span>
+                    </div>
+                `;
+                
                 shotLog.appendChild(entry);
             });
         }
+        
         statsModal.classList.add('open');
     }
     
     function saveGameToHistory() {
         const gameData = {
-            id: Date.now(), date: new Date().toISOString(),
-            playerNames: { 1: p1Name, 2: p2Name },
+            id: Date.now(),
+            date: new Date().toISOString(),
+            playerNames: {
+                1: p1Name,
+                2: p2Name
+            },
             players: {
                 1: { score: players[1].score, shots: players[1].shots, turnovers: players[1].turnovers },
                 2: { score: players[2].score, shots: players[2].shots, turnovers: players[2].turnovers }
             },
-            settings: { speed: currentSpeed, shotClock: currentShotClockSeconds, halfLength: currentHalfLength, bounce: currentBounce },
+            settings: {
+                speed: currentSpeed,
+                shotClock: currentShotClockSeconds,
+                halfLength: currentHalfLength,
+                bounce: currentBounce
+            },
             shotHistory: shotHistory
         };
-        gameHistory.unshift(gameData);
-        if (gameHistory.length > 50) gameHistory = gameHistory.slice(0, 50);
+        
+        gameHistory.unshift(gameData); // Add to beginning
+        
+        // Keep only last 50 games
+        if (gameHistory.length > 50) {
+            gameHistory = gameHistory.slice(0, 50);
+        }
+        
         localStorage.setItem('basketball2p_history', JSON.stringify(gameHistory));
     }
     
     function showHistoryModal(selectedGameId = null) {
         const historyList = document.getElementById('history-list');
         historyList.innerHTML = '';
+        
         if (gameHistory.length === 0) {
             historyList.innerHTML = '<div class="no-history">No games played yet.<br>Complete a game to see it here!</div>';
         } else if (selectedGameId) {
+            // Show detailed view of a specific game
             const game = gameHistory.find(g => g.id === selectedGameId);
             if (!game) return;
+            
+            // Get player names from saved game or use defaults
             const gameP1Name = game.playerNames ? game.playerNames[1] : 'Player 1';
             const gameP2Name = game.playerNames ? game.playerNames[2] : 'Player 2';
+            
             const p1Made = game.shotHistory.filter(s => s.player === 1 && s.scored).length;
             const p2Made = game.shotHistory.filter(s => s.player === 2 && s.scored).length;
             const p1Pct = game.players[1].shots > 0 ? Math.round((p1Made / game.players[1].shots) * 100) : 0;
             const p2Pct = game.players[2].shots > 0 ? Math.round((p2Made / game.players[2].shots) * 100) : 0;
             const p1TO = game.players[1].turnovers || 0;
             const p2TO = game.players[2].turnovers || 0;
-            let html = '<div style="margin-bottom: 15px;"><button class="game-btn" id="back-to-list-btn" style="padding: 8px 16px; font-size: 14px;">← Back to List</button></div><div class="stats-summary" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 15px;"><div class="player-summary p1"><h3>' + gameP1Name + '</h3><div class="big-score">' + game.players[1].score + '</div><div class="stat-line">' + p1Made + '/' + game.players[1].shots + ' (' + p1Pct + '%) • turnovers: ' + p1TO + '</div></div><div class="player-summary p2"><h3>' + gameP2Name + '</h3><div class="big-score">' + game.players[2].score + '</div><div class="stat-line">' + p2Made + '/' + game.players[2].shots + ' (' + p2Pct + '%) • turnovers: ' + p2TO + '</div></div></div><div class="shot-log-title">Shot-by-Shot Log</div>';
+            
+            let html = `
+                <div style="margin-bottom: 15px;">
+                    <button class="game-btn" id="back-to-list-btn" style="padding: 8px 16px; font-size: 14px;">← Back to List</button>
+                </div>
+                <div class="stats-summary" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 15px;">
+                    <div class="player-summary p1">
+                        <h3>${gameP1Name}</h3>
+                        <div class="big-score">${game.players[1].score}</div>
+                        <div class="stat-line">${p1Made}/${game.players[1].shots} (${p1Pct}%) • turnovers: ${p1TO}</div>
+                    </div>
+                    <div class="player-summary p2">
+                        <h3>${gameP2Name}</h3>
+                        <div class="big-score">${game.players[2].score}</div>
+                        <div class="stat-line">${p2Made}/${game.players[2].shots} (${p2Pct}%) • turnovers: ${p2TO}</div>
+                    </div>
+                </div>
+                <div class="shot-log-title">Shot-by-Shot Log</div>
+            `;
+            
             if (game.shotHistory.length === 0) {
                 html += '<div class="no-shots">No shots taken</div>';
             } else {
                 game.shotHistory.forEach((shot, index) => {
-                    const pointsText = shot.scored ? (shot.points === 3 ? '3PT' : shot.points === 2 ? '2PT' : '1PT') : 'MISS';
+                    const pointsText = shot.scored 
+                        ? (shot.points === 3 ? '3PT' : shot.points === 2 ? '2PT' : '1PT') 
+                        : 'MISS';
+                    
                     const halfText = shot.half === 1 ? '1st' : '2nd';
                     const bounceCount = shot.bounces.length;
                     const wallBounces = shot.bounces.filter(b => b.wall).length;
                     const shotPlayerName = shot.player === 1 ? gameP1Name : gameP2Name;
-                    html += '<div class="shot-entry p' + shot.player + (shot.scored ? ' scored' : '') + '"><div class="shot-header"><span class="shot-player">' + shotPlayerName + ' - Shot #' + (index + 1) + '</span><span class="shot-result ' + (shot.scored ? 'made' : 'missed') + '">' + pointsText + '</span></div><div class="shot-details"><span>⏱️ ' + halfText + ' ' + formatTime(shot.gameTime) + '</span><span>💪 ' + shot.power + '% power</span><span>📐 ' + shot.angle + '° angle</span><span>🏀 ' + bounceCount + ' bounce' + (bounceCount !== 1 ? 's' : '') + (wallBounces > 0 ? ' (' + wallBounces + ' wall)' : '') + '</span><span>🚀 From: (' + shot.startX + ', ' + shot.startY + ')</span><span>🎯 To: (' + shot.endX + ', ' + shot.endY + ')</span></div></div>';
+                    
+                    html += `
+                        <div class="shot-entry p${shot.player}${shot.scored ? ' scored' : ''}">
+                            <div class="shot-header">
+                                <span class="shot-player">${shotPlayerName} - Shot #${index + 1}</span>
+                                <span class="shot-result ${shot.scored ? 'made' : 'missed'}">${pointsText}</span>
+                            </div>
+                            <div class="shot-details">
+                                <span>⏱️ ${halfText} ${formatTime(shot.gameTime)}</span>
+                                <span>💪 ${shot.power}% power</span>
+                                <span>📐 ${shot.angle}° angle</span>
+                                <span>🏀 ${bounceCount} bounce${bounceCount !== 1 ? 's' : ''}${wallBounces > 0 ? ` (${wallBounces} wall)` : ''}</span>
+                                <span>🚀 From: (${shot.startX}, ${shot.startY})</span>
+                                <span>🎯 To: (${shot.endX}, ${shot.endY})</span>
+                            </div>
+                        </div>
+                    `;
                 });
             }
+            
             historyList.innerHTML = html;
-            document.getElementById('back-to-list-btn').addEventListener('click', () => { showHistoryModal(); });
+            
+            // Add back button handler
+            document.getElementById('back-to-list-btn').addEventListener('click', () => {
+                showHistoryModal();
+            });
         } else {
+            // Show list of all games
             gameHistory.forEach((game) => {
                 const date = new Date(game.date);
                 const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                
+                // Get player names from saved game or use defaults
                 const gameP1Name = game.playerNames ? game.playerNames[1] : 'Player 1';
                 const gameP2Name = game.playerNames ? game.playerNames[2] : 'Player 2';
+                
                 let winnerClass, winnerText;
-                if (game.players[1].score > game.players[2].score) { winnerClass = 'p1'; winnerText = gameP1Name + ' Won'; }
-                else if (game.players[2].score > game.players[1].score) { winnerClass = 'p2'; winnerText = gameP2Name + ' Won'; }
-                else { winnerClass = 'tie'; winnerText = 'Tie'; }
+                if (game.players[1].score > game.players[2].score) {
+                    winnerClass = 'p1';
+                    winnerText = `${gameP1Name} Won`;
+                } else if (game.players[2].score > game.players[1].score) {
+                    winnerClass = 'p2';
+                    winnerText = `${gameP2Name} Won`;
+                } else {
+                    winnerClass = 'tie';
+                    winnerText = 'Tie';
+                }
+                
                 const totalShots = game.players[1].shots + game.players[2].shots;
+                
                 const entry = document.createElement('div');
                 entry.className = 'history-entry';
-                entry.innerHTML = '<div class="history-entry-header"><span class="history-date">' + dateStr + '</span><span class="history-winner ' + winnerClass + '">' + winnerText + '</span></div><div class="history-scores"><span class="p1-score">' + game.players[1].score + '</span><span class="vs">vs</span><span class="p2-score">' + game.players[2].score + '</span></div><div class="history-details">' + totalShots + ' total shots • ' + formatTime(game.settings.halfLength) + ' halves</div>';
-                entry.addEventListener('click', () => { showHistoryModal(game.id); });
+                entry.innerHTML = `
+                    <div class="history-entry-header">
+                        <span class="history-date">${dateStr}</span>
+                        <span class="history-winner ${winnerClass}">${winnerText}</span>
+                    </div>
+                    <div class="history-scores">
+                        <span class="p1-score">${game.players[1].score}</span>
+                        <span class="vs">vs</span>
+                        <span class="p2-score">${game.players[2].score}</span>
+                    </div>
+                    <div class="history-details">${totalShots} total shots • ${formatTime(game.settings.halfLength)} halves</div>
+                `;
+                
+                entry.addEventListener('click', () => {
+                    showHistoryModal(game.id);
+                });
+                
                 historyList.appendChild(entry);
             });
         }
+        
         historyModal.classList.add('open');
     }
     
     function drawCourt() {
         ctx.fillStyle = '#8B4513';
         ctx.fillRect(0, height - 90, width, 40);
+        
         ctx.strokeStyle = '#a0522d';
         ctx.lineWidth = 2;
-        for (let x = 0; x < width; x += 80) { ctx.beginPath(); ctx.moveTo(x, height - 90); ctx.lineTo(x, height); ctx.stroke(); }
+        for (let x = 0; x < width; x += 80) {
+            ctx.beginPath();
+            ctx.moveTo(x, height - 90);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+        }
+        
         ctx.strokeStyle = 'rgba(255,255,255,0.2)';
         ctx.lineWidth = 3;
         ctx.setLineDash([10, 10]);
-        ctx.beginPath(); ctx.moveTo(width / 2, 0); ctx.lineTo(width / 2, height - 90); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(width / 2, 0);
+        ctx.lineTo(width / 2, height - 90);
+        ctx.stroke();
         ctx.setLineDash([]);
+        
         ctx.strokeStyle = 'rgba(255,255,255,0.15)';
         ctx.lineWidth = 3;
         const threePointRadius = width / 3;
-        ctx.beginPath(); ctx.arc(hoopLeft.x + hoopLeft.width / 2, height - 90, threePointRadius, Math.PI, 0); ctx.stroke();
-        ctx.beginPath(); ctx.arc(hoopRight.x - hoopRight.width / 2, height - 90, threePointRadius, Math.PI, 0); ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(hoopLeft.x + hoopLeft.width / 2, height - 90, threePointRadius, Math.PI, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(hoopRight.x - hoopRight.width / 2, height - 90, threePointRadius, Math.PI, 0);
+        ctx.stroke();
     }
     
-    function drawShotClock() {}
-    function drawGameTimer() {}
+    function drawShotClock() {
+        // Shot clock is now in the top panel HTML
+    }
+    
+    function drawGameTimer() {
+        // Game timer is now in the top panel HTML
+    }
     
     function drawHalftimeScreen() {
         if (!isHalftime) return;
+        
         ctx.fillStyle = 'rgba(0,0,0,0.85)';
         ctx.fillRect(0, 0, width, height);
+        
         ctx.fillStyle = '#ffd700';
         ctx.font = 'bold 48px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('HALFTIME', width / 2, height / 2 - 120);
+        
+        // Stats panel
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.fillRect(width / 2 - 150, height / 2 - 80, 300, 120);
+        ctx.beginPath();
+        ctx.roundRect(width / 2 - 150, height / 2 - 80, 300, 120, 10);
+        ctx.fill();
+        
+        // Player 1 stats
         ctx.font = 'bold 24px Arial';
         ctx.fillStyle = players[1].color;
         ctx.textAlign = 'left';
@@ -1441,7 +1969,9 @@
         ctx.fillText(players[1].score, width / 2 + 130, height / 2 - 50);
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.font = '14px Arial';
-        ctx.fillText(players[1].shots + ' shots', width / 2 + 130, height / 2 - 30);
+        ctx.fillText(`${players[1].shots} shots`, width / 2 + 130, height / 2 - 30);
+        
+        // Player 2 stats
         ctx.font = 'bold 24px Arial';
         ctx.fillStyle = players[2].color;
         ctx.textAlign = 'left';
@@ -1451,24 +1981,43 @@
         ctx.fillText(players[2].score, width / 2 + 130, height / 2);
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.font = '14px Arial';
-        ctx.fillText(players[2].shots + ' shots', width / 2 + 130, height / 2 + 20);
+        ctx.fillText(`${players[2].shots} shots`, width / 2 + 130, height / 2 + 20);
+        
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText('Sides will swap for 2nd half', width / 2, height / 2 + 65);
     }
     
+    // Button hit areas for game over screen
+    let gameOverButtons = {
+        playAgain: { x: 0, y: 0, width: 0, height: 0 }
+    };
+    
+    // Button hit areas for halftime screen
+    let halftimeButtons = {
+        continue: { x: 0, y: 0, width: 0, height: 0 }
+    };
+    
     function drawGameOverScreen() {
         if (!isGameOver) return;
+        
         ctx.fillStyle = 'rgba(0,0,0,0.9)';
         ctx.fillRect(0, 0, width, height);
+        
         ctx.fillStyle = '#ffd700';
         ctx.font = 'bold 42px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('GAME OVER', width / 2, 60);
+        
+        // Stats panel
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.fillRect(width / 2 - 150, 95, 300, 100);
+        ctx.beginPath();
+        ctx.roundRect(width / 2 - 150, 95, 300, 100, 10);
+        ctx.fill();
+        
+        // Player 1 stats
         ctx.font = 'bold 22px Arial';
         ctx.fillStyle = players[1].color;
         ctx.textAlign = 'left';
@@ -1478,7 +2027,9 @@
         ctx.fillText(players[1].score, width / 2 + 130, 125);
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.font = '12px Arial';
-        ctx.fillText(players[1].shots + ' shots', width / 2 + 130, 142);
+        ctx.fillText(`${players[1].shots} shots`, width / 2 + 130, 142);
+        
+        // Player 2 stats
         ctx.font = 'bold 22px Arial';
         ctx.fillStyle = players[2].color;
         ctx.textAlign = 'left';
@@ -1488,33 +2039,53 @@
         ctx.fillText(players[2].score, width / 2 + 130, 168);
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.font = '12px Arial';
-        ctx.fillText(players[2].shots + ' shots', width / 2 + 130, 185);
+        ctx.fillText(`${players[2].shots} shots`, width / 2 + 130, 185);
+        
+        // Show winner
         ctx.font = 'bold 26px Arial';
         ctx.textAlign = 'center';
         let winnerText;
-        if (players[1].score > players[2].score) { ctx.fillStyle = players[1].color; winnerText = '🏆 ' + p1Name + ' Wins! 🏆'; }
-        else if (players[2].score > players[1].score) { ctx.fillStyle = players[2].color; winnerText = '🏆 ' + p2Name + ' Wins! 🏆'; }
-        else { ctx.fillStyle = '#ffd700'; winnerText = "It's a Tie!"; }
+        if (players[1].score > players[2].score) {
+            ctx.fillStyle = players[1].color;
+            winnerText = `🏆 ${p1Name} Wins! 🏆`;
+        } else if (players[2].score > players[1].score) {
+            ctx.fillStyle = players[2].color;
+            winnerText = `🏆 ${p2Name} Wins! 🏆`;
+        } else {
+            ctx.fillStyle = '#ffd700';
+            winnerText = "It's a Tie!";
+        }
         ctx.fillText(winnerText, width / 2, 230);
+        
+        // Settings section - subtle horizontal layout
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
         ctx.font = '14px Arial';
         ctx.textAlign = 'center';
+        
         const settingsY = 270;
-        const settingsText = currentSpeed.toFixed(1) + 'x speed  •  ' + currentShotClockSeconds + 's shot clock  •  ' + formatTime(currentHalfLength) + ' halves  •  ' + currentBounce.toFixed(2) + ' bounce';
+        const settingsText = `${currentSpeed.toFixed(1)}x speed  •  ${currentShotClockSeconds}s shot clock  •  ${formatTime(currentHalfLength)} halves  •  ${currentBounce.toFixed(2)} bounce`;
         ctx.fillText(settingsText, width / 2, settingsY);
     }
     
     function drawBackboard(hoop) {
         const isLeft = hoop.side === 'left';
         const boardX = isLeft ? 0 : width - 10;
+        // Left hoop is Player 1's (red) home, right hoop is Player 2's (blue) home
+        // After halftime, sides swap so colors swap too
         let hoopColor;
-        if (sidesSwapped) hoopColor = isLeft ? players[2].color : players[1].color;
-        else hoopColor = isLeft ? players[1].color : players[2].color;
+        if (sidesSwapped) {
+            hoopColor = isLeft ? players[2].color : players[1].color;
+        } else {
+            hoopColor = isLeft ? players[1].color : players[2].color;
+        }
+        
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.fillRect(boardX, hoop.y - 50, 10, 75);
+        
         ctx.strokeStyle = hoopColor;
         ctx.lineWidth = 2;
         ctx.strokeRect(boardX, hoop.y - 50, 10, 75);
+        
         ctx.fillStyle = '#666';
         const poleX = isLeft ? 2 : width - 6;
         ctx.fillRect(poleX, hoop.y + 25, 5, height - hoop.y - 65);
@@ -1525,15 +2096,23 @@
         const rimLeftX = isLeft ? hoop.x : hoop.x - hoop.width;
         const rimRightX = isLeft ? hoop.x + hoop.width : hoop.x;
         const centerX = (rimLeftX + rimRightX) / 2;
+        // Left hoop is Player 1's (red) home, right hoop is Player 2's (blue) home
+        // After halftime, sides swap so colors swap too
         let hoopColor;
-        if (sidesSwapped) hoopColor = isLeft ? players[2].color : players[1].color;
-        else hoopColor = isLeft ? players[1].color : players[2].color;
+        if (sidesSwapped) {
+            hoopColor = isLeft ? players[2].color : players[1].color;
+        } else {
+            hoopColor = isLeft ? players[1].color : players[2].color;
+        }
+        
+        // Draw net - vertical strings that taper slightly but stay open at bottom
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
         ctx.lineWidth = 1;
         const netSegments = 6;
-        const bottomWidth = hoop.width * 0.5;
+        const bottomWidth = hoop.width * 0.5; // Net opening at bottom is 50% of rim width
         const bottomLeftX = centerX - bottomWidth / 2;
         const bottomRightX = centerX + bottomWidth / 2;
+        
         for (let i = 0; i <= netSegments; i++) {
             const topX = rimLeftX + (hoop.width / netSegments) * i;
             const bottomX = bottomLeftX + (bottomWidth / netSegments) * i;
@@ -1543,69 +2122,106 @@
             ctx.quadraticCurveTo(topX + wave, hoop.y + hoop.netHeight * 0.6, bottomX + wave * 0.5, hoop.y + hoop.netHeight);
             ctx.stroke();
         }
+        
+        // Draw horizontal net strings
         for (let j = 1; j <= 3; j++) {
-            const t = j / 4;
+            const t = j / 4; // Progress down the net (0.25, 0.5, 0.75)
             const rowY = hoop.y + hoop.netHeight * t;
             const rowWidth = hoop.width - (hoop.width - bottomWidth) * t;
             const rowLeftX = centerX - rowWidth / 2;
             const rowRightX = centerX + rowWidth / 2;
-            ctx.beginPath(); ctx.moveTo(rowLeftX, rowY); ctx.lineTo(rowRightX, rowY); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(rowLeftX, rowY);
+            ctx.lineTo(rowRightX, rowY);
+            ctx.stroke();
         }
+        
         ctx.fillStyle = hoopColor;
-        ctx.beginPath(); ctx.arc(rimLeftX, hoop.y, hoop.rimRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rimRightX, hoop.y, hoop.rimRadius, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(rimLeftX, hoop.y, hoop.rimRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(rimRightX, hoop.y, hoop.rimRadius, 0, Math.PI * 2);
+        ctx.fill();
+        
         ctx.strokeStyle = hoopColor;
         ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(rimLeftX, hoop.y); ctx.lineTo(rimRightX, hoop.y); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(rimLeftX, hoop.y);
+        ctx.lineTo(rimRightX, hoop.y);
+        ctx.stroke();
     }
     
     function drawAimArrow() {
         if (!isDragging || dragPoints.length < 2) return;
+        
         const lastPoint = dragPoints[dragPoints.length - 1];
         const dx = lastPoint.x - dragStart.x;
         const dy = lastPoint.y - dragStart.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
+        
         if (dist < 10) return;
+        
         const arrowLength = Math.min(dist * 1.5, 200);
         const angle = Math.atan2(dy, dx);
+        
         const endX = ball.x + Math.cos(angle) * arrowLength;
         const endY = ball.y + Math.sin(angle) * arrowLength;
+        
         const playerColor = players[currentPlayer].color;
         const gradient = ctx.createLinearGradient(ball.x, ball.y, endX, endY);
         gradient.addColorStop(0, playerColor);
         gradient.addColorStop(1, playerColor + '88');
+        
         ctx.strokeStyle = gradient;
         ctx.lineWidth = 5;
         ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(ball.x, ball.y); ctx.lineTo(endX, endY); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ball.x, ball.y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        
         const headLength = 18;
         const headAngle = 0.5;
+        
         ctx.fillStyle = playerColor;
         ctx.beginPath();
         ctx.moveTo(endX, endY);
-        ctx.lineTo(endX - headLength * Math.cos(angle - headAngle), endY - headLength * Math.sin(angle - headAngle));
-        ctx.lineTo(endX - headLength * Math.cos(angle + headAngle), endY - headLength * Math.sin(angle + headAngle));
+        ctx.lineTo(
+            endX - headLength * Math.cos(angle - headAngle),
+            endY - headLength * Math.sin(angle - headAngle)
+        );
+        ctx.lineTo(
+            endX - headLength * Math.cos(angle + headAngle),
+            endY - headLength * Math.sin(angle + headAngle)
+        );
         ctx.closePath();
         ctx.fill();
+        
         const numDots = Math.floor(arrowLength / 30);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
         for (let i = 1; i <= numDots; i++) {
             const t = i / (numDots + 1);
             const dotX = ball.x + Math.cos(angle) * arrowLength * t;
             const dotY = ball.y + Math.sin(angle) * arrowLength * t;
-            ctx.beginPath(); ctx.arc(dotX, dotY, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, 3, 0, Math.PI * 2);
+            ctx.fill();
         }
+        
         const power = Math.min(Math.round((dist / 200) * 100), 100);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.font = 'bold 16px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(power + '%', ball.x, ball.y - ball.radius - 12);
+        ctx.fillText(`${power}%`, ball.x, ball.y - ball.radius - 12);
     }
     
     function drawBallOffscreenIndicator() {
         if (ball.y + ball.radius < 0) {
             const distance = Math.abs(Math.round(ball.y));
             const indicatorX = Math.max(30, Math.min(width - 30, ball.x));
+            
+            // Draw arrow
             ctx.fillStyle = players[currentPlayer].color;
             ctx.beginPath();
             ctx.moveTo(indicatorX, 20);
@@ -1613,10 +2229,12 @@
             ctx.lineTo(indicatorX + 15, 45);
             ctx.closePath();
             ctx.fill();
+            
+            // Draw distance text
             ctx.fillStyle = 'white';
             ctx.font = 'bold 14px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(distance + 'px', indicatorX, 62);
+            ctx.fillText(`${distance}px`, indicatorX, 62);
         }
     }
     
@@ -1624,10 +2242,12 @@
         ctx.save();
         ctx.translate(ball.x, ball.y);
         ctx.rotate(ball.rotation);
-        ctx.font = (ball.radius * 2) + 'px Arial';
+        
+        ctx.font = `${ball.radius * 2}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('🏀', 0, 0);
+        
         ctx.restore();
     }
     
@@ -1646,7 +2266,7 @@
         scorePopups.forEach(s => {
             ctx.globalAlpha = s.life;
             ctx.fillStyle = s.color;
-            ctx.font = 'bold ' + Math.floor(40 * s.scale) + 'px Arial';
+            ctx.font = `bold ${Math.floor(40 * s.scale)}px Arial`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(s.text, s.x, s.y);
@@ -1656,34 +2276,56 @@
     
     function drawTurnover() {
         if (!showingTurnover) return;
+        
         const elapsed = Date.now() - turnoverStartTime;
         const duration = 1000;
         const progress = Math.min(elapsed / duration, 1);
+        
+        // Fade in for first 200ms, stay, fade out for last 200ms
         let alpha;
-        if (elapsed < 200) alpha = elapsed / 200;
-        else if (elapsed > 800) alpha = 1 - ((elapsed - 800) / 200);
-        else alpha = 1;
+        if (elapsed < 200) {
+            alpha = elapsed / 200;
+        } else if (elapsed > 800) {
+            alpha = 1 - ((elapsed - 800) / 200);
+        } else {
+            alpha = 1;
+        }
+        
+        // Scale animation - grow then shrink slightly
         let scale;
-        if (elapsed < 200) scale = 0.5 + (elapsed / 200) * 0.6;
-        else if (elapsed < 400) scale = 1.1 - ((elapsed - 200) / 200) * 0.1;
-        else scale = 1;
+        if (elapsed < 200) {
+            scale = 0.5 + (elapsed / 200) * 0.6;
+        } else if (elapsed < 400) {
+            scale = 1.1 - ((elapsed - 200) / 200) * 0.1;
+        } else {
+            scale = 1;
+        }
+        
         ctx.save();
         ctx.globalAlpha = alpha;
+        
+        // Semi-transparent background
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(width / 2 - 150, height / 2 - 50, 300, 100);
+        
+        // Text
         ctx.fillStyle = '#ff4444';
-        ctx.font = 'bold ' + Math.floor(48 * scale) + 'px Arial';
+        ctx.font = `bold ${Math.floor(48 * scale)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('TURNOVER', width / 2, height / 2);
+        
+        // Player indicator
         ctx.fillStyle = players[currentPlayer].color;
         ctx.font = '18px Arial';
-        ctx.fillText((currentPlayer === 1 ? p1Name : p2Name) + ' - Shot Clock Violation', width / 2, height / 2 + 35);
+        ctx.fillText(`${currentPlayer === 1 ? p1Name : p2Name} - Shot Clock Violation`, width / 2, height / 2 + 35);
+        
         ctx.restore();
     }
     
     function draw() {
         ctx.clearRect(0, 0, width, height);
+        
         drawCourt();
         drawBackboard(hoopLeft);
         drawBackboard(hoopRight);
@@ -1706,26 +2348,37 @@
     function drawStartScreen() {
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, width, height);
+        
         ctx.fillStyle = 'white';
         ctx.font = 'bold 36px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('🏀 Basketball with 🏀', width / 2, height / 2 - 70);
+        
         ctx.font = 'bold 52px Arial';
         ctx.fillStyle = '#ffd700';
         ctx.fillText('MALACHI', width / 2, height / 2 - 20);
+        
         ctx.font = '24px Arial';
         ctx.fillStyle = 'rgba(255,255,255,0.8)';
         ctx.fillText('Tap anywhere to begin', width / 2, height / 2 + 40);
     }
     
     function isPointInRect(x, y, rect) {
-        return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+        return x >= rect.x && x <= rect.x + rect.width &&
+               y >= rect.y && y <= rect.y + rect.height;
     }
     
     function handleCanvasClick(e) {
         const pos = getPos(e);
-        if (!gameStarted) { settingsModal.classList.add('open'); return; }
+        
+        if (!gameStarted) {
+            // Open settings modal on first tap
+            settingsModal.classList.add('open');
+            return;
+        }
+        
+        // Halftime and game over buttons are now HTML elements, no canvas click handling needed
     }
     
     canvas.addEventListener('click', handleCanvasClick);
@@ -1735,14 +2388,16 @@
         draw();
         updateTopPanel();
         updateOverlays();
-        if (!gameStarted) drawStartScreen();
+        if (!gameStarted) {
+            drawStartScreen();
+        }
         requestAnimationFrame(gameLoop);
     }
     
+    // Initialize hoops position but don't start the game
     positionHoops();
     gameLoop();
 </script>
-```
 
 </body>
 </html>
