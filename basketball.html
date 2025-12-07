@@ -672,10 +672,25 @@
         </div>
     </div>
     <script>
-        const canvas = document.getElementById('game');
-        const ctx = canvas.getContext('2d');
+        // Polyfill for roundRect (iOS compatibility)
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+                if (w < 2 * r) r = w / 2;
+                if (h < 2 * r) r = h / 2;
+                this.moveTo(x + r, y);
+                this.arcTo(x + w, y, x + w, y + h, r);
+                this.arcTo(x + w, y + h, x, y + h, r);
+                this.arcTo(x, y + h, x, y, r);
+                this.arcTo(x, y, x + w, y, r);
+                this.closePath();
+                return this;
+            };
+        }
 
 ```
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    
     let width, height;
     
     const hoopLeft = { x: 0, y: 0, width: 60, rimRadius: 5, netHeight: 30, side: 'left' };
@@ -1416,7 +1431,7 @@
         ctx.textBaseline = 'middle';
         ctx.fillText('HALFTIME', width / 2, height / 2 - 120);
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.beginPath(); ctx.roundRect(width / 2 - 150, height / 2 - 80, 300, 120, 10); ctx.fill();
+        ctx.fillRect(width / 2 - 150, height / 2 - 80, 300, 120);
         ctx.font = 'bold 24px Arial';
         ctx.fillStyle = players[1].color;
         ctx.textAlign = 'left';
@@ -1453,7 +1468,7 @@
         ctx.textBaseline = 'middle';
         ctx.fillText('GAME OVER', width / 2, 60);
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.beginPath(); ctx.roundRect(width / 2 - 150, 95, 300, 100, 10); ctx.fill();
+        ctx.fillRect(width / 2 - 150, 95, 300, 100);
         ctx.font = 'bold 22px Arial';
         ctx.fillStyle = players[1].color;
         ctx.textAlign = 'left';
