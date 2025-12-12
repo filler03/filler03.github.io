@@ -1,0 +1,1494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soccer Goal 3D</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;600&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Barlow', sans-serif;
+            overflow: hidden;
+            background: #0a1a0f;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .title {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: clamp(2rem, 5vw, 4rem);
+            color: #fff;
+            text-shadow: 0 0 30px rgba(76, 175, 80, 0.8), 0 4px 20px rgba(0,0,0,0.5);
+            letter-spacing: 0.15em;
+            text-align: center;
+        }
+        
+        .title span {
+            color: #4caf50;
+        }
+        
+        .controls-hint {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 12px 28px;
+            border-radius: 50px;
+            color: #aaa;
+            font-size: 0.9rem;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+        
+        .controls-hint strong {
+            color: #4caf50;
+        }
+        
+        .corner-accent {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border: 2px solid rgba(76, 175, 80, 0.4);
+        }
+        
+        .corner-accent.tl {
+            top: 20px;
+            left: 20px;
+            border-right: none;
+            border-bottom: none;
+        }
+        
+        .corner-accent.tr {
+            top: 20px;
+            right: 20px;
+            border-left: none;
+            border-bottom: none;
+        }
+        
+        .corner-accent.bl {
+            bottom: 20px;
+            left: 20px;
+            border-right: none;
+            border-top: none;
+        }
+        
+        .corner-accent.br {
+            bottom: 20px;
+            right: 20px;
+            border-left: none;
+            border-top: none;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 2rem;
+            color: #4caf50;
+            letter-spacing: 0.2em;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        
+        .mode-toggle {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            border-radius: 50px;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+            overflow: hidden;
+            pointer-events: auto;
+        }
+        
+        .mode-btn {
+            padding: 12px 24px;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.1rem;
+            letter-spacing: 0.1em;
+            color: #888;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mode-btn:hover {
+            color: #fff;
+        }
+        
+        .mode-btn.active {
+            color: #fff;
+            background: rgba(76, 175, 80, 0.4);
+        }
+        
+        .mode-btn:first-child {
+            border-right: 1px solid rgba(76, 175, 80, 0.3);
+        }
+        
+        .kick-stats {
+            position: absolute;
+            top: 100px;
+            left: 30px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 16px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+            color: #fff;
+            font-family: 'Barlow', sans-serif;
+            font-size: 0.9rem;
+            min-width: 180px;
+            opacity: 0;
+            transform: translateX(-20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .kick-stats.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        .kick-stats h3 {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 1.1rem;
+            color: #4caf50;
+            margin-bottom: 10px;
+            letter-spacing: 0.1em;
+        }
+        
+        .kick-stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        
+        .kick-stat-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .kick-stat-label {
+            color: #888;
+        }
+        
+        .kick-stat-value {
+            color: #4caf50;
+            font-weight: 600;
+            font-family: 'Bebas Neue', sans-serif;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div class="loading" id="loading">LOADING...</div>
+    </div>
+    
+    <div class="overlay">
+        <h1 class="title">SOCCER <span>GOAL</span></h1>
+        
+        <div class="corner-accent tl"></div>
+        <div class="corner-accent tr"></div>
+        <div class="corner-accent bl"></div>
+        <div class="corner-accent br"></div>
+        
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="kickModeBtn">KICK</button>
+            <button class="mode-btn" id="cameraModeBtn">CAMERA</button>
+        </div>
+        
+        <div class="kick-stats" id="kickStats">
+            <h3>KICK FORCE</h3>
+            <div class="kick-stat-row">
+                <span class="kick-stat-label">Power</span>
+                <span class="kick-stat-value" id="kickPower">0 m/s</span>
+            </div>
+            <div class="kick-stat-row">
+                <span class="kick-stat-label">Angle X</span>
+                <span class="kick-stat-value" id="kickAngleX">0°</span>
+            </div>
+            <div class="kick-stat-row">
+                <span class="kick-stat-label">Angle Y</span>
+                <span class="kick-stat-value" id="kickAngleY">0°</span>
+            </div>
+            <div class="kick-stat-row">
+                <span class="kick-stat-label">Velocity X</span>
+                <span class="kick-stat-value" id="kickVelX">0 m/s</span>
+            </div>
+            <div class="kick-stat-row">
+                <span class="kick-stat-label">Velocity Y</span>
+                <span class="kick-stat-value" id="kickVelY">0 m/s</span>
+            </div>
+            <div class="kick-stat-row">
+                <span class="kick-stat-label">Velocity Z</span>
+                <span class="kick-stat-value" id="kickVelZ">0 m/s</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        
+        // Camera
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(-3, 3, -14);
+        camera.lookAt(0, 1, 0);
+        
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        container.appendChild(renderer.domElement);
+        
+        // Hide loading
+        document.getElementById('loading').style.display = 'none';
+        
+        // Sky gradient
+        const skyGeo = new THREE.SphereGeometry(200, 32, 32);
+        const skyMat = new THREE.ShaderMaterial({
+            uniforms: {
+                topColor: { value: new THREE.Color(0x0a1a2e) },
+                bottomColor: { value: new THREE.Color(0x1a3a1a) },
+                offset: { value: 20 },
+                exponent: { value: 0.6 }
+            },
+            vertexShader: `
+                varying vec3 vWorldPosition;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldPosition = worldPosition.xyz;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 topColor;
+                uniform vec3 bottomColor;
+                uniform float offset;
+                uniform float exponent;
+                varying vec3 vWorldPosition;
+                void main() {
+                    float h = normalize(vWorldPosition + offset).y;
+                    gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+                }
+            `,
+            side: THREE.BackSide
+        });
+        const sky = new THREE.Mesh(skyGeo, skyMat);
+        scene.add(sky);
+        
+        // Fog
+        scene.fog = new THREE.Fog(0x1a3a1a, 30, 100);
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x4a6a4a, 0.4);
+        scene.add(ambientLight);
+        
+        const sunLight = new THREE.DirectionalLight(0xffffee, 1.2);
+        sunLight.position.set(20, 30, 10);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 1;
+        sunLight.shadow.camera.far = 100;
+        sunLight.shadow.camera.left = -30;
+        sunLight.shadow.camera.right = 30;
+        sunLight.shadow.camera.top = 30;
+        sunLight.shadow.camera.bottom = -30;
+        sunLight.shadow.bias = -0.0001;
+        scene.add(sunLight);
+        
+        const fillLight = new THREE.DirectionalLight(0x88aaff, 0.3);
+        fillLight.position.set(-10, 10, -10);
+        scene.add(fillLight);
+        
+        // Stadium lights
+        const spotLight1 = new THREE.SpotLight(0xffffff, 0.8, 50, Math.PI / 6, 0.5);
+        spotLight1.position.set(-15, 20, 15);
+        spotLight1.target.position.set(0, 0, 0);
+        scene.add(spotLight1);
+        scene.add(spotLight1.target);
+        
+        const spotLight2 = new THREE.SpotLight(0xffffff, 0.8, 50, Math.PI / 6, 0.5);
+        spotLight2.position.set(15, 20, 15);
+        spotLight2.target.position.set(0, 0, 0);
+        scene.add(spotLight2);
+        scene.add(spotLight2.target);
+        
+        // Create grass field with texture
+        function createGrassTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            
+            // Base green
+            ctx.fillStyle = '#2d5a27';
+            ctx.fillRect(0, 0, 512, 512);
+            
+            // Grass stripes
+            for (let i = 0; i < 8; i++) {
+                ctx.fillStyle = i % 2 === 0 ? '#3a6b32' : '#2d5a27';
+                ctx.fillRect(0, i * 64, 512, 64);
+            }
+            
+            // Grass blade details
+            ctx.strokeStyle = '#1a4020';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 2000; i++) {
+                const x = Math.random() * 512;
+                const y = Math.random() * 512;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + (Math.random() - 0.5) * 4, y - Math.random() * 8);
+                ctx.stroke();
+            }
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+        
+        const grassTexture = createGrassTexture();
+        grassTexture.wrapS = THREE.RepeatWrapping;
+        grassTexture.wrapT = THREE.RepeatWrapping;
+        grassTexture.repeat.set(4, 4);
+        
+        const fieldGeometry = new THREE.PlaneGeometry(60, 40);
+        const fieldMaterial = new THREE.MeshStandardMaterial({
+            map: grassTexture,
+            roughness: 0.9,
+            metalness: 0.0
+        });
+        const field = new THREE.Mesh(fieldGeometry, fieldMaterial);
+        field.rotation.x = -Math.PI / 2;
+        field.receiveShadow = true;
+        scene.add(field);
+        
+        // Field lines
+        function createFieldLines() {
+            const lineGroup = new THREE.Group();
+            const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            
+            // Goal area box
+            const lineWidth = 0.1;
+            const goalAreaWidth = 18.32; // 5.5m each side + goal width
+            const goalAreaDepth = 5.5;
+            
+            // Create line helper
+            function createLine(width, depth, x, z) {
+                const geo = new THREE.PlaneGeometry(width, depth);
+                const mesh = new THREE.Mesh(geo, lineMaterial);
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.set(x, 0.01, z);
+                return mesh;
+            }
+            
+            // Goal area lines
+            lineGroup.add(createLine(goalAreaWidth, lineWidth, 0, -goalAreaDepth)); // Front line
+            lineGroup.add(createLine(lineWidth, goalAreaDepth, -goalAreaWidth/2, -goalAreaDepth/2)); // Left line
+            lineGroup.add(createLine(lineWidth, goalAreaDepth, goalAreaWidth/2, -goalAreaDepth/2)); // Right line
+            
+            // Penalty area box
+            const penaltyWidth = 40.32;
+            const penaltyDepth = 16.5;
+            
+            lineGroup.add(createLine(penaltyWidth, lineWidth, 0, -penaltyDepth)); // Front line
+            lineGroup.add(createLine(lineWidth, penaltyDepth, -penaltyWidth/2, -penaltyDepth/2)); // Left line
+            lineGroup.add(createLine(lineWidth, penaltyDepth, penaltyWidth/2, -penaltyDepth/2)); // Right line
+            
+            // Penalty spot
+            const penaltySpot = new THREE.Mesh(
+                new THREE.CircleGeometry(0.2, 16),
+                lineMaterial
+            );
+            penaltySpot.rotation.x = -Math.PI / 2;
+            penaltySpot.position.set(0, 0.01, -11);
+            lineGroup.add(penaltySpot);
+            
+            // Goal line
+            lineGroup.add(createLine(60, lineWidth, 0, 0));
+            
+            return lineGroup;
+        }
+        
+        const fieldLines = createFieldLines();
+        scene.add(fieldLines);
+        
+        // Goal dimensions (FIFA standard)
+        const goalWidth = 7.32;
+        const goalHeight = 2.44;
+        const goalDepth = 2.0;
+        const postRadius = 0.06;
+        
+        // Goal materials
+        const postMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.3,
+            metalness: 0.8
+        });
+        
+        // Create goal frame
+        function createGoal() {
+            const goalGroup = new THREE.Group();
+            
+            // Posts
+            const postGeometry = new THREE.CylinderGeometry(postRadius, postRadius, goalHeight, 16);
+            
+            const leftPost = new THREE.Mesh(postGeometry, postMaterial);
+            leftPost.position.set(-goalWidth / 2, goalHeight / 2, 0);
+            leftPost.castShadow = true;
+            goalGroup.add(leftPost);
+            
+            const rightPost = new THREE.Mesh(postGeometry, postMaterial);
+            rightPost.position.set(goalWidth / 2, goalHeight / 2, 0);
+            rightPost.castShadow = true;
+            goalGroup.add(rightPost);
+            
+            // Crossbar
+            const crossbarGeometry = new THREE.CylinderGeometry(postRadius, postRadius, goalWidth + postRadius * 2, 16);
+            const crossbar = new THREE.Mesh(crossbarGeometry, postMaterial);
+            crossbar.rotation.z = Math.PI / 2;
+            crossbar.position.set(0, goalHeight, 0);
+            crossbar.castShadow = true;
+            goalGroup.add(crossbar);
+            
+            // Back support posts (shorter, at the back)
+            const backPostHeight = goalHeight * 0.5;
+            const backPostGeometry = new THREE.CylinderGeometry(postRadius * 0.7, postRadius * 0.7, backPostHeight, 12);
+            
+            const backLeftPost = new THREE.Mesh(backPostGeometry, postMaterial);
+            backLeftPost.position.set(-goalWidth / 2, backPostHeight / 2, goalDepth);
+            backLeftPost.castShadow = true;
+            goalGroup.add(backLeftPost);
+            
+            const backRightPost = new THREE.Mesh(backPostGeometry, postMaterial);
+            backRightPost.position.set(goalWidth / 2, backPostHeight / 2, goalDepth);
+            backRightPost.castShadow = true;
+            goalGroup.add(backRightPost);
+            
+            // Top back bar (connects the two back posts)
+            const topBackBarGeometry = new THREE.CylinderGeometry(postRadius * 0.7, postRadius * 0.7, goalWidth + postRadius * 2, 12);
+            const topBackBar = new THREE.Mesh(topBackBarGeometry, postMaterial);
+            topBackBar.rotation.z = Math.PI / 2;
+            topBackBar.position.set(0, backPostHeight, goalDepth);
+            topBackBar.castShadow = true;
+            goalGroup.add(topBackBar);
+            
+            // Diagonal supports (from top of front posts down to top of back posts)
+            const diagHeight = goalHeight - backPostHeight;
+            const diagLength = Math.sqrt(goalDepth * goalDepth + diagHeight * diagHeight);
+            const diagGeometry = new THREE.CylinderGeometry(postRadius * 0.5, postRadius * 0.5, diagLength, 8);
+            
+            const diagAngle = Math.atan2(diagHeight, goalDepth);
+            
+            const leftDiag = new THREE.Mesh(diagGeometry, postMaterial);
+            leftDiag.rotation.x = Math.PI / 2 + diagAngle;
+            leftDiag.position.set(-goalWidth / 2, goalHeight - diagHeight / 2, goalDepth / 2);
+            leftDiag.castShadow = true;
+            goalGroup.add(leftDiag);
+            
+            const rightDiag = new THREE.Mesh(diagGeometry, postMaterial);
+            rightDiag.rotation.x = Math.PI / 2 + diagAngle;
+            rightDiag.position.set(goalWidth / 2, goalHeight - diagHeight / 2, goalDepth / 2);
+            rightDiag.castShadow = true;
+            goalGroup.add(rightDiag);
+            
+            // Net
+            const netMaterial = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.4,
+                side: THREE.DoubleSide,
+                wireframe: false
+            });
+            
+            // Back net (matches back post height)
+            const backNetGeometry = new THREE.PlaneGeometry(goalWidth, backPostHeight);
+            const backNet = new THREE.Mesh(backNetGeometry, netMaterial);
+            backNet.position.set(0, backPostHeight / 2, goalDepth);
+            goalGroup.add(backNet);
+            
+            // Side nets (from front posts to back posts)
+            const sideNetGeometry = new THREE.BufferGeometry();
+            const sideVertices = new Float32Array([
+                0, 0, 0,
+                0, goalHeight, 0,
+                0, backPostHeight, goalDepth,
+                0, 0, goalDepth
+            ]);
+            const sideIndices = [0, 1, 2, 0, 2, 3];
+            sideNetGeometry.setAttribute('position', new THREE.BufferAttribute(sideVertices, 3));
+            sideNetGeometry.setIndex(sideIndices);
+            sideNetGeometry.computeVertexNormals();
+            
+            const leftNet = new THREE.Mesh(sideNetGeometry, netMaterial);
+            leftNet.position.set(-goalWidth / 2, 0, 0);
+            goalGroup.add(leftNet);
+            
+            const rightNet = new THREE.Mesh(sideNetGeometry, netMaterial);
+            rightNet.position.set(goalWidth / 2, 0, 0);
+            goalGroup.add(rightNet);
+            
+            // Top net (sloped from crossbar down to back bar)
+            const topNetGeometry = new THREE.BufferGeometry();
+            const topVertices = new Float32Array([
+                -goalWidth / 2, goalHeight, 0,
+                goalWidth / 2, goalHeight, 0,
+                goalWidth / 2, backPostHeight, goalDepth,
+                -goalWidth / 2, backPostHeight, goalDepth
+            ]);
+            const topIndices = [0, 1, 2, 0, 2, 3];
+            topNetGeometry.setAttribute('position', new THREE.BufferAttribute(topVertices, 3));
+            topNetGeometry.setIndex(topIndices);
+            topNetGeometry.computeVertexNormals();
+            
+            const topNet = new THREE.Mesh(topNetGeometry, netMaterial);
+            goalGroup.add(topNet);
+            
+            // Net grid lines (for realism)
+            const gridMaterial = new THREE.LineBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.3 });
+            
+            // Back net grid
+            for (let i = 0; i <= 10; i++) {
+                const x = -goalWidth / 2 + (goalWidth / 10) * i;
+                const points = [
+                    new THREE.Vector3(x, 0, goalDepth),
+                    new THREE.Vector3(x, backPostHeight, goalDepth)
+                ];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                goalGroup.add(new THREE.Line(geometry, gridMaterial));
+            }
+            
+            for (let i = 0; i <= 7; i++) {
+                const y = (backPostHeight / 7) * i;
+                const points = [
+                    new THREE.Vector3(-goalWidth / 2, y, goalDepth),
+                    new THREE.Vector3(goalWidth / 2, y, goalDepth)
+                ];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                goalGroup.add(new THREE.Line(geometry, gridMaterial));
+            }
+            
+            return goalGroup;
+        }
+        
+        const goal = createGoal();
+        scene.add(goal);
+        
+        // Soccer ball
+        function createSoccerBall() {
+            const ballGroup = new THREE.Group();
+            
+            const ballGeometry = new THREE.IcosahedronGeometry(0.22, 1);
+            const ballMaterial = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.4,
+                metalness: 0.1
+            });
+            const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+            ball.castShadow = true;
+            ballGroup.add(ball);
+            
+            // Add pentagon pattern (simplified)
+            const pentagonMaterial = new THREE.MeshStandardMaterial({
+                color: 0x111111,
+                roughness: 0.5,
+                metalness: 0.1
+            });
+            
+            const positions = ball.geometry.attributes.position;
+            const pentagonGeometry = new THREE.CircleGeometry(0.06, 5);
+            
+            // Add black pentagons at vertices
+            const addedPositions = new Set();
+            for (let i = 0; i < positions.count; i++) {
+                const x = positions.getX(i);
+                const y = positions.getY(i);
+                const z = positions.getZ(i);
+                const key = `${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)}`;
+                
+                if (!addedPositions.has(key) && addedPositions.size < 12) {
+                    addedPositions.add(key);
+                    const pentagon = new THREE.Mesh(pentagonGeometry, pentagonMaterial);
+                    pentagon.position.set(x * 1.01, y * 1.01, z * 1.01);
+                    pentagon.lookAt(0, 0, 0);
+                    pentagon.rotateZ(Math.PI);
+                    ballGroup.add(pentagon);
+                }
+            }
+            
+            return ballGroup;
+        }
+        
+        const soccerBall = createSoccerBall();
+        const ballStartHeight = 0.9144; // 3 feet in meters
+        soccerBall.position.set(-3, ballStartHeight, -8);
+        scene.add(soccerBall);
+        
+        // Ball physics
+        const ballRadius = 0.22;
+        const ballPhysics = {
+            velocity: new THREE.Vector3(0, 0, 0),
+            gravity: -9.81,
+            bounciness: 0.7,
+            friction: 0.98,
+            angularVelocity: new THREE.Vector3(0, 0, 0),
+            angularFriction: 0.995
+        };
+        
+        // Corner flags
+        function createCornerFlag(x, z) {
+            const flagGroup = new THREE.Group();
+            
+            const poleGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1.5, 8);
+            const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+            const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+            pole.position.y = 0.75;
+            pole.castShadow = true;
+            flagGroup.add(pole);
+            
+            const flagGeometry = new THREE.PlaneGeometry(0.3, 0.2);
+            const flagMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0xff0000, 
+                side: THREE.DoubleSide 
+            });
+            const flag = new THREE.Mesh(flagGeometry, flagMaterial);
+            flag.position.set(0.15, 1.4, 0);
+            flagGroup.add(flag);
+            
+            flagGroup.position.set(x, 0, z);
+            return flagGroup;
+        }
+        
+        scene.add(createCornerFlag(-30, 0));
+        scene.add(createCornerFlag(30, 0));
+        
+        // Field boundary walls
+        function createWalls() {
+            const wallGroup = new THREE.Group();
+            const wallHeight = 3;
+            const wallThickness = 0.2;
+            const fieldHalfWidth = 30;
+            const fieldHalfDepth = 20;
+            
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0x1a3a1a,
+                roughness: 0.9,
+                metalness: 0.1,
+                transparent: true,
+                opacity: 0.6
+            });
+            
+            // Left wall
+            const leftWallGeo = new THREE.BoxGeometry(wallThickness, wallHeight, fieldHalfDepth * 2);
+            const leftWall = new THREE.Mesh(leftWallGeo, wallMaterial);
+            leftWall.position.set(-fieldHalfWidth - wallThickness / 2, wallHeight / 2, 0);
+            leftWall.receiveShadow = true;
+            wallGroup.add(leftWall);
+            
+            // Right wall
+            const rightWall = new THREE.Mesh(leftWallGeo, wallMaterial);
+            rightWall.position.set(fieldHalfWidth + wallThickness / 2, wallHeight / 2, 0);
+            rightWall.receiveShadow = true;
+            wallGroup.add(rightWall);
+            
+            // Back wall (behind ball start)
+            const backWallGeo = new THREE.BoxGeometry(fieldHalfWidth * 2 + wallThickness * 2, wallHeight, wallThickness);
+            const backWall = new THREE.Mesh(backWallGeo, wallMaterial);
+            backWall.position.set(0, wallHeight / 2, -fieldHalfDepth - wallThickness / 2);
+            backWall.receiveShadow = true;
+            wallGroup.add(backWall);
+            
+            // Front wall (behind goal)
+            const frontWall = new THREE.Mesh(backWallGeo, wallMaterial);
+            frontWall.position.set(0, wallHeight / 2, fieldHalfDepth + wallThickness / 2);
+            frontWall.receiveShadow = true;
+            wallGroup.add(frontWall);
+            
+            // Wall top trim
+            const trimMaterial = new THREE.MeshStandardMaterial({
+                color: 0x4caf50,
+                roughness: 0.5,
+                metalness: 0.3
+            });
+            
+            const trimHeight = 0.1;
+            
+            // Left trim
+            const leftTrimGeo = new THREE.BoxGeometry(wallThickness + 0.1, trimHeight, fieldHalfDepth * 2);
+            const leftTrim = new THREE.Mesh(leftTrimGeo, trimMaterial);
+            leftTrim.position.set(-fieldHalfWidth - wallThickness / 2, wallHeight + trimHeight / 2, 0);
+            wallGroup.add(leftTrim);
+            
+            // Right trim
+            const rightTrim = new THREE.Mesh(leftTrimGeo, trimMaterial);
+            rightTrim.position.set(fieldHalfWidth + wallThickness / 2, wallHeight + trimHeight / 2, 0);
+            wallGroup.add(rightTrim);
+            
+            // Back trim
+            const backTrimGeo = new THREE.BoxGeometry(fieldHalfWidth * 2 + wallThickness * 2 + 0.1, trimHeight, wallThickness + 0.1);
+            const backTrim = new THREE.Mesh(backTrimGeo, trimMaterial);
+            backTrim.position.set(0, wallHeight + trimHeight / 2, -fieldHalfDepth - wallThickness / 2);
+            wallGroup.add(backTrim);
+            
+            // Front trim
+            const frontTrim = new THREE.Mesh(backTrimGeo, trimMaterial);
+            frontTrim.position.set(0, wallHeight + trimHeight / 2, fieldHalfDepth + wallThickness / 2);
+            wallGroup.add(frontTrim);
+            
+            return wallGroup;
+        }
+        
+        const walls = createWalls();
+        scene.add(walls);
+        
+        // Orbit controls (manual implementation)
+        let isDragging = false;
+        let isRightDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let spherical = { theta: -Math.PI / 2, phi: Math.PI / 2.5, radius: 12 };
+        let panOffset = new THREE.Vector3(0, 0, 0);
+        let currentMode = 'kick'; // 'kick' or 'camera'
+        
+        function updateCameraPosition() {
+            // Pivot point is directly below the ball on the ground
+            const pivotPoint = new THREE.Vector3(soccerBall.position.x, 0, soccerBall.position.z);
+            
+            camera.position.x = spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta) + pivotPoint.x + panOffset.x;
+            camera.position.y = spherical.radius * Math.cos(spherical.phi) + panOffset.y;
+            camera.position.z = spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta) + pivotPoint.z + panOffset.z;
+            
+            // Prevent camera from going below ground
+            if (camera.position.y < 0.5) {
+                camera.position.y = 0.5;
+            }
+            
+            camera.lookAt(pivotPoint.x + panOffset.x, Math.max(panOffset.y + 1, 1), pivotPoint.z + panOffset.z);
+        }
+        
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            if (e.button === 0) isDragging = true;
+            if (e.button === 2) isRightDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        renderer.domElement.addEventListener('mouseup', () => {
+            isDragging = false;
+            isRightDragging = false;
+        });
+        
+        renderer.domElement.addEventListener('mouseleave', () => {
+            isDragging = false;
+            isRightDragging = false;
+        });
+        
+        renderer.domElement.addEventListener('mousemove', (e) => {
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+            
+            // Only allow camera movement in camera mode
+            if (currentMode === 'camera') {
+                if (isDragging) {
+                    spherical.theta += deltaX * 0.005;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - deltaY * 0.005));
+                    updateCameraPosition();
+                }
+                
+                if (isRightDragging) {
+                    const right = new THREE.Vector3();
+                    const up = new THREE.Vector3(0, 1, 0);
+                    camera.getWorldDirection(right);
+                    right.cross(up).normalize();
+                    
+                    panOffset.add(right.multiplyScalar(deltaX * 0.02));
+                    panOffset.y -= deltaY * 0.02;
+                    
+                    // Prevent panning below ground
+                    if (panOffset.y < -1) {
+                        panOffset.y = -1;
+                    }
+                    
+                    updateCameraPosition();
+                }
+            }
+            
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        renderer.domElement.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            // Only allow zoom in camera mode
+            if (currentMode === 'camera') {
+                spherical.radius = Math.max(5, Math.min(40, spherical.radius + e.deltaY * 0.02));
+                updateCameraPosition();
+            }
+        });
+        
+        renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+        
+        // Touch controls
+        let touchStartDistance = 0;
+        let touchStartRadius = 0;
+        
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.touches.length === 2) {
+                isDragging = false;
+                touchStartDistance = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                touchStartRadius = spherical.radius;
+            }
+        });
+        
+        renderer.domElement.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            // Only allow camera movement in camera mode
+            if (currentMode === 'camera') {
+                if (e.touches.length === 1 && isDragging) {
+                    const deltaX = e.touches[0].clientX - previousMousePosition.x;
+                    const deltaY = e.touches[0].clientY - previousMousePosition.y;
+                    
+                    spherical.theta += deltaX * 0.005;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - deltaY * 0.005));
+                    updateCameraPosition();
+                    
+                    previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                } else if (e.touches.length === 2) {
+                    const currentDistance = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    const scale = touchStartDistance / currentDistance;
+                    spherical.radius = Math.max(5, Math.min(40, touchStartRadius * scale));
+                    updateCameraPosition();
+                }
+            }
+        }, { passive: false });
+        
+        renderer.domElement.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+        
+        updateCameraPosition();
+        
+        // Kick mechanic
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let swipeStart = null;
+        let swipeStartTime = 0;
+        let swipeStartScreen = null;
+        let isKicking = false;
+        let swipeActive = false;
+        
+        function getMousePosition(clientX, clientY) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            return {
+                x: ((clientX - rect.left) / rect.width) * 2 - 1,
+                y: -((clientY - rect.top) / rect.height) * 2 + 1
+            };
+        }
+        
+        function checkBallHit(mousePos) {
+            mouse.set(mousePos.x, mousePos.y);
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Create a sphere for intersection testing
+            const ballBoundingSphere = new THREE.Sphere(soccerBall.position, ballRadius * 1.5);
+            const ray = raycaster.ray;
+            
+            return ray.intersectsSphere(ballBoundingSphere);
+        }
+        
+        function checkGroundHit(mousePos) {
+            mouse.set(mousePos.x, mousePos.y);
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Check if ray hits the ground plane
+            const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+            const intersectPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(groundPlane, intersectPoint);
+            
+            return intersectPoint;
+        }
+        
+        function kickBall(swipeDirection, swipeSpeed) {
+            // swipeDirection is a normalized 3D vector on the ground plane
+            // swipeSpeed determines kick strength
+            
+            const kickStrength = Math.min(swipeSpeed * 0.8, 20);
+            
+            // Calculate upward component based on how fast the swipe was
+            const upwardKick = kickStrength * 0.3;
+            
+            // Apply velocity to ball in swipe direction
+            ballPhysics.velocity.x = swipeDirection.x * kickStrength;
+            ballPhysics.velocity.y = upwardKick;
+            ballPhysics.velocity.z = swipeDirection.z * kickStrength;
+            
+            // Add spin based on swipe direction
+            ballPhysics.angularVelocity.x = swipeDirection.z * 5;
+            ballPhysics.angularVelocity.z = -swipeDirection.x * 5;
+            
+            // Calculate and display kick stats
+            const totalPower = Math.sqrt(
+                ballPhysics.velocity.x * ballPhysics.velocity.x +
+                ballPhysics.velocity.y * ballPhysics.velocity.y +
+                ballPhysics.velocity.z * ballPhysics.velocity.z
+            );
+            
+            // Calculate angles
+            const horizontalSpeed = Math.sqrt(
+                ballPhysics.velocity.x * ballPhysics.velocity.x +
+                ballPhysics.velocity.z * ballPhysics.velocity.z
+            );
+            const angleY = Math.atan2(ballPhysics.velocity.y, horizontalSpeed) * (180 / Math.PI);
+            const angleX = Math.atan2(ballPhysics.velocity.x, ballPhysics.velocity.z) * (180 / Math.PI);
+            
+            // Update UI
+            document.getElementById('kickPower').textContent = totalPower.toFixed(1) + ' m/s';
+            document.getElementById('kickAngleX').textContent = angleX.toFixed(1) + '°';
+            document.getElementById('kickAngleY').textContent = angleY.toFixed(1) + '°';
+            document.getElementById('kickVelX').textContent = ballPhysics.velocity.x.toFixed(2) + ' m/s';
+            document.getElementById('kickVelY').textContent = ballPhysics.velocity.y.toFixed(2) + ' m/s';
+            document.getElementById('kickVelZ').textContent = ballPhysics.velocity.z.toFixed(2) + ' m/s';
+            
+            // Show kick stats
+            document.getElementById('kickStats').classList.add('visible');
+            
+            // Hide after 3 seconds
+            clearTimeout(window.kickStatsTimeout);
+            window.kickStatsTimeout = setTimeout(() => {
+                document.getElementById('kickStats').classList.remove('visible');
+            }, 3000);
+        }
+        
+        let swipeStartGroundPos = null;
+        let lastGroundPos = null;
+        
+        // Override mouse controls to support kicking
+        renderer.domElement.removeEventListener('mousedown', () => {});
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            const mousePos = getMousePosition(e.clientX, e.clientY);
+            
+            if (e.button === 0) {
+                if (currentMode === 'kick') {
+                    // In kick mode, start swipe if NOT on the ball
+                    if (!checkBallHit(mousePos)) {
+                        swipeActive = true;
+                        swipeStartScreen = { x: e.clientX, y: e.clientY };
+                        swipeStartTime = performance.now();
+                        swipeStartGroundPos = checkGroundHit(mousePos);
+                        lastGroundPos = swipeStartGroundPos.clone();
+                    }
+                } else {
+                    // In camera mode, drag rotates camera
+                    isDragging = true;
+                }
+            }
+            if (e.button === 2) isRightDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        renderer.domElement.addEventListener('mousemove', (e) => {
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+            
+            // Check for ball collision during swipe in kick mode
+            if (currentMode === 'kick' && swipeActive) {
+                const mousePos = getMousePosition(e.clientX, e.clientY);
+                const currentGroundPos = checkGroundHit(mousePos);
+                
+                if (checkBallHit(mousePos) && swipeStartGroundPos) {
+                    // Calculate swipe direction and speed
+                    const swipeDirection = new THREE.Vector3();
+                    swipeDirection.subVectors(currentGroundPos, swipeStartGroundPos);
+                    const swipeDistance = swipeDirection.length();
+                    swipeDirection.normalize();
+                    
+                    const duration = (performance.now() - swipeStartTime) / 1000;
+                    const swipeSpeed = swipeDistance / Math.max(duration, 0.01);
+                    
+                    // Kick the ball!
+                    kickBall(swipeDirection, swipeSpeed);
+                    
+                    // Reset swipe
+                    swipeActive = false;
+                    swipeStartGroundPos = null;
+                }
+                
+                lastGroundPos = currentGroundPos;
+            }
+            
+            // Only allow camera movement in camera mode
+            if (currentMode === 'camera') {
+                if (isDragging) {
+                    spherical.theta += deltaX * 0.005;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - deltaY * 0.005));
+                    updateCameraPosition();
+                }
+                
+                if (isRightDragging) {
+                    const right = new THREE.Vector3();
+                    const up = new THREE.Vector3(0, 1, 0);
+                    camera.getWorldDirection(right);
+                    right.cross(up).normalize();
+                    
+                    panOffset.add(right.multiplyScalar(deltaX * 0.02));
+                    panOffset.y -= deltaY * 0.02;
+                    
+                    // Prevent panning below ground
+                    if (panOffset.y < -1) {
+                        panOffset.y = -1;
+                    }
+                    
+                    updateCameraPosition();
+                }
+            }
+            
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        renderer.domElement.addEventListener('mouseup', (e) => {
+            isDragging = false;
+            isRightDragging = false;
+            swipeActive = false;
+            swipeStartGroundPos = null;
+        });
+        
+        // Override touch controls to support kicking
+        renderer.domElement.removeEventListener('touchstart', () => {});
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                const touchPos = getMousePosition(touch.clientX, touch.clientY);
+                
+                if (currentMode === 'kick') {
+                    // In kick mode, start swipe if NOT on the ball
+                    if (!checkBallHit(touchPos)) {
+                        swipeActive = true;
+                        swipeStartScreen = { x: touch.clientX, y: touch.clientY };
+                        swipeStartTime = performance.now();
+                        swipeStartGroundPos = checkGroundHit(touchPos);
+                        lastGroundPos = swipeStartGroundPos.clone();
+                    }
+                } else {
+                    // In camera mode, touch rotates camera
+                    isDragging = true;
+                }
+                previousMousePosition = { x: touch.clientX, y: touch.clientY };
+            } else if (e.touches.length === 2) {
+                isDragging = false;
+                swipeActive = false;
+                touchStartDistance = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                touchStartRadius = spherical.radius;
+            }
+        });
+        
+        renderer.domElement.removeEventListener('touchend', () => {});
+        renderer.domElement.addEventListener('touchend', (e) => {
+            isDragging = false;
+            swipeActive = false;
+            swipeStartGroundPos = null;
+        });
+        
+        renderer.domElement.removeEventListener('touchmove', () => {});
+        renderer.domElement.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            // Check for ball collision during swipe in kick mode
+            if (currentMode === 'kick' && swipeActive && e.touches.length === 1) {
+                const touch = e.touches[0];
+                const touchPos = getMousePosition(touch.clientX, touch.clientY);
+                const currentGroundPos = checkGroundHit(touchPos);
+                
+                if (checkBallHit(touchPos) && swipeStartGroundPos) {
+                    // Calculate swipe direction and speed
+                    const swipeDirection = new THREE.Vector3();
+                    swipeDirection.subVectors(currentGroundPos, swipeStartGroundPos);
+                    const swipeDistance = swipeDirection.length();
+                    swipeDirection.normalize();
+                    
+                    const duration = (performance.now() - swipeStartTime) / 1000;
+                    const swipeSpeed = swipeDistance / Math.max(duration, 0.01);
+                    
+                    // Kick the ball!
+                    kickBall(swipeDirection, swipeSpeed);
+                    
+                    // Reset swipe
+                    swipeActive = false;
+                    swipeStartGroundPos = null;
+                }
+                
+                lastGroundPos = currentGroundPos;
+                previousMousePosition = { x: touch.clientX, y: touch.clientY };
+            }
+            
+            // Only allow camera movement in camera mode
+            if (currentMode === 'camera') {
+                if (e.touches.length === 1 && isDragging) {
+                    const deltaX = e.touches[0].clientX - previousMousePosition.x;
+                    const deltaY = e.touches[0].clientY - previousMousePosition.y;
+                    
+                    spherical.theta += deltaX * 0.005;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - deltaY * 0.005));
+                    updateCameraPosition();
+                    
+                    previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                } else if (e.touches.length === 2) {
+                    const currentDistance = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    const scale = touchStartDistance / currentDistance;
+                    spherical.radius = Math.max(5, Math.min(40, touchStartRadius * scale));
+                    updateCameraPosition();
+                }
+            }
+        }, { passive: false });
+        
+        // Animation
+        let time = 0;
+        let lastTime = performance.now();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const currentTime = performance.now();
+            const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.05); // Cap delta time
+            lastTime = currentTime;
+            
+            time += deltaTime;
+            
+            // Ball physics update with simple solid collisions
+            
+            const ballSpeed = Math.sqrt(
+                ballPhysics.velocity.x * ballPhysics.velocity.x +
+                ballPhysics.velocity.y * ballPhysics.velocity.y +
+                ballPhysics.velocity.z * ballPhysics.velocity.z
+            );
+            
+            // More substeps for faster balls
+            const maxStepDistance = ballRadius * 0.2;
+            const numSubSteps = Math.max(1, Math.ceil(ballSpeed * deltaTime / maxStepDistance));
+            const subDeltaTime = deltaTime / numSubSteps;
+            
+            // Constants
+            const goalPostRadius = 0.06;
+            const goalBounciness = 0.5;
+            const netBounciness = 0.3;
+            const backPostHeight = goalHeight * 0.5;
+            const fieldHalfWidth = 30;
+            const fieldHalfDepth = 20;
+            const wallBounciness = 0.6;
+            
+            // Goal net boundaries
+            const goalLeft = -goalWidth / 2;
+            const goalRight = goalWidth / 2;
+            const goalBack = goalDepth;
+            
+            for (let step = 0; step < numSubSteps; step++) {
+                // Apply gravity
+                ballPhysics.velocity.y += ballPhysics.gravity * subDeltaTime;
+                
+                // Calculate new position
+                let newX = soccerBall.position.x + ballPhysics.velocity.x * subDeltaTime;
+                let newY = soccerBall.position.y + ballPhysics.velocity.y * subDeltaTime;
+                let newZ = soccerBall.position.z + ballPhysics.velocity.z * subDeltaTime;
+                
+                // Ground
+                if (newY < ballRadius) {
+                    newY = ballRadius;
+                    if (ballPhysics.velocity.y < -0.1) {
+                        ballPhysics.velocity.y = -ballPhysics.velocity.y * ballPhysics.bounciness;
+                        ballPhysics.angularVelocity.x += ballPhysics.velocity.z * 0.5;
+                        ballPhysics.angularVelocity.z -= ballPhysics.velocity.x * 0.5;
+                    } else {
+                        ballPhysics.velocity.y = 0;
+                    }
+                    ballPhysics.velocity.x *= ballPhysics.friction;
+                    ballPhysics.velocity.z *= ballPhysics.friction;
+                }
+                
+                // Field walls
+                if (newX < -fieldHalfWidth + ballRadius) {
+                    newX = -fieldHalfWidth + ballRadius;
+                    ballPhysics.velocity.x = Math.abs(ballPhysics.velocity.x) * wallBounciness;
+                }
+                if (newX > fieldHalfWidth - ballRadius) {
+                    newX = fieldHalfWidth - ballRadius;
+                    ballPhysics.velocity.x = -Math.abs(ballPhysics.velocity.x) * wallBounciness;
+                }
+                if (newZ < -fieldHalfDepth + ballRadius) {
+                    newZ = -fieldHalfDepth + ballRadius;
+                    ballPhysics.velocity.z = Math.abs(ballPhysics.velocity.z) * wallBounciness;
+                }
+                if (newZ > fieldHalfDepth - ballRadius) {
+                    newZ = fieldHalfDepth - ballRadius;
+                    ballPhysics.velocity.z = -Math.abs(ballPhysics.velocity.z) * wallBounciness;
+                }
+                
+                // === GOAL COLLISIONS ===
+                
+                // Helper: Vertical cylinder (posts)
+                function cylinderCollision(cylX, cylZ, cylR, minY, maxY) {
+                    if (newY < minY - ballRadius || newY > maxY + ballRadius) return;
+                    const dx = newX - cylX;
+                    const dz = newZ - cylZ;
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    const minDist = ballRadius + cylR;
+                    if (dist < minDist && dist > 0.001) {
+                        const nx = dx / dist;
+                        const nz = dz / dist;
+                        newX = cylX + nx * minDist;
+                        newZ = cylZ + nz * minDist;
+                        const dot = ballPhysics.velocity.x * nx + ballPhysics.velocity.z * nz;
+                        if (dot < 0) {
+                            ballPhysics.velocity.x -= 2 * dot * nx;
+                            ballPhysics.velocity.z -= 2 * dot * nz;
+                            ballPhysics.velocity.x *= goalBounciness;
+                            ballPhysics.velocity.z *= goalBounciness;
+                        }
+                    }
+                }
+                
+                // Helper: Horizontal cylinder (crossbars)
+                function hCylinderCollision(cylY, cylZ, cylR, minX, maxX) {
+                    if (newX < minX - ballRadius || newX > maxX + ballRadius) return;
+                    const dy = newY - cylY;
+                    const dz = newZ - cylZ;
+                    const dist = Math.sqrt(dy * dy + dz * dz);
+                    const minDist = ballRadius + cylR;
+                    if (dist < minDist && dist > 0.001) {
+                        const ny = dy / dist;
+                        const nz = dz / dist;
+                        newY = cylY + ny * minDist;
+                        newZ = cylZ + nz * minDist;
+                        const dot = ballPhysics.velocity.y * ny + ballPhysics.velocity.z * nz;
+                        if (dot < 0) {
+                            ballPhysics.velocity.y -= 2 * dot * ny;
+                            ballPhysics.velocity.z -= 2 * dot * nz;
+                            ballPhysics.velocity.y *= goalBounciness;
+                            ballPhysics.velocity.z *= goalBounciness;
+                        }
+                    }
+                }
+                
+                // Front posts and crossbar
+                cylinderCollision(goalLeft, 0, goalPostRadius, 0, goalHeight);
+                cylinderCollision(goalRight, 0, goalPostRadius, 0, goalHeight);
+                hCylinderCollision(goalHeight, 0, goalPostRadius, goalLeft, goalRight);
+                
+                // Back posts and crossbar
+                cylinderCollision(goalLeft, goalBack, goalPostRadius * 0.7, 0, backPostHeight);
+                cylinderCollision(goalRight, goalBack, goalPostRadius * 0.7, 0, backPostHeight);
+                hCylinderCollision(backPostHeight, goalBack, goalPostRadius * 0.7, goalLeft, goalRight);
+                
+                // === NET COLLISIONS (solid planes) ===
+                
+                // Back net - vertical plane at z = goalBack
+                // Blocks if ball is within X bounds and below net height
+                const inBackNetX = newX > goalLeft + goalPostRadius && newX < goalRight - goalPostRadius;
+                const inBackNetY = newY > 0 && newY < backPostHeight;
+                
+                if (inBackNetX && inBackNetY) {
+                    // Ball touching back net from either side
+                    if (Math.abs(newZ - goalBack) < ballRadius) {
+                        if (newZ < goalBack) {
+                            // Ball is in front of net
+                            newZ = goalBack - ballRadius;
+                            if (ballPhysics.velocity.z > 0) {
+                                ballPhysics.velocity.z = -ballPhysics.velocity.z * netBounciness;
+                            }
+                        } else {
+                            // Ball is behind net
+                            newZ = goalBack + ballRadius;
+                            if (ballPhysics.velocity.z < 0) {
+                                ballPhysics.velocity.z = -ballPhysics.velocity.z * netBounciness;
+                            }
+                        }
+                        ballPhysics.velocity.x *= 0.8;
+                        ballPhysics.velocity.y *= 0.8;
+                    }
+                }
+                
+                // Left side net - vertical plane at x = goalLeft
+                // Only applies inside goal area (z > 0 and z < goalBack)
+                const inLeftNetZ = newZ > 0 && newZ < goalBack;
+                const inLeftNetY = newY > 0 && newY < goalHeight;
+                
+                if (inLeftNetZ && inLeftNetY) {
+                    const leftNetX = goalLeft + goalPostRadius;
+                    if (Math.abs(newX - leftNetX) < ballRadius) {
+                        if (newX > leftNetX) {
+                            // Ball is inside goal
+                            newX = leftNetX + ballRadius;
+                            if (ballPhysics.velocity.x < 0) {
+                                ballPhysics.velocity.x = -ballPhysics.velocity.x * netBounciness;
+                            }
+                        } else {
+                            // Ball is outside goal
+                            newX = leftNetX - ballRadius;
+                            if (ballPhysics.velocity.x > 0) {
+                                ballPhysics.velocity.x = -ballPhysics.velocity.x * netBounciness;
+                            }
+                        }
+                    }
+                }
+                
+                // Right side net - vertical plane at x = goalRight
+                const inRightNetZ = newZ > 0 && newZ < goalBack;
+                const inRightNetY = newY > 0 && newY < goalHeight;
+                
+                if (inRightNetZ && inRightNetY) {
+                    const rightNetX = goalRight - goalPostRadius;
+                    if (Math.abs(newX - rightNetX) < ballRadius) {
+                        if (newX < rightNetX) {
+                            // Ball is inside goal
+                            newX = rightNetX - ballRadius;
+                            if (ballPhysics.velocity.x > 0) {
+                                ballPhysics.velocity.x = -ballPhysics.velocity.x * netBounciness;
+                            }
+                        } else {
+                            // Ball is outside goal
+                            newX = rightNetX + ballRadius;
+                            if (ballPhysics.velocity.x < 0) {
+                                ballPhysics.velocity.x = -ballPhysics.velocity.x * netBounciness;
+                            }
+                        }
+                    }
+                }
+                
+                // Top net - sloped plane from crossbar (y=goalHeight at z=0) to back bar (y=backPostHeight at z=goalBack)
+                const inTopNetX = newX > goalLeft + goalPostRadius && newX < goalRight - goalPostRadius;
+                const inTopNetZ = newZ > 0 && newZ < goalBack;
+                
+                if (inTopNetX && inTopNetZ) {
+                    const t = newZ / goalBack;
+                    const netHeightAtZ = goalHeight - (goalHeight - backPostHeight) * t;
+                    
+                    if (Math.abs(newY - netHeightAtZ) < ballRadius) {
+                        if (newY < netHeightAtZ) {
+                            // Ball is below net (inside goal)
+                            newY = netHeightAtZ - ballRadius;
+                            if (ballPhysics.velocity.y > 0) {
+                                ballPhysics.velocity.y = -ballPhysics.velocity.y * netBounciness;
+                            }
+                        } else {
+                            // Ball is above net (outside goal)
+                            newY = netHeightAtZ + ballRadius;
+                            if (ballPhysics.velocity.y < 0) {
+                                ballPhysics.velocity.y = -ballPhysics.velocity.y * netBounciness;
+                            }
+                        }
+                    }
+                }
+                
+                // Apply position
+                soccerBall.position.x = newX;
+                soccerBall.position.y = newY;
+                soccerBall.position.z = newZ;
+            }
+            
+            // Apply angular friction (once per frame, not per substep)
+            ballPhysics.angularVelocity.multiplyScalar(Math.pow(ballPhysics.angularFriction, deltaTime * 60));
+            
+            // Rotate ball based on angular velocity
+            soccerBall.rotation.x += ballPhysics.angularVelocity.x * deltaTime;
+            soccerBall.rotation.y += ballPhysics.angularVelocity.y * deltaTime;
+            soccerBall.rotation.z += ballPhysics.angularVelocity.z * deltaTime;
+            
+            // Animate corner flags
+            scene.children.forEach(child => {
+                if (child.children && child.children.length === 2) {
+                    const flag = child.children[1];
+                    if (flag && flag.rotation) {
+                        flag.rotation.y = Math.sin(time * 3) * 0.2;
+                    }
+                }
+            });
+            
+            // Update camera pivot to follow ball
+            updateCameraPosition();
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+        
+        // Mode toggle buttons
+        const kickModeBtn = document.getElementById('kickModeBtn');
+        const cameraModeBtn = document.getElementById('cameraModeBtn');
+        
+        kickModeBtn.addEventListener('click', () => {
+            currentMode = 'kick';
+            kickModeBtn.classList.add('active');
+            cameraModeBtn.classList.remove('active');
+        });
+        
+        cameraModeBtn.addEventListener('click', () => {
+            currentMode = 'camera';
+            cameraModeBtn.classList.add('active');
+            kickModeBtn.classList.remove('active');
+        });
+        
+        // Handle resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
