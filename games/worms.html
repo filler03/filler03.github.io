@@ -35,11 +35,27 @@
     <canvas id="canvas"></canvas>
     <div id="info">Move the mouse to guide the worm • Eat food to grow!</div>
     <script>
-        try {
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        // Global error handler to display errors on screen
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;padding:20px;z-index:9999;font-family:monospace;white-space:pre-wrap;';
+            errorDiv.textContent = 'ERROR: ' + message + '\nLine: ' + lineno + ', Col: ' + colno + '\nSource: ' + source;
+            document.body.appendChild(errorDiv);
+            return false;
+        };
 
 ```
+    window.addEventListener('unhandledrejection', function(event) {
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:orange;color:white;padding:20px;z-index:9999;font-family:monospace;white-space:pre-wrap;';
+        errorDiv.textContent = 'UNHANDLED PROMISE: ' + event.reason;
+        document.body.appendChild(errorDiv);
+    });
+
+    try {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
     let width = canvas.width = window.innerWidth;
     let height = canvas.height = window.innerHeight;
 
