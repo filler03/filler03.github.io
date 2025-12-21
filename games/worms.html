@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slithering Worm</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 14px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="info">Move the mouse to guide the worm • Eat food to grow!</div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+```
+    let width = canvas.width = window.innerWidth;
+    let height = canvas.height = window.innerHeight;
+
+    // Camera position (world coordinates that should be at screen center)
+    let cameraX = 0;
+    let cameraY = 0;
+
+    // Track mouse position in screen coordinates
+    let mouseScreenX = width / 2;
+    let mouseScreenY = height / 2;
+
+    // Convert screen to world coordinates
+    function screenToWorld(screenX, screenY) {
+        return {
+            x: screenX - width / 2 + cameraX,
+            y: screenY - height / 2 + cameraY
+        };
+    }
+
+    // Convert world to screen coordinates
+    function worldToScreen(worldX, worldY) {
+        return {
+            x: worldX - cameraX + width / 2,
+            y: worldY - cameraY + height / 2
+        };
+    }
+
+    // Food emojis
+    const foodEmojis = ['🍎', '🍕', '🍔', '🌮', '🍩', '🍪', '🧁', '🍇', '🍓', '🍌', '🥕', '🌽', '🍗', '🧀', '🥐'];
+    const foods = [];
+
+    // Chunk system to track visited areas
+    const CHUNK_SIZE = 200;
+    const chunkVisits = new Map(); // Stores {count, fadeIn, numberPop}
+    let lastChunkKey = null; // Track which chunk we were in last frame
+
+    function getChunkKey(worldX, worldY) {
+        const chunkX = Math.floor(worldX / CHUNK_SIZE);
+        const chunkY = Math.floor(worldY / CHUNK_SIZE);
+        return `${chunkX},${chunkY}`;
+    }
+
+    function markChunkVisited(worldX, worldY) {
+        const key = getChunkKey(worldX, worldY);
+        // Only increment if we just entered this chunk
+        if (key !== lastChunkKey) {
+            const existing = chunkVisits.get(key);
+            if (existing) {
+                // Revisiting - increment count and trigger number pop animation
+                existing.count += 1;
+                existing.numberPop = 1.0; // Start pop animation
+            } else {
+                // First visit - create new entry with fade-in animation
+                chunkVisits.set(key, {
+                    count: 1,
+                    fadeIn: 0.0, // Start fade-in animation from 0
+                    numberPop: 1.0 // Also pop the number on first visit
+                });
+            }
+            lastChunkKey = key;
+        }
+    }
+
+    function isChunkVisited(worldX, worldY) {
+        return chunkVisits.has(getChunkKey(worldX, worldY));
+    }
+
+    function getChunkVisitCount(worldX, worldY) {
+        const data = chunkVisits.get(getChunkKey(worldX, worldY));
+        return data ? data.count : 0;
+    }
+
+    function getChunkCenter(chunkX, chunkY) {
+        return {
+            x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2,
+            y: chunkY * CHUNK_SIZE + CHUNK_SIZE / 2
+        };
+    }
+
+    // Update chunk animations
+    function updateChunkAnimations() {
+        for (const [key, data] of chunkVisits) {
+            // Fade in animation
+            if (data.fadeIn < 1.0) {
+                data.fadeIn = Math.min(1.0, data.fadeIn + 0.03);
+            }
+            // Number pop animation (0 to 1 and back to 0) - use as progress
+            if (data.numberPop > 0) {
+                data.numberPop = Math.max(0, data.numberPop - 0.025);
+            }
+        }
+    }
+
+    // Draw chunk grid with visit counts
+    function drawChunks() {
+        // Calculate visible chunk range
+        const startChunkX = Math.floor((cameraX - width / 2) / CHUNK_SIZE) - 1;
+        const endChunkX = Math.floor((cameraX + width / 2) / CHUNK_SIZE) + 1;
+        const startChunkY = Math.floor((cameraY - height / 2) / CHUNK_SIZE) - 1;
+        const endChunkY = Math.floor((cameraY + height / 2) / CHUNK_SIZE) + 1;
+
+        for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX++) {
+            for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY++) {
+                const key = `${chunkX},${chunkY}`;
+                const data = chunkVisits.get(key);
+                
+                if (data && data.count > 0) {
+                    const worldX = chunkX * CHUNK_SIZE;
+                    const worldY = chunkY * CHUNK_SIZE;
+                    const screenPos = worldToScreen(worldX, worldY);
+                    
+                    // Draw chunk background with fade-in animation
+                    const alpha = 0.2 * data.fadeIn;
+                    ctx.fillStyle = `rgba(50, 50, 70, ${alpha})`;
+                    ctx.fillRect(screenPos.x, screenPos.y, CHUNK_SIZE, CHUNK_SIZE);
+                    
+                    // Draw visit count in center with pop animation
+                    const centerScreenPos = worldToScreen(
+                        worldX + CHUNK_SIZE / 2,
+                        worldY + CHUNK_SIZE / 2
+                    );
+                    
+                    // Use sine curve for smooth up-and-down animation
+                    // numberPop goes from 1 to 0, so we map it to 0 -> PI for a full sine hump
+                    const animProgress = (1 - data.numberPop) * Math.PI;
+                    const popAmount = Math.sin(animProgress);
+                    
+                    // Pop effect: scale and brightness boost
+                    const popScale = 1 + popAmount * 0.5;
+                    const popBrightness = 0.2 + popAmount * 0.6;
+                    
+                    // Gold color interpolation based on pop animation
+                    // Base color: white (255, 255, 255), Gold: (255, 215, 0)
+                    const goldAmount = popAmount;
+                    const r = 255;
+                    const g = Math.round(255 - (40 * goldAmount)); // 255 -> 215
+                    const b = Math.round(255 - (255 * goldAmount)); // 255 -> 0
+                    
+                    ctx.save();
+                    ctx.translate(centerScreenPos.x, centerScreenPos.y);
+                    ctx.scale(popScale, popScale);
+                    
+                    ctx.font = '16px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${popBrightness * data.fadeIn})`;
+                    ctx.fillText(data.count.toString(), 0, 0);
+                    
+                    // Draw chunk coordinates below the visit count
+                    ctx.font = '10px monospace';
+                    ctx.fillStyle = `rgba(255, 255, 255, ${0.15 * data.fadeIn})`;
+                    ctx.fillText(`${chunkX},${-chunkY}`, 0, 18);
+                    
+                    ctx.restore();
+                }
+            }
+        }
+    }
+
+    // Background stars/dots for visual reference of movement
+    const bgDots = [];
+    for (let i = 0; i < 200; i++) {
+        bgDots.push({
+            x: (Math.random() - 0.5) * 4000,
+            y: (Math.random() - 0.5) * 4000,
+            size: Math.random() * 2 + 1,
+            alpha: Math.random() * 0.3 + 0.1
+        });
+    }
+
+    class Worm {
+        constructor(x, y, followsMouse = false) {
+            this.segments = [];
+            this.segmentCount = 12;
+            this.segmentRadius = 10;
+            this.speed = 2;
+            this.followsMouse = followsMouse;
+            this.angle = 0;
+            
+            // Base hue for the worm
+            this.baseHue = Math.random() * 360;
+            
+            // Initialize segments with individual hues
+            for (let i = 0; i < this.segmentCount; i++) {
+                this.segments.push({
+                    x: x - i * this.segmentRadius * 0.8,
+                    y: y,
+                    hue: this.baseHue
+                });
+            }
+            
+            // Color change propagation - now supports queue of colors
+            this.colorQueue = []; // Queue of {hue, index} for pending color changes
+            this.baseHue = this.baseHue;
+        }
+
+        eatFood(foodHue) {
+            // Add new color to the queue, starting from head
+            this.colorQueue.push({
+                hue: foodHue,
+                index: 0
+            });
+            this.segments[0].hue = foodHue;
+        }
+
+        grow(amount = 1) {
+            const tail = this.segments[this.segments.length - 1];
+            for (let i = 0; i < amount; i++) {
+                this.segments.push({
+                    x: tail.x,
+                    y: tail.y,
+                    hue: tail.hue // Use the current tail's color
+                });
+            }
+            this.segmentCount = this.segments.length;
+        }
+
+        update() {
+            const head = this.segments[0];
+            
+            if (this.followsMouse) {
+                // Convert mouse screen position to world coordinates
+                const mouseWorld = screenToWorld(mouseScreenX, mouseScreenY);
+                
+                // Calculate angle to mouse in world space
+                const dx = mouseWorld.x - head.x;
+                const dy = mouseWorld.y - head.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist > 5) {
+                    // Smoothly turn towards mouse
+                    const targetAngle = Math.atan2(dy, dx);
+                    let angleDiff = targetAngle - this.angle;
+                    
+                    // Normalize angle difference
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    
+                    // Smooth turning
+                    this.angle += angleDiff * 0.15;
+                    
+                    // Move head towards mouse
+                    const moveSpeed = Math.min(this.speed, dist * 0.1);
+                    head.x += Math.cos(this.angle) * moveSpeed;
+                    head.y += Math.sin(this.angle) * moveSpeed;
+                }
+            }
+
+            // Follow the leader for body segments
+            for (let i = 1; i < this.segments.length; i++) {
+                const current = this.segments[i];
+                const previous = this.segments[i - 1];
+                
+                const dx = previous.x - current.x;
+                const dy = previous.y - current.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const targetDist = this.segmentRadius * 0.7;
+                
+                if (dist > targetDist) {
+                    const moveRatio = (dist - targetDist) / dist;
+                    current.x += dx * moveRatio * 0.5;
+                    current.y += dy * moveRatio * 0.5;
+                }
+            }
+
+            // Propagate color changes for all items in queue
+            for (let q = this.colorQueue.length - 1; q >= 0; q--) {
+                const colorChange = this.colorQueue[q];
+                colorChange.index += 0.3; // Speed of color propagation
+                const idx = Math.floor(colorChange.index);
+                
+                if (idx < this.segments.length) {
+                    this.segments[idx].hue = colorChange.hue;
+                }
+                
+                // Check if this color change reached the end
+                if (colorChange.index >= this.segments.length - 1) {
+                    // Color reached the end, grow the worm!
+                    this.grow(1);
+                    const tail = this.segments[this.segments.length - 1];
+                    createBurst(tail.x, tail.y, colorChange.hue);
+                    this.baseHue = colorChange.hue;
+                    this.colorQueue.splice(q, 1);
+                }
+            }
+
+            // Update camera to follow head
+            cameraX = head.x;
+            cameraY = head.y;
+
+            // Mark current chunk and nearby chunks as visited
+            markChunkVisited(head.x, head.y);
+        }
+
+        getHeadPosition() {
+            return this.segments[0];
+        }
+
+        draw() {
+            // Draw segments from tail to head
+            for (let i = this.segments.length - 1; i >= 0; i--) {
+                const seg = this.segments[i];
+                const screenPos = worldToScreen(seg.x, seg.y);
+                const progress = i / (this.segments.length - 1);
+                
+                // Size varies along the body
+                let sizeMod = 1;
+                if (progress > 0.8) {
+                    sizeMod = 0.9 + (progress - 0.8) * 0.5; // Head is bigger
+                } else if (progress < 0.2) {
+                    sizeMod = 0.5 + progress * 2.5; // Tail tapers
+                }
+                
+                const radius = this.segmentRadius * sizeMod;
+                
+                // Color based on segment's individual hue
+                const lightness = 35 + progress * 25;
+                const saturation = 60 + progress * 20;
+                
+                // Glow effect
+                ctx.beginPath();
+                ctx.arc(screenPos.x, screenPos.y, radius * 1.5, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${seg.hue}, ${saturation}%, ${lightness}%, 0.15)`;
+                ctx.fill();
+                
+                // Main segment
+                ctx.beginPath();
+                ctx.arc(screenPos.x, screenPos.y, radius, 0, Math.PI * 2);
+                const gradient = ctx.createRadialGradient(
+                    screenPos.x - radius * 0.3, screenPos.y - radius * 0.3, 0,
+                    screenPos.x, screenPos.y, radius
+                );
+                gradient.addColorStop(0, `hsl(${seg.hue}, ${saturation}%, ${lightness + 20}%)`);
+                gradient.addColorStop(1, `hsl(${seg.hue}, ${saturation}%, ${lightness}%)`);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                // Eyes on head
+                if (i === 0) {
+                    const eyeOffset = radius * 0.4;
+                    const eyeRadius = radius * 0.3;
+                    const eyeAngle1 = this.angle - 0.5;
+                    const eyeAngle2 = this.angle + 0.5;
+                    
+                    // Left eye
+                    ctx.beginPath();
+                    ctx.arc(
+                        screenPos.x + Math.cos(eyeAngle1) * eyeOffset,
+                        screenPos.y + Math.sin(eyeAngle1) * eyeOffset,
+                        eyeRadius, 0, Math.PI * 2
+                    );
+                    ctx.fillStyle = 'white';
+                    ctx.fill();
+                    
+                    // Left pupil
+                    ctx.beginPath();
+                    ctx.arc(
+                        screenPos.x + Math.cos(eyeAngle1) * eyeOffset + Math.cos(this.angle) * eyeRadius * 0.3,
+                        screenPos.y + Math.sin(eyeAngle1) * eyeOffset + Math.sin(this.angle) * eyeRadius * 0.3,
+                        eyeRadius * 0.5, 0, Math.PI * 2
+                    );
+                    ctx.fillStyle = '#111';
+                    ctx.fill();
+                    
+                    // Right eye
+                    ctx.beginPath();
+                    ctx.arc(
+                        screenPos.x + Math.cos(eyeAngle2) * eyeOffset,
+                        screenPos.y + Math.sin(eyeAngle2) * eyeOffset,
+                        eyeRadius, 0, Math.PI * 2
+                    );
+                    ctx.fillStyle = 'white';
+                    ctx.fill();
+                    
+                    // Right pupil
+                    ctx.beginPath();
+                    ctx.arc(
+                        screenPos.x + Math.cos(eyeAngle2) * eyeOffset + Math.cos(this.angle) * eyeRadius * 0.3,
+                        screenPos.y + Math.sin(eyeAngle2) * eyeOffset + Math.sin(this.angle) * eyeRadius * 0.3,
+                        eyeRadius * 0.5, 0, Math.PI * 2
+                    );
+                    ctx.fillStyle = '#111';
+                    ctx.fill();
+                }
+            }
+        }
+    }
+
+    // Food class - spawns in unexplored areas off-screen
+    class Food {
+        constructor(wormAngle) {
+            // Find an unexplored chunk that's off-screen
+            const spawnPos = this.findUnexploredSpawnPoint(wormAngle);
+            this.x = spawnPos.x;
+            this.y = spawnPos.y;
+            this.emoji = foodEmojis[Math.floor(Math.random() * foodEmojis.length)];
+            this.size = 30;
+            this.hue = Math.random() * 360;
+            this.bobOffset = Math.random() * Math.PI * 2;
+            this.rotation = Math.random() * 0.4 - 0.2;
+        }
+
+        findUnexploredSpawnPoint(wormAngle) {
+            // Must spawn off-screen in an unvisited chunk
+            const minDist = Math.max(width, height) / 2 + 50; // Just off screen
+            const maxDist = minDist + 600;
+            
+            // Try multiple times, favoring forward direction
+            for (let attempt = 0; attempt < 50; attempt++) {
+                // Bias angle towards worm's facing direction
+                // First attempts are more forward-focused, later ones spread out
+                const angleSpread = Math.PI * (0.5 + attempt * 0.04); // Starts narrow, widens
+                const angle = wormAngle + (Math.random() - 0.5) * angleSpread;
+                const distance = minDist + Math.random() * (maxDist - minDist);
+                
+                const testX = cameraX + Math.cos(angle) * distance;
+                const testY = cameraY + Math.sin(angle) * distance;
+                
+                // Only spawn in chunks that have NEVER been visited
+                if (!isChunkVisited(testX, testY)) {
+                    // Add some randomness within the chunk
+                    return {
+                        x: testX + (Math.random() - 0.5) * CHUNK_SIZE * 0.8,
+                        y: testY + (Math.random() - 0.5) * CHUNK_SIZE * 0.8
+                    };
+                }
+            }
+            
+            // Fallback: spawn even further out in facing direction in unvisited territory
+            for (let attempt = 0; attempt < 20; attempt++) {
+                const farDistance = maxDist + 200 + Math.random() * 800;
+                const angle = wormAngle + (Math.random() - 0.5) * Math.PI;
+                const testX = cameraX + Math.cos(angle) * farDistance;
+                const testY = cameraY + Math.sin(angle) * farDistance;
+                
+                if (!isChunkVisited(testX, testY)) {
+                    return {
+                        x: testX,
+                        y: testY
+                    };
+                }
+            }
+            
+            // Last resort: just go really far in a random direction
+            const veryFarDistance = maxDist + 1500 + Math.random() * 500;
+            const randomAngle = Math.random() * Math.PI * 2;
+            return {
+                x: cameraX + Math.cos(randomAngle) * veryFarDistance,
+                y: cameraY + Math.sin(randomAngle) * veryFarDistance
+            };
+        }
+
+        isOnScreen() {
+            const screenPos = worldToScreen(this.x, this.y);
+            const margin = 100;
+            return screenPos.x > -margin && screenPos.x < width + margin &&
+                   screenPos.y > -margin && screenPos.y < height + margin;
+        }
+
+        draw() {
+            const screenPos = worldToScreen(this.x, this.y);
+            const bob = Math.sin(Date.now() / 300 + this.bobOffset) * 3;
+            ctx.save();
+            ctx.translate(screenPos.x, screenPos.y + bob);
+            ctx.rotate(Math.sin(Date.now() / 500 + this.bobOffset) * this.rotation);
+            ctx.font = `${this.size}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(this.emoji, 0, 0);
+            ctx.restore();
+        }
+    }
+
+    // Spawn food periodically
+    function spawnFood() {
+        const count = 1 + Math.floor(Math.random() * 2); // 1 or 2
+        for (let i = 0; i < count; i++) {
+            if (foods.length < 12) { // Max 12 food items
+                foods.push(new Food(worm.angle));
+            }
+        }
+    }
+
+    // Clean up food that's too far away
+    function cleanupFood() {
+        for (let i = foods.length - 1; i >= 0; i--) {
+            const food = foods[i];
+            const dx = food.x - cameraX;
+            const dy = food.y - cameraY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 1500) {
+                foods.splice(i, 1);
+            }
+        }
+    }
+
+    // Create single worm that follows mouse
+    const worm = new Worm(0, 0, true);
+
+    // Initial food - spawn after worm is created
+    spawnFood();
+    spawnFood();
+    spawnFood();
+
+    // Spawn food every few seconds
+    setInterval(spawnFood, 2000);
+    setInterval(cleanupFood, 5000);
+
+    // Track mouse movement
+    canvas.addEventListener('mousemove', (e) => {
+        mouseScreenX = e.clientX;
+        mouseScreenY = e.clientY;
+    });
+
+    // Burst particles - now in world coordinates
+    const particles = [];
+
+    function createBurst(worldX, worldY, hue) {
+        for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 / 12) * i;
+            particles.push({
+                x: worldX,
+                y: worldY,
+                vx: Math.cos(angle) * (3 + Math.random() * 3),
+                vy: Math.sin(angle) * (3 + Math.random() * 3),
+                life: 1,
+                hue: hue
+            });
+        }
+    }
+
+    function updateParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vx *= 0.95;
+            p.vy *= 0.95;
+            p.life -= 0.02;
+            
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+            }
+        }
+    }
+
+    function drawParticles() {
+        particles.forEach(p => {
+            const screenPos = worldToScreen(p.x, p.y);
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, 5 * p.life, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${p.life})`;
+            ctx.fill();
+        });
+    }
+
+    // Draw background dots for parallax/movement reference
+    function drawBackground() {
+        bgDots.forEach(dot => {
+            const screenPos = worldToScreen(dot.x, dot.y);
+            // Wrap dots around for infinite feel
+            let sx = ((screenPos.x % (width + 200)) + (width + 200)) % (width + 200) - 100;
+            let sy = ((screenPos.y % (height + 200)) + (height + 200)) % (height + 200) - 100;
+            
+            ctx.beginPath();
+            ctx.arc(sx, sy, dot.size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${dot.alpha})`;
+            ctx.fill();
+        });
+    }
+
+    // Check collision between worm head and food
+    function checkFoodCollision() {
+        const head = worm.getHeadPosition();
+        const headRadius = worm.segmentRadius;
+        
+        for (let i = foods.length - 1; i >= 0; i--) {
+            const food = foods[i];
+            const dx = head.x - food.x;
+            const dy = head.y - food.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < headRadius + food.size / 2) {
+                // Collision! Eat the food
+                worm.eatFood(food.hue);
+                createBurst(food.x, food.y, food.hue);
+                foods.splice(i, 1);
+            }
+        }
+    }
+
+    // Draw coordinates display
+    function drawCoordinates() {
+        const head = worm.getHeadPosition();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Position: (${Math.round(head.x)}, ${Math.round(-head.y)})`, width - 20, height - 20);
+        ctx.fillText(`Length: ${worm.segments.length} segments`, width - 20, height - 40);
+        ctx.fillText(`Explored: ${chunkVisits.size} chunks`, width - 20, height - 60);
+    }
+
+    // Animation loop
+    function animate() {
+        // Clear with solid color
+        ctx.fillStyle = 'rgba(26, 26, 46, 1)';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Update chunk animations
+        updateChunkAnimations();
+        
+        // Draw chunk visit counts
+        drawChunks();
+        
+        // Draw background reference dots
+        drawBackground();
+        
+        // Draw food
+        foods.forEach(food => food.draw());
+        
+        updateParticles();
+        drawParticles();
+        
+        worm.update();
+        worm.draw();
+        
+        checkFoodCollision();
+        
+        drawCoordinates();
+        
+        requestAnimationFrame(animate);
+    }
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+    });
+
+    animate();
+</script>
+```
+
+</body>
+</html>
