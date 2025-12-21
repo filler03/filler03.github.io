@@ -18,6 +18,7 @@
         }
         canvas {
             display: block;
+            touch-action: none;
         }
         #info {
             position: fixed;
@@ -34,6 +35,7 @@
     <canvas id="canvas"></canvas>
     <div id="info">Move the mouse to guide the worm • Eat food to grow!</div>
     <script>
+        try {
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
 
@@ -552,6 +554,21 @@
         mouseScreenY = e.clientY;
     });
 
+    // Touch support for mobile devices
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        mouseScreenX = touch.clientX;
+        mouseScreenY = touch.clientY;
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        mouseScreenX = touch.clientX;
+        mouseScreenY = touch.clientY;
+    });
+
     // Burst particles - now in world coordinates
     const particles = [];
 
@@ -678,6 +695,10 @@
     });
 
     animate();
+    } catch(e) {
+        console.error('Worm game error:', e);
+        document.body.innerHTML = '<div style="color:white;padding:20px;">Error: ' + e.message + '</div>';
+    }
 </script>
 ```
 
