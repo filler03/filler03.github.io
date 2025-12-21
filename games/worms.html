@@ -33,7 +33,7 @@
 </head>
 <body>
     <canvas id="canvas"></canvas>
-    <div id="info">Move the mouse to guide the worm • Eat food to grow!</div>
+    <div id="info">Tap and drag to guide the worm • Eat food to grow!</div>
     <script>
         // Global error handler to display errors on screen
         window.onerror = function(message, source, lineno, colno, error) {
@@ -63,9 +63,10 @@
     let cameraX = 0;
     let cameraY = 0;
 
-    // Track mouse position in screen coordinates
+    // Track mouse position in screen coordinates - start at center
     let mouseScreenX = width / 2;
     let mouseScreenY = height / 2;
+    let hasUserInput = false; // Track if user has touched/moved yet
 
     // Convert screen to world coordinates
     function screenToWorld(screenX, screenY) {
@@ -568,6 +569,7 @@
     canvas.addEventListener('mousemove', (e) => {
         mouseScreenX = e.clientX;
         mouseScreenY = e.clientY;
+        hasUserInput = true;
     });
 
     // Touch support for mobile devices
@@ -576,6 +578,7 @@
         const touch = e.touches[0];
         mouseScreenX = touch.clientX;
         mouseScreenY = touch.clientY;
+        hasUserInput = true;
     });
 
     canvas.addEventListener('touchmove', (e) => {
@@ -583,6 +586,7 @@
         const touch = e.touches[0];
         mouseScreenX = touch.clientX;
         mouseScreenY = touch.clientY;
+        hasUserInput = true;
     });
 
     // Burst particles - now in world coordinates
@@ -700,6 +704,19 @@
         checkFoodCollision();
         
         drawCoordinates();
+        
+        // Show tap to start message if no input yet
+        if (!hasUserInput) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, width, height);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Tap anywhere to start!', width / 2, height / 2);
+            ctx.font = '16px sans-serif';
+            ctx.fillText('Drag your finger to guide the worm', width / 2, height / 2 + 40);
+        }
         
         requestAnimationFrame(animate);
     }
