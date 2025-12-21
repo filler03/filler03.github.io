@@ -9,92 +9,52 @@
     <title>Slithering Worm</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         html, body {
-            width: 100%; 
-            height: 100dvh; 
-            overflow: hidden;
-            background: #1a1a2e;
-            position: fixed;
-            top: 0; left: 0;
+            width: 100%; height: 100dvh; overflow: hidden;
+            background: #1a1a2e; position: fixed; top: 0; left: 0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-
-        body { 
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); 
-        }
-
+        body { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); }
         canvas { 
-            display: block; 
-            touch-action: none; 
-            width: 100%; 
-            height: 100%;
-            transform: translateZ(0);
-            -webkit-transform: translateZ(0);
+            display: block; touch-action: none; width: 100%; height: 100%;
+            transform: translateZ(0); -webkit-transform: translateZ(0);
         }
-
         #info {
-            position: fixed;
-            top: max(10px, env(safe-area-inset-top, 10px));
+            position: fixed; top: max(10px, env(safe-area-inset-top, 10px));
             left: max(10px, env(safe-area-inset-left, 10px));
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 13px;
-            pointer-events: none;
-            z-index: 10;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            color: rgba(255, 255, 255, 0.7); font-size: 13px;
+            pointer-events: none; z-index: 10;
         }
-
         #stats {
-            position: fixed;
-            bottom: max(15px, env(safe-area-inset-bottom, 15px));
+            position: fixed; bottom: max(15px, env(safe-area-inset-bottom, 15px));
             right: max(15px, env(safe-area-inset-right, 15px));
-            text-align: right;
-            color: rgba(255, 255, 255, 0.6);
-            font-family: 'SF Mono', 'Courier New', monospace;
-            font-size: 11px;
-            line-height: 1.6;
-            pointer-events: none;
-            z-index: 20;
-            background: rgba(0, 0, 0, 0.3);
-            padding: 10px;
-            border-radius: 10px;
-            backdrop-filter: blur(5px);
-            -webkit-backdrop-filter: blur(5px);
+            text-align: right; color: rgba(255, 255, 255, 0.6);
+            font-family: 'SF Mono', monospace; font-size: 11px;
+            pointer-events: none; z-index: 20;
+            background: rgba(0, 0, 0, 0.3); padding: 10px; border-radius: 10px;
+            backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
             border: 1px solid rgba(255,255,255,0.1);
         }
-
-        .stat-line { display: block; }
-
         #overlay {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            z-index: 100;
-            transition: opacity 0.5s;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; color: white;
+            z-index: 100; transition: opacity 0.5s; cursor: pointer;
         }
-        
         #overlay.hidden { opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="info">Guide the worm • Eat to grow</div>
-    
     <div id="overlay">
         <h2 style="margin-bottom: 10px;">Slithering Worm</h2>
         <p>Tap anywhere to start</p>
     </div>
-
     <div id="stats">
-        <span class="stat-line" id="stat-pos">Position: (0, 0)</span>
-        <span class="stat-line" id="stat-len">Length: 12</span>
-        <span class="stat-line" id="stat-chunks">Explored: 0 chunks</span>
+        <div id="stat-pos">Position: (0, 0)</div>
+        <div id="stat-len">Length: 12</div>
+        <div id="stat-chunks">Explored: 0 chunks</div>
     </div>
-
     <canvas id="canvas"></canvas>
 
     <script>
@@ -115,23 +75,14 @@
             dpr = window.devicePixelRatio || 1;
             width = window.visualViewport ? window.visualViewport.width : window.innerWidth;
             height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            
             canvas.width = Math.floor(width * dpr);
             canvas.height = Math.floor(height * dpr);
             canvas.style.width = width + 'px';
             canvas.style.height = height + 'px';
-            
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.scale(dpr, dpr);
-            
-            if (!hasUserInput) {
-                mouseScreenX = width / 2;
-                mouseScreenY = height / 2;
-            }
         }
-        
         window.addEventListener('resize', resizeCanvas);
-        if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
         function screenToWorld(sx, sy) { return { x: sx - width/2 + cameraX, y: sy - height/2 + cameraY }; }
@@ -141,35 +92,25 @@
         const foods = [];
         const CHUNK_SIZE = 200;
         const chunkVisits = new Map();
-        let lastChunkKey = null;
 
         function markChunkVisited(wx, wy) {
             const cx = Math.floor(wx/CHUNK_SIZE), cy = Math.floor(wy/CHUNK_SIZE);
             const key = `${cx},${cy}`;
-            if (key !== lastChunkKey) {
-                const existing = chunkVisits.get(key);
-                if (existing) { 
-                    existing.count++; 
-                    existing.numberPop = 1.0; 
-                } else { 
-                    chunkVisits.set(key, { cx, cy, count: 1, fadeIn: 0, numberPop: 1.0 }); 
-                }
-                lastChunkKey = key;
+            if (!chunkVisits.has(key)) {
+                chunkVisits.set(key, { cx, cy, fadeIn: 0 });
             }
         }
 
-        const bgDots = Array.from({length: 150}, () => ({
-            x: (Math.random()-0.5)*4000, 
-            y: (Math.random()-0.5)*4000, 
-            size: Math.random()*2+1, 
-            alpha: Math.random()*0.3+0.1 
+        const bgDots = Array.from({length: 100}, () => ({
+            x: (Math.random()-0.5)*4000, y: (Math.random()-0.5)*4000, 
+            size: Math.random()*2+1, alpha: Math.random()*0.2+0.1 
         }));
 
         class Worm {
             constructor(x, y) {
                 this.segments = [];
-                this.segmentRadius = Math.max(10, Math.min(14, width / 30));
-                this.speed = 2.8;
+                this.segmentRadius = Math.max(10, width / 35);
+                this.speed = 3;
                 this.angle = 0;
                 this.baseHue = Math.random() * 360;
                 this.colorQueue = [];
@@ -177,13 +118,12 @@
                     this.segments.push({ x: x - i * 10, y: y, hue: this.baseHue });
                 }
             }
-
             update() {
                 const head = this.segments[0];
                 if (hasUserInput) {
                     const m = screenToWorld(mouseScreenX, mouseScreenY);
                     const dx = m.x - head.x, dy = m.y - head.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    const dist = Math.hypot(dx, dy);
                     if (dist > 5) {
                         const target = Math.atan2(dy, dx);
                         let diff = target - this.angle;
@@ -194,11 +134,10 @@
                         head.y += Math.sin(this.angle) * this.speed;
                     }
                 }
-
                 for (let i = 1; i < this.segments.length; i++) {
                     const cur = this.segments[i], prev = this.segments[i-1];
                     const dx = prev.x - cur.x, dy = prev.y - cur.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    const dist = Math.hypot(dx, dy);
                     const target = this.segmentRadius * 0.7;
                     if (dist > target) {
                         const ratio = (dist - target) / dist;
@@ -206,40 +145,27 @@
                         cur.y += dy * ratio * 0.8;
                     }
                 }
-
                 for (let q = this.colorQueue.length - 1; q >= 0; q--) {
                     const c = this.colorQueue[q];
                     c.index += 0.4;
                     const idx = Math.floor(c.index);
                     if (idx < this.segments.length) this.segments[idx].hue = c.hue;
                     if (c.index >= this.segments.length - 1) {
-                        const tail = this.segments[this.segments.length-1];
-                        this.segments.push({...tail});
+                        this.segments.push({...this.segments[this.segments.length-1]});
                         this.colorQueue.splice(q, 1);
                     }
                 }
                 cameraX = head.x; cameraY = head.y;
                 markChunkVisited(head.x, head.y);
             }
-
             draw() {
                 for (let i = this.segments.length - 1; i >= 0; i--) {
                     const seg = this.segments[i];
                     const sp = worldToScreen(seg.x, seg.y);
-                    const r = i === 0 ? this.segmentRadius * 1.1 : this.segmentRadius;
                     ctx.beginPath();
-                    ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
-                    ctx.fillStyle = `hsl(${seg.hue}, 70%, ${i === 0 ? 60 : 50}%)`;
+                    ctx.arc(sp.x, sp.y, i===0 ? this.segmentRadius*1.1 : this.segmentRadius, 0, Math.PI*2);
+                    ctx.fillStyle = `hsl(${seg.hue}, 70%, 50%)`;
                     ctx.fill();
-                    if (i === 0) {
-                        ctx.fillStyle = 'white';
-                        const eyeDist = r * 0.5, eyeSize = r * 0.3;
-                        [-0.6, 0.6].forEach(a => {
-                            ctx.beginPath();
-                            ctx.arc(sp.x + Math.cos(this.angle+a)*eyeDist, sp.y + Math.sin(this.angle+a)*eyeDist, eyeSize, 0, Math.PI*2);
-                            ctx.fill();
-                        });
-                    }
                 }
             }
         }
@@ -247,53 +173,49 @@
         class Food {
             constructor() {
                 const a = Math.random() * Math.PI * 2;
-                const d = 400 + Math.random() * 600;
+                const d = 300 + Math.random() * 500;
                 this.x = cameraX + Math.cos(a) * d;
                 this.y = cameraY + Math.sin(a) * d;
                 this.emoji = foodEmojis[Math.floor(Math.random() * foodEmojis.length)];
                 this.hue = Math.random() * 360;
-                this.size = 24;
             }
             draw() {
                 const sp = worldToScreen(this.x, this.y);
-                ctx.font = '24px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
+                ctx.font = '24px Arial'; ctx.textAlign = 'center';
                 ctx.fillText(this.emoji, sp.x, sp.y);
             }
         }
 
         const worm = new Worm(0, 0);
-        const particles = [];
-
-        function spawnFood() { if(foods.length < 20) foods.push(new Food()); }
-        setInterval(spawnFood, 1000);
+        const foods = [];
+        setInterval(() => { if(foods.length < 15) foods.push(new Food()); }, 1000);
 
         const handleInput = (x, y) => {
             mouseScreenX = x; mouseScreenY = y;
             if (!hasUserInput) {
                 hasUserInput = true;
                 overlay.classList.add('hidden');
+                setTimeout(() => overlay.style.display = 'none', 500);
             }
         };
 
-        canvas.addEventListener('mousemove', e => handleInput(e.clientX, e.clientY));
-        canvas.addEventListener('touchstart', e => {
-            e.preventDefault();
-            handleInput(e.touches[0].clientX, e.touches[0].clientY);
-        }, {passive: false});
-        canvas.addEventListener('touchmove', e => {
-            e.preventDefault();
-            handleInput(e.touches[0].clientX, e.touches[0].clientY);
-        }, {passive: false});
+        [canvas, overlay].forEach(el => {
+            el.addEventListener('mousemove', e => handleInput(e.clientX, e.clientY));
+            el.addEventListener('touchstart', e => {
+                if (el === canvas) e.preventDefault();
+                handleInput(e.touches[0].clientX, e.touches[0].clientY);
+            }, {passive: false});
+            el.addEventListener('touchmove', e => {
+                if (el === canvas) e.preventDefault();
+                handleInput(e.touches[0].clientX, e.touches[0].clientY);
+            }, {passive: false});
+        });
 
         function animate() {
-            ctx.fillStyle = '#1a1a2e';
-            ctx.fillRect(0, 0, width, height);
-
-            // Draw Chunks
+            ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, 0, width, height);
+            
             for (const data of chunkVisits.values()) {
-                if (data.fadeIn < 1) data.fadeIn += 0.03;
+                if (data.fadeIn < 1) data.fadeIn += 0.02;
                 const sp = worldToScreen(data.cx * CHUNK_SIZE, data.cy * CHUNK_SIZE);
                 ctx.fillStyle = `rgba(50, 50, 80, ${0.2 * data.fadeIn})`;
                 ctx.fillRect(sp.x, sp.y, CHUNK_SIZE, CHUNK_SIZE);
@@ -309,22 +231,17 @@
 
             foods.forEach((f, i) => {
                 f.draw();
-                const head = worm.segments[0];
-                if (Math.hypot(head.x - f.x, head.y - f.y) < 30) {
+                if (Math.hypot(worm.segments[0].x - f.x, worm.segments[0].y - f.y) < 30) {
                     worm.colorQueue.push({hue: f.hue, index: 0});
                     foods.splice(i, 1);
                 }
             });
 
-            worm.update();
-            worm.draw();
-
-            // Update Stats
+            worm.update(); worm.draw();
             const h = worm.segments[0];
             statPos.textContent = `Position: (${Math.round(h.x)}, ${Math.round(-h.y)})`;
             statLen.textContent = `Length: ${worm.segments.length}`;
             statChunks.textContent = `Explored: ${chunkVisits.size} chunks`;
-
             requestAnimationFrame(animate);
         }
         animate();
