@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -6,279 +7,540 @@
     <title>Slither Mobile</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        /* Force the body to be exactly the size of the iPhone screen */
-        html, body {
-            width: 100%;
-            height: 100%;
-            height: 100dvh;
-            overflow: hidden;
-            background: #0a0a1a;
-            position: fixed;
-            font-family: -apple-system, system-ui, sans-serif;
-        }
 
-        canvas {
-            display: block;
-            touch-action: none; /* Critical: Stops iOS from trying to scroll */
-            width: 100%;
-            height: 100%;
-            background: radial-gradient(circle at center, #1b1b3a 0%, #0a0a1a 100%);
-        }
+```
+    html, body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+        background: #0a0a1a;
+        position: fixed;
+        font-family: -apple-system, system-ui, sans-serif;
+    }
 
-        /* Fixed UI Layer */
-        #ui {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; /* Let touches pass through to the game */
-            z-index: 10;
-        }
+    canvas {
+        display: block;
+        touch-action: none;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(circle at center, #1b1b3a 0%, #0a0a1a 100%);
+    }
 
-        .label {
-            position: absolute;
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 12px;
-            font-family: monospace;
-            padding: env(safe-area-inset-top) 15px;
-        }
+    #ui {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        pointer-events: none;
+        z-index: 10;
+    }
 
-        #stats {
-            position: absolute;
-            bottom: max(20px, env(safe-area-inset-bottom));
-            right: 20px;
-            text-align: right;
-            color: #00ffcc;
-            font-family: monospace;
-            text-shadow: 0 0 5px rgba(0, 255, 204, 0.5);
-        }
+    .label {
+        position: absolute;
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 12px;
+        font-family: monospace;
+        padding: env(safe-area-inset-top) 15px;
+    }
 
-        #prompt {
-            position: absolute;
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            text-align: center;
-            transition: opacity 0.5s;
-        }
+    #stats {
+        position: absolute;
+        bottom: max(20px, env(safe-area-inset-bottom));
+        right: 20px;
+        text-align: right;
+        color: #00ffcc;
+        font-family: monospace;
+        text-shadow: 0 0 5px rgba(0, 255, 204, 0.5);
+    }
 
-        #debug {
-            position: absolute;
-            bottom: 10px; left: 10px;
-            color: red; font-size: 10px;
-        }
-    </style>
+    #prompt {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        text-align: center;
+        transition: opacity 0.5s;
+    }
+
+    #debug {
+        position: absolute;
+        bottom: 10px; left: 10px;
+        color: red; font-size: 10px;
+    }
+</style>
+```
+
 </head>
 <body>
 
-    <canvas id="canvas"></canvas>
+```
+<canvas id="canvas"></canvas>
 
-    <div id="ui">
-        <div class="label">SLITHER.IO MOBILE</div>
-        <div id="prompt">
-            <h1 style="margin-bottom:10px">READY?</h1>
-            <p>Drag anywhere to move</p>
-        </div>
-        <div id="stats">
-            <div id="stat-len">Length: 12</div>
-            <div id="stat-pos">0, 0</div>
-        </div>
-        <div id="debug"></div>
+<div id="ui">
+    <div class="label">SLITHER.IO MOBILE</div>
+    <div id="prompt">
+        <h1 style="margin-bottom:10px">READY?</h1>
+        <p>Drag anywhere to move</p>
     </div>
+    <div id="stats">
+        <div id="stat-len">Length: 12</div>
+        <div id="stat-pos">0, 0</div>
+        <div id="stat-chunks">Explored: 0</div>
+    </div>
+    <div id="debug"></div>
+</div>
 
-    <script>
-    // Emergency logger for iPhone troubleshooting
-    const debug = (msg) => { document.getElementById('debug').innerText += msg + " | "; };
+<script>
+const debug = (msg) => { document.getElementById('debug').innerText += msg + " | "; };
 
-    try {
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d', { alpha: false });
-        const prompt = document.getElementById('prompt');
-        const statLen = document.getElementById('stat-len');
-        const statPos = document.getElementById('stat-pos');
+try {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const prompt = document.getElementById('prompt');
+    const statLen = document.getElementById('stat-len');
+    const statPos = document.getElementById('stat-pos');
+    const statChunks = document.getElementById('stat-chunks');
 
-        let width, height, dpr;
-        let cameraX = 0, cameraY = 0;
-        let targetX = 0, targetY = 0;
-        let isMoving = false;
+    let width, height, dpr;
+    let cameraX = 0, cameraY = 0;
+    let targetX = 0, targetY = 0;
+    let isMoving = false;
 
-        function resize() {
-            dpr = window.devicePixelRatio || 1;
-            width = window.innerWidth;
-            height = window.innerHeight;
-            canvas.width = Math.floor(width * dpr);
-            canvas.height = Math.floor(height * dpr);
-            ctx.scale(dpr, dpr);
-            // On start, center the target
-            if(!isMoving) { targetX = width/2; targetY = height/2; }
+    function resize() {
+        dpr = window.devicePixelRatio || 1;
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        ctx.scale(dpr, dpr);
+        if(!isMoving) { targetX = width/2; targetY = height/2; }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // WORLD CONVERSION
+    const toWorld = (sx, sy) => ({ x: sx - width/2 + cameraX, y: sy - height/2 + cameraY });
+    const toScreen = (wx, wy) => ({ x: wx - cameraX + width/2, y: wy - cameraY + height/2 });
+
+    // CHUNK SYSTEM
+    const CHUNK_SIZE = 200;
+    const chunkVisits = new Map();
+    let lastChunkKey = null;
+
+    function getChunkKey(wx, wy) {
+        return `${Math.floor(wx / CHUNK_SIZE)},${Math.floor(wy / CHUNK_SIZE)}`;
+    }
+
+    function markChunkVisited(wx, wy) {
+        const key = getChunkKey(wx, wy);
+        if (key !== lastChunkKey) {
+            const existing = chunkVisits.get(key);
+            if (existing) {
+                existing.count++;
+                existing.numberPop = 1.0;
+            } else {
+                chunkVisits.set(key, { count: 1, fadeIn: 0, numberPop: 1.0 });
+            }
+            lastChunkKey = key;
         }
-        window.addEventListener('resize', resize);
-        resize();
+    }
 
-        // WORLD CONVERSION
-        const toWorld = (sx, sy) => ({ x: sx - width/2 + cameraX, y: sy - height/2 + cameraY });
-        const toScreen = (wx, wy) => ({ x: wx - cameraX + width/2, y: wy - cameraY + height/2 });
+    function isChunkVisited(wx, wy) {
+        return chunkVisits.has(getChunkKey(wx, wy));
+    }
 
-        // FOOD SYSTEM
-        const foods = [];
-        function spawnFood() {
-            if (foods.length < 20) {
-                const angle = Math.random() * Math.PI * 2;
-                const dist = 300 + Math.random() * 400;
+    function updateChunkAnimations() {
+        for (const data of chunkVisits.values()) {
+            if (data.fadeIn < 1) data.fadeIn = Math.min(1, data.fadeIn + 0.03);
+            if (data.numberPop > 0) data.numberPop = Math.max(0, data.numberPop - 0.025);
+        }
+    }
+
+    function drawChunks() {
+        const startX = Math.floor((cameraX - width/2) / CHUNK_SIZE) - 1;
+        const endX = Math.floor((cameraX + width/2) / CHUNK_SIZE) + 1;
+        const startY = Math.floor((cameraY - height/2) / CHUNK_SIZE) - 1;
+        const endY = Math.floor((cameraY + height/2) / CHUNK_SIZE) + 1;
+
+        const numFont = Math.max(12, Math.min(16, width / 30));
+        const coordFont = Math.max(8, Math.min(10, width / 50));
+
+        for (let cx = startX; cx <= endX; cx++) {
+            for (let cy = startY; cy <= endY; cy++) {
+                const key = `${cx},${cy}`;
+                const data = chunkVisits.get(key);
+
+                if (data && data.count > 0) {
+                    const wx = cx * CHUNK_SIZE;
+                    const wy = cy * CHUNK_SIZE;
+                    const sp = toScreen(wx, wy);
+
+                    // Chunk background
+                    const alpha = 0.15 * data.fadeIn;
+                    ctx.fillStyle = `rgba(50, 50, 70, ${alpha})`;
+                    ctx.fillRect(sp.x, sp.y, CHUNK_SIZE, CHUNK_SIZE);
+
+                    // Visit count with animation
+                    const cp = toScreen(wx + CHUNK_SIZE/2, wy + CHUNK_SIZE/2);
+                    const pop = Math.sin((1 - data.numberPop) * Math.PI);
+                    const scale = 1 + pop * 0.5;
+                    const bright = 0.2 + pop * 0.6;
+
+                    ctx.save();
+                    ctx.translate(cp.x, cp.y);
+                    ctx.scale(scale, scale);
+
+                    // Gold color animation
+                    const r = 255;
+                    const g = Math.round(255 - 40 * pop);
+                    const b = Math.round(255 - 255 * pop);
+
+                    ctx.font = `${numFont}px monospace`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = `rgba(${r},${g},${b},${bright * data.fadeIn})`;
+                    ctx.fillText(data.count.toString(), 0, 0);
+
+                    // Chunk coordinates
+                    ctx.font = `${coordFont}px monospace`;
+                    ctx.fillStyle = `rgba(255,255,255,${0.15 * data.fadeIn})`;
+                    ctx.fillText(`${cx},${-cy}`, 0, numFont + 4);
+
+                    ctx.restore();
+                }
+            }
+        }
+    }
+
+    // FOOD SYSTEM WITH EMOJIS
+    const foodEmojis = ['🍎', '🍕', '🍔', '🌮', '🍩', '🍪', '🧁', '🍇', '🍓', '🍌', '🥕', '🌽', '🍗', '🧀', '🥐'];
+    const foods = [];
+
+    function spawnFood() {
+        if (foods.length >= 12) return;
+        
+        // Spawn in unexplored chunks off-screen
+        const minDist = Math.max(width, height) / 2 + 50;
+        const maxDist = minDist + 600;
+
+        for (let attempt = 0; attempt < 50; attempt++) {
+            const angleSpread = Math.PI * (0.5 + attempt * 0.04);
+            const angle = player.angle + (Math.random() - 0.5) * angleSpread;
+            const distance = minDist + Math.random() * (maxDist - minDist);
+
+            const testX = cameraX + Math.cos(angle) * distance;
+            const testY = cameraY + Math.sin(angle) * distance;
+
+            if (!isChunkVisited(testX, testY)) {
                 foods.push({
-                    x: cameraX + Math.cos(angle) * dist,
-                    y: cameraY + Math.sin(angle) * dist,
-                    hue: Math.random() * 360
+                    x: testX + (Math.random() - 0.5) * CHUNK_SIZE * 0.8,
+                    y: testY + (Math.random() - 0.5) * CHUNK_SIZE * 0.8,
+                    emoji: foodEmojis[Math.floor(Math.random() * foodEmojis.length)],
+                    hue: Math.random() * 360,
+                    size: Math.max(24, Math.min(32, Math.min(width, height) / 15)),
+                    bob: Math.random() * Math.PI * 2,
+                    rot: Math.random() * 0.4 - 0.2
                 });
+                return;
             }
         }
 
-        // WORM SYSTEM
-        class Worm {
-            constructor() {
-                this.segments = [];
-                this.radius = 12;
-                this.angle = 0;
-                this.speed = 3;
-                for(let i=0; i<15; i++) {
-                    this.segments.push({x: 0, y: 0});
-                }
-            }
-            update() {
-                const head = this.segments[0];
-                const worldTarget = toWorld(targetX, targetY);
-                
-                const dx = worldTarget.x - head.x;
-                const dy = worldTarget.y - head.y;
-                const targetAngle = Math.atan2(dy, dx);
-                
-                // Smooth rotation
-                let diff = targetAngle - this.angle;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff > Math.PI) diff -= Math.PI * 2;
-                this.angle += diff * 0.1;
+        // Fallback: spawn far away
+        const farDist = maxDist + 1000 + Math.random() * 500;
+        const farAngle = Math.random() * Math.PI * 2;
+        foods.push({
+            x: cameraX + Math.cos(farAngle) * farDist,
+            y: cameraY + Math.sin(farAngle) * farDist,
+            emoji: foodEmojis[Math.floor(Math.random() * foodEmojis.length)],
+            hue: Math.random() * 360,
+            size: Math.max(24, Math.min(32, Math.min(width, height) / 15)),
+            bob: Math.random() * Math.PI * 2,
+            rot: Math.random() * 0.4 - 0.2
+        });
+    }
 
-                // Move head
-                head.x += Math.cos(this.angle) * this.speed;
-                head.y += Math.sin(this.angle) * this.speed;
+    function drawFood() {
+        const now = Date.now();
+        foods.forEach(f => {
+            const pos = toScreen(f.x, f.y);
+            const bobY = Math.sin(now / 300 + f.bob) * 3;
+            const rotation = Math.sin(now / 500 + f.bob) * f.rot;
 
-                // Move body
-                for(let i=1; i<this.segments.length; i++) {
-                    const seg = this.segments[i];
-                    const prev = this.segments[i-1];
-                    const d = Math.hypot(prev.x - seg.x, prev.y - seg.y);
-                    const minDist = 10;
-                    if(d > minDist) {
-                        const t = (d - minDist) / d;
-                        seg.x += (prev.x - seg.x) * t;
-                        seg.y += (prev.y - seg.y) * t;
-                    }
-                }
-                cameraX = head.x;
-                cameraY = head.y;
-            }
-            draw() {
-                for(let i=this.segments.length-1; i>=0; i--) {
-                    const pos = toScreen(this.segments[i].x, this.segments[i].y);
-                    ctx.beginPath();
-                    ctx.arc(pos.x, pos.y, i === 0 ? 14 : 11, 0, Math.PI*2);
-                    ctx.fillStyle = i === 0 ? '#00ffcc' : `hsl(170, 100%, ${40 + (i*2)}%)`;
-                    ctx.fill();
-                    // Eyes
-                    if(i === 0) {
-                        ctx.fillStyle = 'white';
-                        ctx.beginPath();
-                        ctx.arc(pos.x + Math.cos(this.angle+0.5)*8, pos.y + Math.sin(this.angle+0.5)*8, 3, 0, Math.PI*2);
-                        ctx.arc(pos.x + Math.cos(this.angle-0.5)*8, pos.y + Math.sin(this.angle-0.5)*8, 3, 0, Math.PI*2);
-                        ctx.fill();
-                    }
-                }
-            }
+            ctx.save();
+            ctx.translate(pos.x, pos.y + bobY);
+            ctx.rotate(rotation);
+            ctx.font = `${f.size}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(f.emoji, 0, 0);
+            ctx.restore();
+        });
+    }
+
+    function cleanupFood() {
+        for (let i = foods.length - 1; i >= 0; i--) {
+            const f = foods[i];
+            const dist = Math.hypot(f.x - cameraX, f.y - cameraY);
+            if (dist > 1500) foods.splice(i, 1);
         }
+    }
 
-        const player = new Worm();
+    // PARTICLE SYSTEM
+    const particles = [];
 
-        // INPUT HANDLING - Listening directly to window for maximum compatibility
-        const input = (e) => {
-            if(!isMoving) {
-                isMoving = true;
-                prompt.style.opacity = '0';
+    function createBurst(x, y, hue) {
+        for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 / 12) * i;
+            particles.push({
+                x, y,
+                vx: Math.cos(angle) * (3 + Math.random() * 3),
+                vy: Math.sin(angle) * (3 + Math.random() * 3),
+                life: 1,
+                hue
+            });
+        }
+    }
+
+    function updateAndDrawParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vx *= 0.95;
+            p.vy *= 0.95;
+            p.life -= 0.02;
+
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+                continue;
             }
-            const t = e.touches ? e.touches[0] : e;
-            targetX = t.clientX;
-            targetY = t.clientY;
-        };
 
-        window.addEventListener('touchstart', (e) => { 
-            // Only preventDefault if not touching a UI button (if added later)
-            if(e.target === canvas) e.preventDefault(); 
-            input(e); 
-        }, {passive: false});
-
-        window.addEventListener('touchmove', (e) => { 
-            if(e.target === canvas) e.preventDefault(); 
-            input(e); 
-        }, {passive: false});
-
-        window.addEventListener('mousemove', input);
-
-        // GRID BACKGROUND
-        function drawGrid() {
-            const size = 100;
-            const offsetX = -cameraX % size;
-            const offsetY = -cameraY % size;
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-            ctx.lineWidth = 1;
+            const pos = toScreen(p.x, p.y);
             ctx.beginPath();
-            for (let x = offsetX; x < width; x += size) {
-                ctx.moveTo(x, 0); ctx.lineTo(x, height);
+            ctx.arc(pos.x, pos.y, 5 * p.life, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${p.life})`;
+            ctx.fill();
+        }
+    }
+
+    // WORM SYSTEM
+    class Worm {
+        constructor() {
+            this.segments = [];
+            this.radius = 12;
+            this.angle = 0;
+            this.speed = 3;
+            this.baseHue = 170;
+            this.colorQueue = [];
+
+            for (let i = 0; i < 15; i++) {
+                this.segments.push({ x: 0, y: 0, hue: this.baseHue });
             }
-            for (let y = offsetY; y < height; y += size) {
-                ctx.moveTo(0, y); ctx.lineTo(width, y);
-            }
-            ctx.stroke();
         }
 
-        function loop() {
-            // 1. Clear
-            ctx.fillStyle = '#0a0a1a';
-            ctx.fillRect(0, 0, width, height);
+        eatFood(foodHue) {
+            this.colorQueue.push({ hue: foodHue, index: 0 });
+            this.segments[0].hue = foodHue;
+        }
 
-            // 2. Background
-            drawGrid();
+        grow() {
+            const tail = this.segments[this.segments.length - 1];
+            this.segments.push({ x: tail.x, y: tail.y, hue: tail.hue });
+        }
 
-            // 3. Food
-            spawnFood();
-            foods.forEach((f, i) => {
-                const pos = toScreen(f.x, f.y);
-                ctx.fillStyle = `hsl(${f.hue}, 100%, 60%)`;
+        update() {
+            const head = this.segments[0];
+            const worldTarget = toWorld(targetX, targetY);
+
+            const dx = worldTarget.x - head.x;
+            const dy = worldTarget.y - head.y;
+            const targetAngle = Math.atan2(dy, dx);
+
+            // Smooth rotation
+            let diff = targetAngle - this.angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            this.angle += diff * 0.1;
+
+            // Move head
+            head.x += Math.cos(this.angle) * this.speed;
+            head.y += Math.sin(this.angle) * this.speed;
+
+            // Move body
+            for (let i = 1; i < this.segments.length; i++) {
+                const seg = this.segments[i];
+                const prev = this.segments[i - 1];
+                const d = Math.hypot(prev.x - seg.x, prev.y - seg.y);
+                const minDist = 10;
+                if (d > minDist) {
+                    const t = (d - minDist) / d;
+                    seg.x += (prev.x - seg.x) * t;
+                    seg.y += (prev.y - seg.y) * t;
+                }
+            }
+
+            // Color propagation
+            for (let q = this.colorQueue.length - 1; q >= 0; q--) {
+                const c = this.colorQueue[q];
+                c.index += 0.3;
+                const idx = Math.floor(c.index);
+                if (idx < this.segments.length) {
+                    this.segments[idx].hue = c.hue;
+                }
+                if (c.index >= this.segments.length - 1) {
+                    this.grow();
+                    const tail = this.segments[this.segments.length - 1];
+                    createBurst(tail.x, tail.y, c.hue);
+                    this.baseHue = c.hue;
+                    this.colorQueue.splice(q, 1);
+                }
+            }
+
+            cameraX = head.x;
+            cameraY = head.y;
+            markChunkVisited(head.x, head.y);
+        }
+
+        draw() {
+            for (let i = this.segments.length - 1; i >= 0; i--) {
+                const seg = this.segments[i];
+                const pos = toScreen(seg.x, seg.y);
+                const isHead = i === 0;
+                const radius = isHead ? 14 : 11;
+
+                // Glow
                 ctx.beginPath();
-                ctx.arc(pos.x, pos.y, 5, 0, Math.PI*2);
+                ctx.arc(pos.x, pos.y, radius * 1.4, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${seg.hue}, 100%, 50%, 0.15)`;
                 ctx.fill();
 
-                // Eat detection
-                if(Math.hypot(player.segments[0].x - f.x, player.segments[0].y - f.y) < 20) {
-                    foods.splice(i, 1);
-                    player.segments.push({ ...player.segments[player.segments.length-1] });
+                // Body
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+                ctx.fillStyle = `hsl(${seg.hue}, 100%, ${isHead ? 60 : 40 + (i * 1.5)}%)`;
+                ctx.fill();
+
+                // Eyes
+                if (isHead) {
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.arc(pos.x + Math.cos(this.angle + 0.5) * 8, pos.y + Math.sin(this.angle + 0.5) * 8, 4, 0, Math.PI * 2);
+                    ctx.arc(pos.x + Math.cos(this.angle - 0.5) * 8, pos.y + Math.sin(this.angle - 0.5) * 8, 4, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = '#111';
+                    ctx.beginPath();
+                    ctx.arc(pos.x + Math.cos(this.angle + 0.5) * 8 + Math.cos(this.angle) * 1.5, pos.y + Math.sin(this.angle + 0.5) * 8 + Math.sin(this.angle) * 1.5, 2, 0, Math.PI * 2);
+                    ctx.arc(pos.x + Math.cos(this.angle - 0.5) * 8 + Math.cos(this.angle) * 1.5, pos.y + Math.sin(this.angle - 0.5) * 8 + Math.sin(this.angle) * 1.5, 2, 0, Math.PI * 2);
+                    ctx.fill();
                 }
-            });
+            }
+        }
+    }
 
-            // 4. Player
-            player.update();
-            player.draw();
+    const player = new Worm();
 
-            // 5. Stats
-            statLen.innerText = `Length: ${player.segments.length}`;
-            statPos.innerText = `${Math.round(player.segments[0].x)}, ${Math.round(player.segments[0].y)}`;
+    // INPUT HANDLING
+    const input = (e) => {
+        if (!isMoving) {
+            isMoving = true;
+            prompt.style.opacity = '0';
+        }
+        const t = e.touches ? e.touches[0] : e;
+        targetX = t.clientX;
+        targetY = t.clientY;
+    };
 
-            requestAnimationFrame(loop);
+    window.addEventListener('touchstart', (e) => {
+        if (e.target === canvas) e.preventDefault();
+        input(e);
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+        if (e.target === canvas) e.preventDefault();
+        input(e);
+    }, { passive: false });
+
+    window.addEventListener('mousemove', input);
+
+    // GRID BACKGROUND
+    function drawGrid() {
+        const size = 100;
+        const offsetX = -cameraX % size;
+        const offsetY = -cameraY % size;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = offsetX; x < width; x += size) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+        }
+        for (let y = offsetY; y < height; y += size) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+        }
+        ctx.stroke();
+    }
+
+    // Spawn food periodically
+    setInterval(() => {
+        const count = 1 + Math.floor(Math.random() * 2);
+        for (let i = 0; i < count; i++) spawnFood();
+    }, 2000);
+
+    setInterval(cleanupFood, 5000);
+
+    // Initial food
+    for (let i = 0; i < 5; i++) spawnFood();
+
+    function loop() {
+        // 1. Clear
+        ctx.fillStyle = '#0a0a1a';
+        ctx.fillRect(0, 0, width, height);
+
+        // 2. Background
+        drawGrid();
+
+        // 3. Chunk system
+        updateChunkAnimations();
+        drawChunks();
+
+        // 4. Food
+        drawFood();
+
+        // 5. Food collision
+        const head = player.segments[0];
+        for (let i = foods.length - 1; i >= 0; i--) {
+            const f = foods[i];
+            if (Math.hypot(head.x - f.x, head.y - f.y) < 20 + f.size / 2) {
+                player.eatFood(f.hue);
+                createBurst(f.x, f.y, f.hue);
+                foods.splice(i, 1);
+            }
         }
 
-        loop();
-        debug("Game initialized");
+        // 6. Particles
+        updateAndDrawParticles();
 
-    } catch (err) {
-        debug("Error: " + err.message);
+        // 7. Player
+        player.update();
+        player.draw();
+
+        // 8. Stats
+        statLen.innerText = `Length: ${player.segments.length}`;
+        statPos.innerText = `${Math.round(head.x)}, ${Math.round(-head.y)}`;
+        statChunks.innerText = `Explored: ${chunkVisits.size}`;
+
+        requestAnimationFrame(loop);
     }
-    </script>
+
+    loop();
+    debug("Game initialized");
+
+} catch (err) {
+    debug("Error: " + err.message);
+}
+</script>
+```
+
 </body>
 </html>
