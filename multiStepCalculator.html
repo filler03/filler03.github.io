@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Step Calculator</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+```
+    :root {
+        --bg-primary: #0a0a0b;
+        --bg-secondary: #121214;
+        --bg-elevated: #1a1a1d;
+        --bg-input: #0d0d0e;
+        --border: #2a2a2e;
+        --border-focus: #4a9eff;
+        --text-primary: #f5f5f7;
+        --text-secondary: #8e8e93;
+        --text-muted: #636366;
+        --accent: #4a9eff;
+        --accent-glow: rgba(74, 158, 255, 0.15);
+        --success: #34c759;
+        --warning: #ff9f0a;
+        --danger: #ff453a;
+        --add: #34c759;
+        --subtract: #ff453a;
+        --compound: #bf5af2;
+    }
+
+    body {
+        font-family: 'JetBrains Mono', monospace;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        min-height: 100vh;
+        padding: 32px 20px;
+        background-image: 
+            radial-gradient(ellipse at 50% 0%, rgba(74, 158, 255, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(191, 90, 242, 0.05) 0%, transparent 40%);
+    }
+
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+
+    h1 {
+        font-family: 'Instrument Serif', serif;
+        font-size: 2.5rem;
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
+        background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .subtitle {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+    }
+
+    /* Flows Container */
+    .flows-wrapper {
+        display: flex;
+        gap: 20px;
+        overflow-x: auto;
+        padding-bottom: 16px;
+    }
+
+    .flow-column {
+        flex: 1;
+        min-width: 340px;
+        max-width: 400px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        position: relative;
+    }
+
+    .flow-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .flow-name-input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        font-family: 'Instrument Serif', serif;
+        font-size: 1.3rem;
+        color: var(--text-primary);
+        outline: none;
+    }
+
+    .flow-name-input::placeholder {
+        color: var(--text-muted);
+    }
+
+    .flow-delete-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 6px;
+        transition: all 0.2s ease;
+    }
+
+    .flow-delete-btn:hover {
+        background: rgba(255, 69, 58, 0.1);
+        color: var(--danger);
+    }
+
+    /* Starting Value Section */
+    .start-section {
+        margin-bottom: 16px;
+    }
+
+    .start-section label {
+        display: block;
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+    }
+
+    .start-input-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .currency-symbol {
+        font-size: 1.1rem;
+        color: var(--text-muted);
+    }
+
+    .start-value-input {
+        flex: 1;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        transition: all 0.2s ease;
+    }
+
+    .start-value-input:focus {
+        outline: none;
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* Steps List */
+    .steps-section {
+        margin-bottom: 12px;
+    }
+
+    .steps-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .steps-header h2 {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-secondary);
+    }
+
+    .step-count {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+    }
+
+    .steps-container {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .step-item {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        animation: slideIn 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .step-item::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+    }
+
+    .step-item.op-add::before { background: var(--add); }
+    .step-item.op-subtract::before { background: var(--subtract); }
+    .step-item.op-add-percent::before { background: var(--success); }
+    .step-item.op-subtract-percent::before { background: var(--warning); }
+    .step-item.op-compound::before { background: var(--compound); }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .step-number {
+        width: 20px;
+        height: 20px;
+        background: var(--bg-secondary);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.6rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+    }
+
+    .step-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .step-operation {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .step-item.op-add .step-operation { color: var(--add); }
+    .step-item.op-subtract .step-operation { color: var(--subtract); }
+    .step-item.op-add-percent .step-operation { color: var(--success); }
+    .step-item.op-subtract-percent .step-operation { color: var(--warning); }
+    .step-item.op-compound .step-operation { color: var(--compound); }
+
+    .step-details {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+    }
+
+    .step-result {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .step-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+        padding-left: 8px;
+        border-left: 1px solid var(--border);
+    }
+
+    .step-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .step-btn:hover {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+
+    .step-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
+    .step-btn:disabled:hover {
+        background: none;
+        color: var(--text-muted);
+    }
+
+    .step-btn.delete:hover {
+        background: rgba(255, 69, 58, 0.1);
+        color: var(--danger);
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 24px 16px;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+    }
+
+    /* Steps Section */
+    .steps-section {
+        margin-bottom: 16px;
+    }
+
+    /* Result Section */
+    .result-section {
+        background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-secondary) 100%);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+        margin-top: 16px;
+    }
+
+    .result-section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, var(--accent), var(--compound), var(--success));
+    }
+
+    .result-label {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+    }
+
+    .result-value {
+        font-family: 'Instrument Serif', serif;
+        font-size: 2rem;
+        font-weight: 400;
+        color: var(--text-primary);
+        line-height: 1;
+    }
+
+    .result-change {
+        margin-top: 8px;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+    }
+
+    .result-change.positive {
+        color: var(--success);
+    }
+
+    .result-change.negative {
+        color: var(--danger);
+    }
+
+    .result-math {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        word-break: break-word;
+        line-height: 1.6;
+    }
+
+    /* Inline Step Editing */
+    .step-inline-select {
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 4px 20px 4px 6px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-primary);
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='%238e8e93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 6px center;
+        margin-bottom: 4px;
+    }
+
+    .step-inline-select:focus {
+        outline: none;
+        border-color: var(--border-focus);
+    }
+
+    .step-inline-inputs {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .step-inline-input {
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 4px 6px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem;
+        color: var(--text-primary);
+        width: 70px;
+    }
+
+    .step-inline-input.small {
+        width: 40px;
+    }
+
+    .step-inline-input:focus {
+        outline: none;
+        border-color: var(--border-focus);
+    }
+
+    .step-inline-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+    }
+
+    /* Add Step Button */
+    .add-step-btn {
+        width: 100%;
+        background: var(--bg-elevated);
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-top: 10px;
+    }
+
+    .add-step-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-glow);
+    }
+
+    /* Clear Button */
+    .clear-btn {
+        display: block;
+        width: 100%;
+        margin-top: 12px;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+
+    .clear-btn:hover {
+        border-color: var(--danger);
+        color: var(--danger);
+        background: rgba(255, 69, 58, 0.05);
+    }
+
+    /* Add Flow Button */
+    .add-flow-column {
+        min-width: 200px;
+        max-width: 200px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px dashed var(--border);
+        border-radius: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        color: var(--text-muted);
+    }
+
+    .add-flow-column:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-glow);
+    }
+
+    .add-flow-content {
+        text-align: center;
+        padding: 20px;
+    }
+
+    .add-flow-icon {
+        font-size: 2rem;
+        margin-bottom: 8px;
+    }
+
+    .add-flow-text {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+
+    /* Comparison Summary */
+    .comparison-summary {
+        margin-top: 24px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+    }
+
+    .comparison-title {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-secondary);
+        margin-bottom: 16px;
+        text-align: center;
+    }
+
+    .comparison-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 12px;
+    }
+
+    .comparison-item {
+        background: var(--bg-elevated);
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+    }
+
+    .comparison-item.best {
+        border: 1px solid var(--success);
+        background: rgba(52, 199, 89, 0.05);
+    }
+
+    .comparison-name {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .comparison-value {
+        font-family: 'Instrument Serif', serif;
+        font-size: 1.4rem;
+        color: var(--text-primary);
+    }
+
+    .comparison-item.best .comparison-value {
+        color: var(--success);
+    }
+
+    .comparison-diff {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+        h1 {
+            font-size: 2rem;
+        }
+
+        .flows-wrapper {
+            flex-direction: column;
+        }
+
+        .flow-column, .add-flow-column {
+            max-width: none;
+            min-width: auto;
+        }
+
+        .add-flow-column {
+            min-height: 100px;
+        }
+    }
+</style>
+```
+
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Step Calculator</h1>
+            <p class="subtitle">Build & compare calculation flows</p>
+        </header>
+
+```
+    <div class="flows-wrapper" id="flowsWrapper">
+        <!-- Flows will be rendered here -->
+    </div>
+
+    <div class="comparison-summary" id="comparisonSummary" style="display: none;">
+        <div class="comparison-title">Comparison Summary</div>
+        <div class="comparison-grid" id="comparisonGrid"></div>
+    </div>
+</div>
+
+<script>
+    // State
+    const state = {
+        flows: [
+            { id: 1, name: 'Flow 1', startValue: 1000, steps: [] }
+        ],
+        nextId: 2
+    };
+
+    // Format currency
+    function formatCurrency(value) {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(value);
+    }
+
+    // Format percentage
+    function formatPercent(value) {
+        return value.toFixed(2) + '%';
+    }
+
+    // Operation handlers
+    const operations = {
+        'add': (current, value) => current + value,
+        'subtract': (current, value) => current - value,
+        'add-percent': (current, value) => current * (1 + value / 100),
+        'subtract-percent': (current, value) => current * (1 - value / 100),
+        'compound': (current, apy, years) => current * Math.pow(1 + apy / 100, years)
+    };
+
+    // Get operation display name
+    function getOperationName(op) {
+        const names = {
+            'add': 'Add',
+            'subtract': 'Subtract',
+            'add-percent': 'Add %',
+            'subtract-percent': 'Sub %',
+            'compound': 'Compound'
+        };
+        return names[op];
+    }
+
+    // Get step details text
+    function getStepDetails(step) {
+        if (step.operation === 'compound') {
+            return `${formatPercent(step.apy)} × ${step.years}yr`;
+        } else if (step.operation.includes('percent')) {
+            return formatPercent(step.value);
+        } else {
+            return formatCurrency(step.value);
+        }
+    }
+
+    // Calculate flow result
+    function calculateFlow(flow) {
+        let current = flow.startValue;
+        flow.steps.forEach((step) => {
+            if (step.operation === 'compound') {
+                step.result = operations.compound(current, step.apy, step.years);
+            } else {
+                step.result = operations[step.operation](current, step.value);
+            }
+            current = step.result;
+        });
+        return current;
+    }
+
+    // Get operation symbol for math display
+    function getOperationSymbol(op) {
+        const symbols = {
+            'add': '+',
+            'subtract': '−',
+            'add-percent': '+',
+            'subtract-percent': '−',
+            'compound': '×'
+        };
+        return symbols[op];
+    }
+
+    // Get step math representation
+    function getStepMath(step) {
+        if (step.operation === 'compound') {
+            return `(1 + ${step.apy}%)^${step.years}`;
+        } else if (step.operation.includes('percent')) {
+            return `${step.value}%`;
+        } else {
+            return formatCurrency(step.value);
+        }
+    }
+
+    // Build math expression string
+    function buildMathExpression(flow) {
+        if (flow.steps.length === 0) return '';
+        
+        let parts = [formatCurrency(flow.startValue)];
+        
+        flow.steps.forEach(step => {
+            const symbol = getOperationSymbol(step.operation);
+            const value = getStepMath(step);
+            parts.push(`${symbol} ${value}`);
+        });
+        
+        return parts.join(' ');
+    }
+
+    // Render a single flow
+    function renderFlow(flow) {
+        const finalValue = calculateFlow(flow);
+        const change = finalValue - flow.startValue;
+        const changePercent = flow.startValue !== 0 ? (change / flow.startValue) * 100 : 0;
+        const sign = change >= 0 ? '+' : '';
+
+        return `
+            <div class="flow-column" data-flow-id="${flow.id}">
+                <div class="flow-header">
+                    <input type="text" class="flow-name-input" value="${flow.name}" 
+                        onchange="updateFlowName(${flow.id}, this.value)" placeholder="Flow name">
+                    ${state.flows.length > 1 ? `
+                        <button class="flow-delete-btn" onclick="deleteFlow(${flow.id})" title="Delete flow">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    ` : ''}
+                </div>
+
+                <div class="start-section">
+                    <label>Starting Value</label>
+                    <div class="start-input-wrapper">
+                        <span class="currency-symbol">$</span>
+                        <input type="number" class="start-value-input" value="${flow.startValue}" step="any" 
+                            onchange="updateStartValue(${flow.id}, this.value)" placeholder="0.00">
+                    </div>
+                </div>
+
+                <div class="steps-section">
+                    <div class="steps-header">
+                        <h2>Steps</h2>
+                        <span class="step-count">${flow.steps.length} step${flow.steps.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="steps-container">
+                        ${flow.steps.length === 0 ? `
+                            <div class="empty-state">No steps yet</div>
+                        ` : flow.steps.map((step, index) => `
+                            <div class="step-item op-${step.operation}">
+                                <div class="step-number">${index + 1}</div>
+                                <div class="step-content">
+                                    <select class="step-inline-select" onchange="updateStepOperation(${flow.id}, ${index}, this.value)">
+                                        <option value="add" ${step.operation === 'add' ? 'selected' : ''}>Add</option>
+                                        <option value="subtract" ${step.operation === 'subtract' ? 'selected' : ''}>Subtract</option>
+                                        <option value="add-percent" ${step.operation === 'add-percent' ? 'selected' : ''}>Add %</option>
+                                        <option value="subtract-percent" ${step.operation === 'subtract-percent' ? 'selected' : ''}>Sub %</option>
+                                        <option value="compound" ${step.operation === 'compound' ? 'selected' : ''}>Compound</option>
+                                    </select>
+                                    ${step.operation === 'compound' ? `
+                                        <div class="step-inline-inputs">
+                                            <input type="number" class="step-inline-input" value="${step.apy}" step="0.01" 
+                                                onchange="updateStepValue(${flow.id}, ${index}, 'apy', this.value)" placeholder="APY">
+                                            <span class="step-inline-label">% ×</span>
+                                            <input type="number" class="step-inline-input small" value="${step.years}" step="1" min="1"
+                                                onchange="updateStepValue(${flow.id}, ${index}, 'years', this.value)" placeholder="Yrs">
+                                            <span class="step-inline-label">yr</span>
+                                        </div>
+                                    ` : `
+                                        <div class="step-inline-inputs">
+                                            ${step.operation.includes('percent') ? '' : '<span class="step-inline-label">$</span>'}
+                                            <input type="number" class="step-inline-input" value="${step.value}" step="any"
+                                                onchange="updateStepValue(${flow.id}, ${index}, 'value', this.value)">
+                                            ${step.operation.includes('percent') ? '<span class="step-inline-label">%</span>' : ''}
+                                        </div>
+                                    `}
+                                </div>
+                                <div class="step-result">${formatCurrency(step.result)}</div>
+                                <div class="step-actions">
+                                    <button class="step-btn" onclick="moveStep(${flow.id}, ${index}, -1)" title="Move up" ${index === 0 ? 'disabled' : ''}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                            <path d="M12 5L12 19M12 5L6 11M12 5L18 11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <button class="step-btn delete" onclick="deleteStep(${flow.id}, ${index})" title="Remove">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                        </svg>
+                                    </button>
+                                    <button class="step-btn" onclick="moveStep(${flow.id}, ${index}, 1)" title="Move down" ${index === flow.steps.length - 1 ? 'disabled' : ''}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                            <path d="M12 19L12 5M12 19L6 13M12 19L18 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="add-step-btn" onclick="addStep(${flow.id})">+ Add Step</button>
+                </div>
+
+                <div class="result-section">
+                    <div class="result-label">Final Result</div>
+                    <div class="result-value">${formatCurrency(finalValue)}</div>
+                    ${flow.steps.length > 0 ? `
+                        <div class="result-math">${buildMathExpression(flow)}</div>
+                        <div class="result-change ${change >= 0 ? 'positive' : 'negative'}">
+                            ${sign}${formatCurrency(change)} (${sign}${changePercent.toFixed(2)}%)
+                        </div>
+                    ` : ''}
+                </div>
+
+                <button class="clear-btn" onclick="clearSteps(${flow.id})">Clear Steps</button>
+            </div>
+        `;
+    }
+
+    // Render all flows
+    function render() {
+        const wrapper = document.getElementById('flowsWrapper');
+        wrapper.innerHTML = state.flows.map(flow => renderFlow(flow)).join('') + `
+            <div class="add-flow-column" onclick="addFlow()">
+                <div class="add-flow-content">
+                    <div class="add-flow-icon">+</div>
+                    <div class="add-flow-text">Add Flow</div>
+                </div>
+            </div>
+        `;
+
+        renderComparison();
+    }
+
+    // Render comparison summary
+    function renderComparison() {
+        const summary = document.getElementById('comparisonSummary');
+        const grid = document.getElementById('comparisonGrid');
+
+        if (state.flows.length < 2) {
+            summary.style.display = 'none';
+            return;
+        }
+
+        summary.style.display = 'block';
+
+        const results = state.flows.map(flow => ({
+            id: flow.id,
+            name: flow.name,
+            value: calculateFlow(flow)
+        }));
+
+        const maxValue = Math.max(...results.map(r => r.value));
+
+        grid.innerHTML = results.map(r => {
+            const diff = r.value - maxValue;
+            const isBest = r.value === maxValue;
+            return `
+                <div class="comparison-item ${isBest ? 'best' : ''}">
+                    <div class="comparison-name">${r.name}</div>
+                    <div class="comparison-value">${formatCurrency(r.value)}</div>
+                    ${!isBest ? `<div class="comparison-diff">${formatCurrency(diff)}</div>` : '<div class="comparison-diff">Best</div>'}
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Add a new flow
+    window.addFlow = function() {
+        state.flows.push({
+            id: state.nextId,
+            name: `Flow ${state.nextId}`,
+            startValue: 1000,
+            steps: []
+        });
+        state.nextId++;
+        render();
+    };
+
+    // Delete a flow
+    window.deleteFlow = function(flowId) {
+        state.flows = state.flows.filter(f => f.id !== flowId);
+        render();
+    };
+
+    // Update flow name
+    window.updateFlowName = function(flowId, name) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (flow) {
+            flow.name = name || `Flow ${flowId}`;
+            renderComparison();
+        }
+    };
+
+    // Update start value
+    window.updateStartValue = function(flowId, value) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (flow) {
+            flow.startValue = parseFloat(value) || 0;
+            render();
+        }
+    };
+
+    // Add step to flow
+    window.addStep = function(flowId) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (!flow) return;
+
+        // Add a default "add $100" step
+        flow.steps.push({
+            operation: 'add',
+            value: 100
+        });
+        render();
+    };
+
+    // Update step operation
+    window.updateStepOperation = function(flowId, index, operation) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (!flow || !flow.steps[index]) return;
+
+        const step = flow.steps[index];
+        const oldOp = step.operation;
+        step.operation = operation;
+
+        // Convert values when switching operation types
+        if (operation === 'compound') {
+            step.apy = step.value || 5;
+            step.years = 1;
+            delete step.value;
+        } else if (oldOp === 'compound') {
+            step.value = step.apy || 100;
+            delete step.apy;
+            delete step.years;
+        }
+
+        render();
+    };
+
+    // Update step value
+    window.updateStepValue = function(flowId, index, field, value) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (!flow || !flow.steps[index]) return;
+
+        if (field === 'years') {
+            flow.steps[index][field] = parseInt(value) || 1;
+        } else {
+            flow.steps[index][field] = parseFloat(value) || 0;
+        }
+        render();
+    };
+
+    // Delete step from flow
+    window.deleteStep = function(flowId, index) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (flow) {
+            flow.steps.splice(index, 1);
+            render();
+        }
+    };
+
+    // Move step within flow
+    window.moveStep = function(flowId, index, direction) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (!flow) return;
+
+        const newIndex = index + direction;
+        if (newIndex < 0 || newIndex >= flow.steps.length) return;
+
+        const temp = flow.steps[index];
+        flow.steps[index] = flow.steps[newIndex];
+        flow.steps[newIndex] = temp;
+        render();
+    };
+
+    // Clear all steps in a flow
+    window.clearSteps = function(flowId) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (flow) {
+            flow.steps = [];
+            render();
+        }
+    };
+
+    // Initialize
+    render();
+</script>
+```
+
+</body>
+</html>
