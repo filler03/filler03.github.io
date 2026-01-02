@@ -7,7 +7,7 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
             min-height: 100vh;
@@ -17,9 +17,21 @@
             border-bottom: 2px solid #333;
             padding-bottom: 10px;
         }
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-top: 20px;
+        }
+        .section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+        }
         h2 {
             color: #555;
-            margin-top: 30px;
+            margin-top: 0;
+            margin-bottom: 20px;
         }
         ul {
             list-style-type: none;
@@ -40,22 +52,45 @@
         a:hover {
             background-color: #0056b3;
         }
+        @media (max-width: 768px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
     <h1>Game Index</h1>
 
-    <h2>Games</h2>
-    <ul>
-        <li><a href="games/basketball/basketball.html">Basketball</a></li>
-        <li><a href="games/soccer/soccer.html">Soccer</a></li>
-    </ul>
+    <div class="content-grid">
+        <div class="left-column">
+            <div class="section">
+                <h2>Games</h2>
+                <ul>
+                    <li><a href="games/basketball/basketball.html">Basketball</a></li>
+                    <li><a href="games/soccer/soccer.html">Soccer</a></li>
+                </ul>
+            </div>
 
-    <h2>Test</h2>
-    <ul>
-        <li><a href="test/basketball/basketball.html">Basketball (Test)</a></li>
-        <li><a href="test/soccer/soccer.html">Soccer (Test)</a></li>
-    </ul>
+            <div class="section" style="margin-top: 20px;">
+                <h2>Test</h2>
+                <ul>
+                    <li><a href="test/basketball/basketball.html">Basketball (Test)</a></li>
+                    <li><a href="test/soccer/soccer.html">Soccer (Test)</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="right-column">
+            <div class="section">
+                <h2>Tools</h2>
+                <ul>
+                    <li><a href="tools/lifeProgress.html">Life Progress Tracker</a></li>
+                    <li><a href="tools/multiStepCalculator.html">Multi-Step Calculator</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Set gradient based on progress through current minute
