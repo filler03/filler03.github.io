@@ -89,16 +89,16 @@
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 16px;
-        padding: 20px;
+        padding: 14px;
         position: relative;
     }
 
     .flow-header {
         display: flex;
         align-items: center;
-        gap: 10px;
-        margin-bottom: 16px;
-        padding-bottom: 12px;
+        gap: 8px;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
         border-bottom: 1px solid var(--border);
     }
 
@@ -107,7 +107,7 @@
         background: transparent;
         border: none;
         font-family: 'Instrument Serif', serif;
-        font-size: 1.3rem;
+        font-size: 1.1rem;
         color: var(--text-primary);
         outline: none;
     }
@@ -116,7 +116,7 @@
         color: var(--text-muted);
     }
 
-    .flow-delete-btn {
+    .flow-action-btn {
         background: none;
         border: none;
         color: var(--text-muted);
@@ -124,35 +124,43 @@
         padding: 6px;
         border-radius: 6px;
         transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 
-    .flow-delete-btn:hover {
+    .flow-action-btn:hover {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+    }
+
+    .flow-action-btn.delete:hover {
         background: rgba(255, 69, 58, 0.1);
         color: var(--danger);
     }
 
     /* Starting Value Section */
     .start-section {
-        margin-bottom: 16px;
+        margin-bottom: 10px;
     }
 
     .start-section label {
         display: block;
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         text-transform: uppercase;
         letter-spacing: 0.1em;
         color: var(--text-secondary);
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     }
 
     .start-input-wrapper {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
     }
 
     .currency-symbol {
-        font-size: 1.1rem;
+        font-size: 1rem;
         color: var(--text-muted);
     }
 
@@ -160,10 +168,10 @@
         flex: 1;
         background: var(--bg-input);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 10px 14px;
+        border-radius: 6px;
+        padding: 8px 10px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 1.2rem;
+        font-size: 1rem;
         font-weight: 600;
         color: var(--text-primary);
         transition: all 0.2s ease;
@@ -177,14 +185,14 @@
 
     /* Steps List */
     .steps-section {
-        margin-bottom: 12px;
+        margin-bottom: 8px;
     }
 
     .steps-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 10px;
+        margin-bottom: 6px;
     }
 
     .steps-header h2 {
@@ -202,17 +210,17 @@
     .steps-container {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 4px;
     }
 
     .step-item {
         background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 8px 10px;
+        border-radius: 6px;
+        padding: 6px 8px;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         animation: slideIn 0.3s ease;
         position: relative;
         overflow: hidden;
@@ -245,14 +253,14 @@
     }
 
     .step-number {
-        width: 20px;
-        height: 20px;
+        width: 18px;
+        height: 18px;
         background: var(--bg-secondary);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 0.6rem;
+        font-size: 0.55rem;
         font-weight: 600;
         color: var(--text-secondary);
         flex-shrink: 0;
@@ -294,7 +302,7 @@
         flex-direction: column;
         align-items: center;
         gap: 0;
-        padding-left: 8px;
+        padding-left: 6px;
         border-left: 1px solid var(--border);
     }
 
@@ -303,7 +311,7 @@
         border: none;
         color: var(--text-muted);
         cursor: pointer;
-        padding: 3px;
+        padding: 2px;
         border-radius: 4px;
         transition: all 0.2s ease;
         display: flex;
@@ -333,11 +341,11 @@
 
     .empty-state {
         text-align: center;
-        padding: 24px 16px;
+        padding: 16px 12px;
         color: var(--text-muted);
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         border: 1px dashed var(--border);
-        border-radius: 8px;
+        border-radius: 6px;
     }
 
     /* Steps Section */
@@ -349,12 +357,12 @@
     .result-section {
         background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-secondary) 100%);
         border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 16px;
+        border-radius: 10px;
+        padding: 12px;
         text-align: center;
         position: relative;
         overflow: hidden;
-        margin-top: 16px;
+        margin-top: 10px;
     }
 
     .result-section::before {
@@ -368,24 +376,24 @@
     }
 
     .result-label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         text-transform: uppercase;
         letter-spacing: 0.15em;
         color: var(--text-secondary);
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }
 
     .result-value {
         font-family: 'Instrument Serif', serif;
-        font-size: 2rem;
+        font-size: 1.6rem;
         font-weight: 400;
         color: var(--text-primary);
         line-height: 1;
     }
 
     .result-change {
-        margin-top: 8px;
-        font-size: 0.75rem;
+        margin-top: 6px;
+        font-size: 0.7rem;
         color: var(--text-muted);
     }
 
@@ -398,13 +406,13 @@
     }
 
     .result-math {
-        margin-top: 10px;
-        padding-top: 10px;
+        margin-top: 8px;
+        padding-top: 8px;
         border-top: 1px solid var(--border);
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         color: var(--text-secondary);
         word-break: break-word;
-        line-height: 1.6;
+        line-height: 1.5;
     }
 
     /* Inline Step Editing */
@@ -412,9 +420,9 @@
         background: var(--bg-input);
         border: 1px solid var(--border);
         border-radius: 4px;
-        padding: 4px 20px 4px 6px;
+        padding: 3px 18px 3px 5px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         font-weight: 600;
         text-transform: uppercase;
         color: var(--text-primary);
@@ -422,8 +430,8 @@
         appearance: none;
         background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='%238e8e93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
-        background-position: right 6px center;
-        margin-bottom: 4px;
+        background-position: right 5px center;
+        margin-bottom: 3px;
     }
 
     .step-inline-select:focus {
@@ -434,22 +442,22 @@
     .step-inline-inputs {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 3px;
     }
 
     .step-inline-input {
         background: var(--bg-input);
         border: 1px solid var(--border);
         border-radius: 4px;
-        padding: 4px 6px;
+        padding: 3px 5px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: var(--text-primary);
-        width: 70px;
+        width: 60px;
     }
 
     .step-inline-input.small {
-        width: 40px;
+        width: 35px;
     }
 
     .step-inline-input:focus {
@@ -458,7 +466,7 @@
     }
 
     .step-inline-label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         color: var(--text-muted);
     }
 
@@ -467,17 +475,17 @@
         width: 100%;
         background: var(--bg-elevated);
         border: 1px dashed var(--border);
-        border-radius: 8px;
-        padding: 10px 16px;
+        border-radius: 6px;
+        padding: 8px 12px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         font-weight: 600;
         color: var(--text-muted);
         cursor: pointer;
         transition: all 0.2s ease;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        margin-top: 10px;
+        margin-top: 6px;
     }
 
     .add-step-btn:hover {
@@ -490,13 +498,13 @@
     .clear-btn {
         display: block;
         width: 100%;
-        margin-top: 12px;
+        margin-top: 8px;
         background: transparent;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 8px 16px;
+        border-radius: 6px;
+        padding: 6px 12px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         font-weight: 600;
         color: var(--text-muted);
         cursor: pointer;
@@ -769,9 +777,15 @@
                 <div class="flow-header">
                     <input type="text" class="flow-name-input" value="${flow.name}" 
                         onchange="updateFlowName(${flow.id}, this.value)" placeholder="Flow name">
+                    <button class="flow-action-btn" onclick="duplicateFlow(${flow.id})" title="Duplicate flow">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <rect x="8" y="8" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2"/>
+                            <path d="M16 8V6C16 4.89543 15.1046 4 14 4H6C4.89543 4 4 4.89543 4 6V14C4 15.1046 4.89543 16 6 16H8" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
                     ${state.flows.length > 1 ? `
-                        <button class="flow-delete-btn" onclick="deleteFlow(${flow.id})" title="Delete flow">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <button class="flow-action-btn delete" onclick="deleteFlow(${flow.id})" title="Delete flow">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                                 <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                             </svg>
                         </button>
@@ -921,6 +935,26 @@
             steps: []
         });
         state.nextId++;
+        render();
+    };
+
+    // Duplicate a flow
+    window.duplicateFlow = function(flowId) {
+        const flow = state.flows.find(f => f.id === flowId);
+        if (!flow) return;
+
+        const newFlow = {
+            id: state.nextId,
+            name: `${flow.name} (copy)`,
+            startValue: flow.startValue,
+            steps: flow.steps.map(step => ({ ...step }))
+        };
+        state.nextId++;
+        
+        // Insert after the original flow
+        const index = state.flows.findIndex(f => f.id === flowId);
+        state.flows.splice(index + 1, 0, newFlow);
+        
         render();
     };
 
