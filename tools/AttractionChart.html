@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Attraction Chart</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
 <style>
@@ -20,7 +20,12 @@
     --delight-color: #c080e0;
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Essential fix for overflow */
+  *, *::before, *::after { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+  }
 
   body {
     background-color: var(--bg);
@@ -30,7 +35,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 2rem 1rem; /* Added horizontal padding for mobile safety */
+    padding: 1rem;
+    overflow-x: hidden; /* Prevent horizontal scroll on body */
   }
 
   body::before {
@@ -48,39 +54,40 @@
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 800px; /* Locked width to keep it from falling off screen */
+    max-width: 600px; /* Reduced max-width for better fit */
+    margin: 0 auto;
   }
 
   h1 {
     font-family: 'Playfair Display', serif;
     font-weight: 900;
-    font-size: 2.2rem;
-    letter-spacing: -0.02em;
-    margin-bottom: 0.3rem;
+    font-size: clamp(1.5rem, 5vw, 2.2rem);
+    margin-bottom: 0.5rem;
     background: linear-gradient(135deg, #f0a050, #e07830);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    background-clip: text;
   }
 
   .legend {
     display: flex;
-    gap: 1.5rem;
-    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
   }
 
   .legend-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8rem;
+    gap: 0.4rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
   }
 
   .legend-swatch {
-    width: 12px;
-    height: 12px;
-    border-radius: 3px;
+    width: 10px;
+    height: 100px; /* This is just the swatch size */
+    height: 10px;
+    border-radius: 2px;
   }
 
   .legend-swatch.dolled { background: var(--bar-dolled); }
@@ -89,16 +96,17 @@
   .chart-wrapper {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 1.5rem 1rem;
+    border-radius: 12px;
+    padding: 1rem 0.5rem;
     width: 100%;
+    overflow: hidden;
   }
 
   .columns-area {
     display: grid;
-    grid-template-columns: repeat(7, 1fr); /* Exactly 7 columns */
+    grid-template-columns: repeat(7, 1fr);
     position: relative;
-    height: 500px; /* Taller graph as requested */
+    height: 450px; /* Height of the actual graph */
     width: 100%;
   }
 
@@ -119,8 +127,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    position: relative;
-    z-index: 1;
+    min-width: 0; /* Critical for grid shrinking */
   }
 
   .bars-area {
@@ -129,12 +136,12 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    gap: 3px; /* Slightly tighter gap to save space */
-    padding-bottom: 10px;
+    gap: 2px;
+    padding-bottom: 5px;
   }
 
   .bar-outer {
-    width: 18px; /* Slightly thinner bars to ensure they fit */
+    flex: 0 1 14px; /* Bars will shrink if needed */
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -142,67 +149,68 @@
   }
 
   .bar-fill {
-    border-radius: 3px 3px 0 0;
+    border-radius: 2px 2px 0 0;
     transition: height 0.3s ease-out;
-    min-height: 2px;
+    min-height: 1px;
+    width: 100%;
   }
 
-  .bar-fill.dolled { background: linear-gradient(0deg, #d06820, #f0a050); }
-  .bar-fill.attract { background: linear-gradient(0deg, #2878a0, #50b0e0); }
+  .bar-fill.dolled { background: var(--bar-dolled); }
+  .bar-fill.attract { background: var(--bar-attract); }
 
   .day-label {
     font-weight: 700;
-    font-size: 0.65rem;
-    text-transform: uppercase;
+    font-size: 0.6rem;
     color: var(--text-muted);
-    padding: 0.8rem 0 0.5rem;
+    padding: 0.5rem 0;
   }
 
+  /* The Slider Container */
   .slider-wrapper {
-    height: 100px;
-    width: 100%;
+    height: 80px;
+    width: 30px; /* Force a narrow width */
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
   }
 
   input[type="range"].day-slider {
     -webkit-appearance: none;
-    appearance: none;
-    width: 80px; /* Shorter sliders to fit the columns */
+    position: absolute;
+    width: 70px; /* Length of the slider */
     height: 4px;
     background: var(--slider-track);
     border-radius: 2px;
-    outline: none;
     transform: rotate(-90deg);
     cursor: pointer;
+    outline: none;
   }
 
   input[type="range"].day-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--slider-thumb);
-    cursor: pointer;
   }
 
+  /* Comfort Area */
   .delight-area {
-    margin-top: 1.5rem;
+    margin-top: 1rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.2rem;
-    display: flex;
-    flex-direction: column; /* Stacked on mobile, side-by-side on desktop via media query */
-    gap: 1rem;
+    padding: 1rem;
     width: 100%;
   }
 
   .delight-label {
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: var(--delight-color);
+    margin-bottom: 0.5rem;
+    display: block;
   }
 
   input[type="range"].delight-slider {
@@ -216,17 +224,10 @@
 
   input[type="range"].delight-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: var(--delight-color);
-    cursor: pointer;
-  }
-
-  /* Desktop adjustment for comfort slider */
-  @media (min-width: 600px) {
-    .delight-area { flex-direction: row; }
-    .delight-label { min-width: 200px; }
   }
 </style>
 </head>
@@ -234,7 +235,7 @@
 
 <div class="container">
   <h1>Attraction Chart</h1>
-  <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.5rem; font-style: italic;">* the comfort level relates to how willing we are to actively seek to bless each other</p>
+  <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem; font-style: italic;">* willingness to seek to bless each other</p>
 
   <div class="legend">
     <div class="legend-item"><div class="legend-swatch dolled"></div><span>Attempt to Impress</span></div>
@@ -254,7 +255,7 @@
 </div>
 
 <script>
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const MAX_INPUT = 200;
   const CHART_MAX = 800; 
   const values = [0, 0, 0, 0, 0, 0, 0];
@@ -289,12 +290,8 @@
       col.className = 'day-column';
       col.innerHTML = `
         <div class="bars-area">
-          <div class="bar-outer">
-            <div class="bar-fill dolled" id="bar-dolled-${i}"></div>
-          </div>
-          <div class="bar-outer">
-            <div class="bar-fill attract" id="bar-attract-${i}"></div>
-          </div>
+          <div class="bar-outer"><div class="bar-fill dolled" id="bar-dolled-${i}"></div></div>
+          <div class="bar-outer"><div class="bar-fill attract" id="bar-attract-${i}"></div></div>
         </div>
         <div class="day-label">${day}</div>
         <div class="slider-wrapper">
@@ -313,11 +310,8 @@
   function updateAll() {
     for (let i = 0; i < 7; i++) {
       const calcVal = calculateValue(values[i], i);
-      const dolledBar = document.getElementById(`bar-dolled-${i}`);
-      const attractBar = document.getElementById(`bar-attract-${i}`);
-      
-      dolledBar.style.height = (values[i] / CHART_MAX * 100) + '%';
-      attractBar.style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
+      document.getElementById(`bar-dolled-${i}`).style.height = (values[i] / CHART_MAX * 100) + '%';
+      document.getElementById(`bar-attract-${i}`).style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
     }
   }
 
