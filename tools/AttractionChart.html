@@ -30,8 +30,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 2rem;
+    padding: 2rem 1rem; /* Added horizontal padding for mobile safety */
   }
 
   body::before {
@@ -49,13 +48,13 @@
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 880px;
+    max-width: 800px; /* Locked width to keep it from falling off screen */
   }
 
   h1 {
     font-family: 'Playfair Display', serif;
     font-weight: 900;
-    font-size: 2.4rem;
+    font-size: 2.2rem;
     letter-spacing: -0.02em;
     margin-bottom: 0.3rem;
     background: linear-gradient(135deg, #f0a050, #e07830);
@@ -66,7 +65,7 @@
 
   .legend {
     display: flex;
-    gap: 1.8rem;
+    gap: 1.5rem;
     margin-bottom: 1.5rem;
   }
 
@@ -74,13 +73,13 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: var(--text-muted);
   }
 
   .legend-swatch {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 3px;
   }
 
@@ -91,22 +90,22 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 1.5rem 1.5rem 1rem;
-    overflow: hidden;
+    padding: 1.5rem 1rem;
+    width: 100%;
   }
 
   .columns-area {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, 1fr); /* Exactly 7 columns */
     position: relative;
-    height: 500px; /* Increased height to accommodate the 800 scale */
+    height: 500px; /* Taller graph as requested */
+    width: 100%;
   }
 
   .grid-lines {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     pointer-events: none;
-    z-index: 0;
   }
 
   .grid-line {
@@ -130,12 +129,12 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    gap: 4px;
+    gap: 3px; /* Slightly tighter gap to save space */
     padding-bottom: 10px;
   }
 
   .bar-outer {
-    width: 22px;
+    width: 18px; /* Slightly thinner bars to ensure they fit */
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -143,7 +142,7 @@
   }
 
   .bar-fill {
-    border-radius: 4px 4px 0 0;
+    border-radius: 3px 3px 0 0;
     transition: height 0.3s ease-out;
     min-height: 2px;
   }
@@ -153,16 +152,15 @@
 
   .day-label {
     font-weight: 700;
-    font-size: 0.72rem;
+    font-size: 0.65rem;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
     color: var(--text-muted);
-    padding: 1rem 0 0.5rem;
+    padding: 0.8rem 0 0.5rem;
   }
 
   .slider-wrapper {
-    height: 120px;
-    width: 40px;
+    height: 100px;
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -171,10 +169,10 @@
   input[type="range"].day-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 100px;
-    height: 6px;
+    width: 80px; /* Shorter sliders to fit the columns */
+    height: 4px;
     background: var(--slider-track);
-    border-radius: 3px;
+    border-radius: 2px;
     outline: none;
     transform: rotate(-90deg);
     cursor: pointer;
@@ -182,8 +180,8 @@
 
   input[type="range"].day-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--slider-thumb);
     cursor: pointer;
@@ -194,23 +192,22 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.2rem 1.5rem;
+    padding: 1.2rem;
     display: flex;
-    align-items: center;
-    gap: 1.2rem;
+    flex-direction: column; /* Stacked on mobile, side-by-side on desktop via media query */
+    gap: 1rem;
+    width: 100%;
   }
 
   .delight-label {
     font-weight: 700;
     font-size: 0.85rem;
     color: var(--delight-color);
-    min-width: 180px;
   }
 
   input[type="range"].delight-slider {
     -webkit-appearance: none;
-    appearance: none;
-    flex: 1;
+    width: 100%;
     height: 6px;
     background: var(--slider-track);
     border-radius: 3px;
@@ -224,6 +221,12 @@
     border-radius: 50%;
     background: var(--delight-color);
     cursor: pointer;
+  }
+
+  /* Desktop adjustment for comfort slider */
+  @media (min-width: 600px) {
+    .delight-area { flex-direction: row; }
+    .delight-label { min-width: 200px; }
   }
 </style>
 </head>
@@ -253,7 +256,7 @@
 <script>
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const MAX_INPUT = 200;
-  const CHART_MAX = 800; // Fixed scale increased to 800
+  const CHART_MAX = 800; 
   const values = [0, 0, 0, 0, 0, 0, 0];
   let delightLevel = 0;
 
@@ -271,7 +274,6 @@
   function buildGridLines() {
     const grid = document.getElementById('gridLines');
     grid.innerHTML = '';
-    // Create lines every 100 units up to 800
     for (let i = 0; i <= CHART_MAX; i += 100) {
       const line = document.createElement('div');
       line.className = 'grid-line';
