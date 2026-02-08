@@ -34,6 +34,7 @@
     padding: 2rem;
   }
 
+  /* Ambient background glow */
   body::before {
     content: '';
     position: fixed;
@@ -95,23 +96,16 @@
     overflow: hidden;
   }
 
-  .chart-inner {
-    display: flex;
-    gap: 0;
-  }
-
   .columns-area {
-    flex: 1;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 0;
     position: relative;
+    height: 420px;
   }
 
   .grid-lines {
     position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 420px;
+    top: 0; left: 0; right: 0; bottom: 0;
     pointer-events: none;
     z-index: 0;
   }
@@ -120,7 +114,8 @@
     position: absolute;
     left: 0; right: 0;
     height: 1px;
-    background: rgba(255,255,255,0.04);
+    background: rgba(255,255,255,0.06);
+    transition: bottom 0.3s ease;
   }
 
   .day-column {
@@ -133,41 +128,36 @@
 
   .bars-area {
     width: 100%;
-    height: 420px;
+    height: 100%;
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    gap: 2px;
-    position: relative;
+    gap: 4px;
+    padding-bottom: 10px;
   }
 
   .bar-outer {
-    width: 20px;
+    width: 22px;
     height: 100%;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
   }
 
-  .ref-bar {
-    position: absolute;
-    left: 0; right: 0; bottom: 0;
-    border: 2px dotted rgba(240, 160, 80, 0.3);
-    border-bottom: none;
-    background: none;
-    border-radius: 4px 4px 0 0;
-    pointer-events: none;
-    z-index: 2;
-  }
-
   .bar-fill {
     border-radius: 4px 4px 0 0;
-    transition: height 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     min-height: 2px;
   }
 
-  .bar-fill.dolled { background: linear-gradient(0deg, #d06820, #f0a050); }
-  .bar-fill.attract { background: linear-gradient(0deg, #2878a0, #50b0e0); }
+  .bar-fill.dolled { 
+    background: linear-gradient(0deg, #d06820, #f0a050); 
+    box-shadow: 0 -4px 12px rgba(240, 160, 80, 0.15);
+  }
+  .bar-fill.attract { 
+    background: linear-gradient(0deg, #2878a0, #50b0e0); 
+    box-shadow: 0 -4px 12px rgba(80, 176, 224, 0.15);
+  }
 
   .day-label {
     font-weight: 700;
@@ -175,12 +165,12 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-muted);
-    padding: 0.5rem 0 0.25rem;
+    padding: 1rem 0 0.5rem;
   }
 
   .slider-wrapper {
-    height: 112px;
-    width: 35px;
+    height: 120px;
+    width: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -189,7 +179,7 @@
   input[type="range"].day-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 90px;
+    width: 100px;
     height: 6px;
     background: var(--slider-track);
     border-radius: 3px;
@@ -200,11 +190,12 @@
 
   input[type="range"].day-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: var(--slider-thumb);
     cursor: pointer;
+    box-shadow: 0 0 10px rgba(240, 160, 80, 0.3);
   }
 
   .delight-area {
@@ -212,7 +203,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1rem 1.5rem;
+    padding: 1.2rem 1.5rem;
     display: flex;
     align-items: center;
     gap: 1.2rem;
@@ -220,19 +211,34 @@
 
   .delight-label {
     font-weight: 700;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     color: var(--delight-color);
+    min-width: 180px;
   }
 
   input[type="range"].delight-slider {
+    -webkit-appearance: none;
     flex: 1;
+    height: 6px;
+    background: var(--slider-track);
+    border-radius: 3px;
+    outline: none;
+  }
+
+  input[type="range"].delight-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--delight-color);
     cursor: pointer;
   }
 
   @media (max-width: 600px) {
-    h1 { font-size: 1.6rem; }
-    .bars-area { height: 300px; }
-    .grid-lines { height: 300px; }
+    .columns-area { height: 300px; }
+    .bar-outer { width: 16px; }
+    h1 { font-size: 1.8rem; }
+    .delight-area { flex-direction: column; align-items: flex-start; }
   }
 </style>
 </head>
@@ -248,11 +254,9 @@
   </div>
 
   <div class="chart-wrapper">
-    <div class="chart-inner">
-      <div class="columns-area" id="columnsArea">
-        <div class="grid-lines" id="gridLines"></div>
+    <div class="columns-area" id="columnsArea">
+      <div class="grid-lines" id="gridLines"></div>
       </div>
-    </div>
   </div>
 
   <div class="delight-area">
@@ -263,30 +267,51 @@
 
 <script>
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const MAX_VALUE = 200;
-  const CHART_MAX = 500;
+  const MAX_INPUT = 200;
   const values = [0, 0, 0, 0, 0, 0, 0];
   let delightLevel = 0;
 
   function calculateValue(inputVal, dayIndex) {
     let base = 0;
+    // Cumulative logic
     for (let d = 0; d < dayIndex; d++) {
-      const effective = values[d] + 50;
-      const excess = Math.max(0, effective - 50);
+      const prevEffective = values[d] + 50;
+      const excess = Math.max(0, prevEffective - 50);
       base = (base + excess) * 0.75;
     }
-    const effective = values[dayIndex] + 50;
-    return Math.max(0, Math.round(base + effective + delightLevel));
+    const currentEffective = values[dayIndex] + 50;
+    const final = base + currentEffective + delightLevel;
+    return Math.max(0, Math.round(final));
   }
 
-  function buildGridLines() {
+  function updateAll() {
+    const calculatedValues = values.map((v, i) => calculateValue(v, i));
+    
+    // Determine dynamic max (at least 200, but grows with data)
+    const highestPoint = Math.max(...values, ...calculatedValues, 200);
+    // Round up to nearest 100 with a little head-room buffer
+    const currentChartMax = Math.ceil((highestPoint + 50) / 100) * 100;
+
+    // Refresh Grid Lines
     const grid = document.getElementById('gridLines');
-    [0, 100, 200, 300, 400, 500].forEach(val => {
+    grid.innerHTML = '';
+    for (let i = 0; i <= currentChartMax; i += 100) {
       const line = document.createElement('div');
       line.className = 'grid-line';
-      line.style.bottom = (val / CHART_MAX * 100) + '%';
+      line.style.bottom = (i / currentChartMax * 100) + '%';
       grid.appendChild(line);
-    });
+    }
+
+    // Update Bar Heights
+    for (let i = 0; i < 7; i++) {
+      const dolledBar = document.getElementById(`bar-dolled-${i}`);
+      const attractBar = document.getElementById(`bar-attract-${i}`);
+      
+      if (dolledBar && attractBar) {
+        dolledBar.style.height = (values[i] / currentChartMax * 100) + '%';
+        attractBar.style.height = (calculatedValues[i] / currentChartMax * 100) + '%';
+      }
+    }
   }
 
   function buildColumns() {
@@ -296,34 +321,25 @@
       col.className = 'day-column';
       col.innerHTML = `
         <div class="bars-area">
-          <div class="ref-bar" style="height: ${200 / CHART_MAX * 100}%"></div>
           <div class="bar-outer">
-            <div class="bar-fill dolled" id="bar-dolled-${i}" style="height: 0%"></div>
+            <div class="bar-fill dolled" id="bar-dolled-${i}"></div>
           </div>
           <div class="bar-outer">
-            <div class="bar-fill attract" id="bar-attract-${i}" style="height: 0%"></div>
+            <div class="bar-fill attract" id="bar-attract-${i}"></div>
           </div>
         </div>
         <div class="day-label">${day}</div>
         <div class="slider-wrapper">
-          <input type="range" class="day-slider" min="0" max="${MAX_VALUE}" value="0" id="slider-${i}" />
+          <input type="range" class="day-slider" min="0" max="${MAX_INPUT}" value="0" />
         </div>
       `;
       area.appendChild(col);
 
-      col.querySelector('input').addEventListener('input', (e) => {
+      col.querySelector('.day-slider').addEventListener('input', (e) => {
         values[i] = parseInt(e.target.value);
         updateAll();
       });
     });
-  }
-
-  function updateAll() {
-    for (let i = 0; i < 7; i++) {
-      const calcVal = calculateValue(values[i], i);
-      document.getElementById(`bar-dolled-${i}`).style.height = (values[i] / CHART_MAX * 100) + '%';
-      document.getElementById(`bar-attract-${i}`).style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
-    }
   }
 
   document.getElementById('delightSlider').addEventListener('input', (e) => {
@@ -332,9 +348,10 @@
     updateAll();
   });
 
-  buildGridLines();
+  // Init
   buildColumns();
   updateAll();
 </script>
+
 </body>
 </html>
