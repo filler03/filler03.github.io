@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Weekly Bar Graph</title>
+<title>Attraction Chart</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
 <style>
   :root {
+    color-scheme: dark;
     --bg: #0f1117;
     --surface: #1a1d27;
     --border: #2a2d3a;
@@ -20,367 +20,235 @@
     --delight-color: #c080e0;
   }
 
-- { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-body {
-background: var(–bg);
-color: var(–text);
-font-family: ‘DM Sans’, sans-serif;
-min-height: 100vh;
-display: flex;
-flex-direction: column;
-align-items: center;
-justify-content: center;
-padding: 2rem;
-}
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
 
-body::before {
-content: ‘’;
-position: fixed;
-top: -50%; left: -50%;
-width: 200%; height: 200%;
-background: radial-gradient(ellipse at 30% 20%, rgba(240, 160, 80, 0.04) 0%, transparent 50%),
-radial-gradient(ellipse at 70% 80%, rgba(80, 176, 224, 0.03) 0%, transparent 50%);
-pointer-events: none;
-z-index: 0;
-}
+  body::before {
+    content: '';
+    position: fixed;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(240, 160, 80, 0.04) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 80%, rgba(80, 176, 224, 0.03) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
 
-.container {
-position: relative;
-z-index: 1;
-width: 100%;
-max-width: 880px;
-}
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 880px;
+  }
 
-h1 {
-font-family: ‘Playfair Display’, serif;
-font-weight: 900;
-font-size: 2.4rem;
-letter-spacing: -0.02em;
-margin-bottom: 0.3rem;
-background: linear-gradient(135deg, #f0a050, #e07830);
--webkit-background-clip: text;
--webkit-text-fill-color: transparent;
-background-clip: text;
-}
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: 2.4rem;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.3rem;
+    background: linear-gradient(135deg, #f0a050, #e07830);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
 
-.subtitle {
-color: var(–text-muted);
-font-size: 0.95rem;
-margin-bottom: 2rem;
-}
+  .legend {
+    display: flex;
+    gap: 1.8rem;
+    margin-bottom: 1.5rem;
+  }
 
-.legend {
-display: flex;
-gap: 1.8rem;
-margin-bottom: 1.5rem;
-}
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
 
-.legend-item {
-display: flex;
-align-items: center;
-gap: 0.5rem;
-font-size: 0.85rem;
-color: var(–text-muted);
-}
+  .legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+  }
 
-.legend-swatch {
-width: 14px;
-height: 14px;
-border-radius: 3px;
-}
+  .legend-swatch.dolled { background: var(--bar-dolled); }
+  .legend-swatch.attract { background: var(--bar-attract); }
 
-.legend-swatch.dolled { background: var(–bar-dolled); }
-.legend-swatch.attract { background: var(–bar-attract); }
+  .chart-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem 1.5rem 1rem;
+    overflow: hidden;
+  }
 
-.chart-wrapper {
-background: var(–surface);
-border: 1px solid var(–border);
-border-radius: 16px;
-padding: 1.5rem 1.5rem 1rem;
-}
+  .chart-inner {
+    display: flex;
+    gap: 0;
+  }
 
-.chart-inner {
-display: flex;
-gap: 0;
-}
+  .columns-area {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0;
+    position: relative;
+  }
 
-.y-axis {
-display: flex;
-flex-direction: column;
-justify-content: space-between;
-height: 420px;
-padding-right: 0.6rem;
-flex-shrink: 0;
-}
+  .grid-lines {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 420px;
+    pointer-events: none;
+    z-index: 0;
+  }
 
-.y-tick {
-display: none;
-}
+  .grid-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 1px;
+    background: rgba(255,255,255,0.04);
+  }
 
-.columns-area {
-flex: 1;
-display: grid;
-grid-template-columns: repeat(7, 1fr);
-gap: 0;
-position: relative;
-}
+  .day-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+  }
 
-.grid-lines {
-position: absolute;
-top: 0; left: 0; right: 0;
-height: 420px;
-pointer-events: none;
-z-index: 0;
-}
+  .bars-area {
+    width: 100%;
+    height: 420px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+    position: relative;
+  }
 
-.grid-line {
-position: absolute;
-left: 0; right: 0;
-height: 1px;
-background: rgba(255,255,255,0.04);
-}
+  .bar-outer {
+    width: 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
 
-.day-column {
-display: flex;
-flex-direction: column;
-align-items: center;
-position: relative;
-z-index: 1;
-}
+  .ref-bar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    border: 2px dotted rgba(240, 160, 80, 0.3);
+    border-bottom: none;
+    background: none;
+    border-radius: 4px 4px 0 0;
+    pointer-events: none;
+    z-index: 2;
+  }
 
-.bars-area {
-width: 100%;
-height: 420px;
-display: flex;
-align-items: flex-end;
-justify-content: center;
-gap: 2px;
-position: relative;
-}
+  .bar-fill {
+    border-radius: 4px 4px 0 0;
+    transition: height 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    min-height: 2px;
+  }
 
-.bar-outer {
-width: 20px;
-height: 100%;
-display: flex;
-flex-direction: column;
-justify-content: flex-end;
-}
+  .bar-fill.dolled { background: linear-gradient(0deg, #d06820, #f0a050); }
+  .bar-fill.attract { background: linear-gradient(0deg, #2878a0, #50b0e0); }
 
-.ref-bar {
-position: absolute;
-left: 0;
-right: 0;
-bottom: 0;
-border: 2px dotted rgba(240, 160, 80, 0.5);
-border-bottom: none;
-background: none;
-border-radius: 4px 4px 0 0;
-pointer-events: none;
-z-index: 2;
-}
+  .day-label {
+    font-weight: 700;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 0.5rem 0 0.25rem;
+  }
 
-.bar-fill {
-border-radius: 4px 4px 0 0;
-transition: height 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-min-height: 2px;
-position: relative;
-}
+  .slider-wrapper {
+    height: 112px;
+    width: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
-.bar-fill.dolled {
-background: linear-gradient(0deg, #d06820, #f0a050);
-box-shadow: 0 -4px 12px rgba(240, 160, 80, 0.2);
-}
+  input[type="range"].day-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 90px;
+    height: 6px;
+    background: var(--slider-track);
+    border-radius: 3px;
+    outline: none;
+    transform: rotate(-90deg);
+    cursor: pointer;
+  }
 
-.bar-fill.attract {
-background: linear-gradient(0deg, #2878a0, #50b0e0);
-box-shadow: 0 -4px 12px rgba(80, 176, 224, 0.2);
-}
+  input[type="range"].day-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--slider-thumb);
+    cursor: pointer;
+  }
 
-.bar-value {
-display: none;
-}
+  .delight-area {
+    margin-top: 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+  }
 
-.bar-value.dolled-val { color: var(–bar-dolled); }
-.bar-value.attract-val { color: var(–bar-attract); }
+  .delight-label {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--delight-color);
+  }
 
-.day-label {
-font-weight: 700;
-font-size: 0.72rem;
-text-transform: uppercase;
-letter-spacing: 0.08em;
-color: var(–text-muted);
-padding: 0.5rem 0 0.25rem;
-text-align: center;
-}
+  input[type="range"].delight-slider {
+    flex: 1;
+    cursor: pointer;
+  }
 
-.slider-section {
-display: flex;
-flex-direction: column;
-align-items: center;
-padding-bottom: 0.2rem;
-}
-
-.slider-wrapper {
-height: 112px;
-width: 35px;
-display: flex;
-align-items: center;
-justify-content: center;
-}
-
-input[type=“range”].day-slider {
--webkit-appearance: none;
-appearance: none;
-writing-mode: vertical-lr;
-direction: rtl;
-width: 4px;
-height: 90px;
-background: var(–slider-track);
-border-radius: 2px;
-outline: none;
-cursor: pointer;
-}
-
-input[type=“range”].day-slider::-webkit-slider-thumb {
--webkit-appearance: none;
-appearance: none;
-width: 12px;
-height: 12px;
-border-radius: 50%;
-background: var(–slider-thumb);
-box-shadow: 0 0 8px rgba(240, 160, 80, 0.4), 0 2px 4px rgba(0,0,0,0.3);
-cursor: pointer;
-transition: transform 0.15s, box-shadow 0.15s;
-}
-
-input[type=“range”].day-slider::-webkit-slider-thumb:hover {
-transform: scale(1.2);
-box-shadow: 0 0 14px rgba(240, 160, 80, 0.6), 0 2px 6px rgba(0,0,0,0.4);
-}
-
-input[type=“range”].day-slider::-moz-range-thumb {
-width: 12px;
-height: 12px;
-border-radius: 50%;
-background: var(–slider-thumb);
-box-shadow: 0 0 8px rgba(240, 160, 80, 0.4), 0 2px 4px rgba(0,0,0,0.3);
-cursor: pointer;
-border: none;
-}
-
-.slider-val {
-display: none;
-}
-
-/* Delight Level Slider */
-.delight-area {
-margin-top: 1.5rem;
-background: var(–surface);
-border: 1px solid var(–border);
-border-radius: 12px;
-padding: 1rem 1.5rem;
-display: flex;
-align-items: center;
-gap: 1.2rem;
-}
-
-.delight-label {
-font-weight: 700;
-font-size: 0.8rem;
-text-transform: uppercase;
-letter-spacing: 0.08em;
-color: var(–delight-color);
-white-space: nowrap;
-}
-
-.delight-slider-wrap {
-flex: 1;
-display: flex;
-align-items: center;
-gap: 0.8rem;
-}
-
-.delight-slider-wrap .delight-min,
-.delight-slider-wrap .delight-max {
-display: none;
-}
-
-input[type=“range”].delight-slider {
--webkit-appearance: none;
-appearance: none;
-flex: 1;
-height: 4px;
-background: var(–slider-track);
-border-radius: 2px;
-outline: none;
-cursor: pointer;
-}
-
-input[type=“range”].delight-slider::-webkit-slider-thumb {
--webkit-appearance: none;
-appearance: none;
-width: 18px;
-height: 18px;
-border-radius: 50%;
-background: var(–delight-color);
-box-shadow: 0 0 10px rgba(192, 128, 224, 0.4), 0 2px 4px rgba(0,0,0,0.3);
-cursor: pointer;
-transition: transform 0.15s, box-shadow 0.15s;
-}
-
-input[type=“range”].delight-slider::-webkit-slider-thumb:hover {
-transform: scale(1.15);
-box-shadow: 0 0 16px rgba(192, 128, 224, 0.6), 0 2px 6px rgba(0,0,0,0.4);
-}
-
-input[type=“range”].delight-slider::-moz-range-thumb {
-width: 18px;
-height: 18px;
-border-radius: 50%;
-background: var(–delight-color);
-box-shadow: 0 0 10px rgba(192, 128, 224, 0.4), 0 2px 4px rgba(0,0,0,0.3);
-cursor: pointer;
-border: none;
-}
-
-.delight-value {
-display: none;
-}
-
-@media (max-width: 600px) {
-.chart-wrapper { padding: 1rem 0.5rem 0.5rem; border-radius: 10px; }
-.bar-outer { width: 18px; }
-h1 { font-size: 1.6rem; }
-.y-axis { display: none; }
-.bars-area { height: 300px; }
-.slider-wrapper { height: 88px; }
-input[type=“range”].day-slider { height: 70px; }
-.delight-area { flex-direction: column; gap: 0.6rem; padding: 0.8rem; }
-}
+  @media (max-width: 600px) {
+    h1 { font-size: 1.6rem; }
+    .bars-area { height: 300px; }
+    .grid-lines { height: 300px; }
+  }
 </style>
-
 </head>
 <body>
 
 <div class="container">
   <h1>Attraction Chart</h1>
-  <p class="note" style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.5rem; font-style: italic;">** the comfort level relates to how willing we are to actively seek to bless each other in the ways that we desire to be blessed</p>
+  <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.5rem; font-style: italic;">* the comfort level relates to how willing we are to actively seek to bless each other</p>
 
   <div class="legend">
-    <div class="legend-item">
-      <div class="legend-swatch dolled"></div>
-      <span>Attempt to Impress</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-swatch attract"></div>
-      <span>Attractiveness</span>
-    </div>
+    <div class="legend-item"><div class="legend-swatch dolled"></div><span>Attempt to Impress</span></div>
+    <div class="legend-item"><div class="legend-swatch attract"></div><span>Attractiveness</span></div>
   </div>
 
   <div class="chart-wrapper">
     <div class="chart-inner">
-      <div class="y-axis" id="yAxis"></div>
       <div class="columns-area" id="columnsArea">
         <div class="grid-lines" id="gridLines"></div>
       </div>
@@ -388,13 +256,8 @@ input[type=“range”].day-slider { height: 70px; }
   </div>
 
   <div class="delight-area">
-    <div class="delight-label">Comfort / Connection</div>
-    <div class="delight-slider-wrap">
-      <span class="delight-min">−100</span>
-      <input type="range" class="delight-slider" min="-200" max="200" value="0" id="delightSlider" />
-      <span class="delight-max">+100</span>
-    </div>
-    <div class="delight-value" id="delightValue">0</div>
+    <div class="delight-label">Comfort / Connection: <span id="delightValue">0</span></div>
+    <input type="range" class="delight-slider" min="-200" max="200" value="0" id="delightSlider" />
   </div>
 </div>
 
@@ -403,13 +266,9 @@ input[type=“range”].day-slider { height: 70px; }
   const MAX_VALUE = 200;
   const CHART_MAX = 500;
   const values = [0, 0, 0, 0, 0, 0, 0];
-  let delightLevel = 0; // -200 to 200, additive
+  let delightLevel = 0;
 
   function calculateValue(inputVal, dayIndex) {
-    // Effective value is impress + 50 (baseline attractiveness)
-    // Base decays at 75% — only the portion above 50 carries forward
-    // Attractiveness = base + effective value + delight level
-    // Cannot go below 0
     let base = 0;
     for (let d = 0; d < dayIndex; d++) {
       const effective = values[d] + 50;
@@ -417,18 +276,7 @@ input[type=“range”].day-slider { height: 70px; }
       base = (base + excess) * 0.75;
     }
     const effective = values[dayIndex] + 50;
-    const raw = base + effective + delightLevel;
-    return Math.max(0, Math.round(raw));
-  }
-
-  function buildYAxis() {
-    const axis = document.getElementById('yAxis');
-    [500, 400, 300, 200, 100, 0].forEach(t => {
-      const el = document.createElement('div');
-      el.className = 'y-tick';
-      el.textContent = t;
-      axis.appendChild(el);
-    });
+    return Math.max(0, Math.round(base + effective + delightLevel));
   }
 
   function buildGridLines() {
@@ -443,38 +291,27 @@ input[type=“range”].day-slider { height: 70px; }
 
   function buildColumns() {
     const area = document.getElementById('columnsArea');
-
     days.forEach((day, i) => {
-      const calcVal = calculateValue(values[i], i);
-
       const col = document.createElement('div');
       col.className = 'day-column';
       col.innerHTML = `
         <div class="bars-area">
           <div class="ref-bar" style="height: ${200 / CHART_MAX * 100}%"></div>
           <div class="bar-outer">
-            <div class="bar-fill dolled" id="bar-dolled-${i}" style="height: ${values[i] / CHART_MAX * 100}%">
-              <div class="bar-value dolled-val" id="val-dolled-${i}">${values[i]}</div>
-            </div>
+            <div class="bar-fill dolled" id="bar-dolled-${i}" style="height: 0%"></div>
           </div>
           <div class="bar-outer">
-            <div class="bar-fill attract" id="bar-attract-${i}" style="height: ${calcVal / CHART_MAX * 100}%">
-              <div class="bar-value attract-val" id="val-attract-${i}">${calcVal}</div>
-            </div>
+            <div class="bar-fill attract" id="bar-attract-${i}" style="height: 0%"></div>
           </div>
         </div>
         <div class="day-label">${day}</div>
-        <div class="slider-section">
-          <div class="slider-wrapper">
-            <input type="range" class="day-slider" min="0" max="${MAX_VALUE}" value="${values[i]}" id="slider-${i}" />
-          </div>
-          <div class="slider-val" id="slider-val-${i}">${values[i]}</div>
+        <div class="slider-wrapper">
+          <input type="range" class="day-slider" min="0" max="${MAX_VALUE}" value="0" id="slider-${i}" />
         </div>
       `;
       area.appendChild(col);
 
-      const slider = col.querySelector('input[type="range"]');
-      slider.addEventListener('input', (e) => {
+      col.querySelector('input').addEventListener('input', (e) => {
         values[i] = parseInt(e.target.value);
         updateAll();
       });
@@ -483,40 +320,21 @@ input[type=“range”].day-slider { height: 70px; }
 
   function updateAll() {
     for (let i = 0; i < 7; i++) {
-      const val = values[i];
-      const calcVal = calculateValue(val, i);
-
-      const dolledBar = document.getElementById(`bar-dolled-${i}`);
-      const attractBar = document.getElementById(`bar-attract-${i}`);
-
-      dolledBar.style.height = (val / CHART_MAX * 100) + '%';
-      dolledBar.style.visibility = val === 0 ? 'hidden' : 'visible';
-      attractBar.style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
-      attractBar.style.visibility = calcVal === 0 ? 'hidden' : 'visible';
-
-      document.getElementById(`val-dolled-${i}`).textContent = val;
-      document.getElementById(`val-attract-${i}`).textContent = calcVal;
-      document.getElementById(`slider-val-${i}`).textContent = val;
+      const calcVal = calculateValue(values[i], i);
+      document.getElementById(`bar-dolled-${i}`).style.height = (values[i] / CHART_MAX * 100) + '%';
+      document.getElementById(`bar-attract-${i}`).style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
     }
   }
 
-  function updateDelightDisplay() {
-    const sign = delightLevel >= 0 ? '+' : '';
-    document.getElementById('delightValue').textContent = sign + delightLevel;
-  }
-
-  // Delight slider
   document.getElementById('delightSlider').addEventListener('input', (e) => {
     delightLevel = parseInt(e.target.value);
-    updateDelightDisplay();
+    document.getElementById('delightValue').textContent = (delightLevel >= 0 ? '+' : '') + delightLevel;
     updateAll();
   });
 
-  buildYAxis();
   buildGridLines();
   buildColumns();
-  updateDelightDisplay();
+  updateAll();
 </script>
-
 </body>
 </html>
