@@ -20,32 +20,37 @@
     --delight-color: #c080e0;
   }
 
+  /* Strict anti-scroll rules */
   *, *::before, *::after { 
     margin: 0; 
     padding: 0; 
     box-sizing: border-box; 
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* Disables all scrolling */
+    position: fixed; /* Prevents "bounce" scrolling on iOS */
+    touch-action: none; /* Prevents gesture-based scrolling */
   }
 
   body {
     background-color: var(--bg);
     color: var(--text);
     font-family: 'DM Sans', sans-serif;
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
-    padding: 1rem 0.5rem;
-    overflow-x: hidden;
+    padding: 10px;
   }
 
   body::before {
     content: '';
     position: fixed;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
-    background: radial-gradient(ellipse at 30% 20%, rgba(240, 160, 80, 0.04) 0%, transparent 50%),
-                radial-gradient(ellipse at 70% 80%, rgba(80, 176, 224, 0.03) 0%, transparent 50%);
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(240, 160, 80, 0.04) 0%, transparent 50%);
     pointer-events: none;
     z-index: 0;
   }
@@ -54,50 +59,26 @@
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 600px;
+    max-width: 500px;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    justify-content: space-between; /* Spreads content to fill screen height */
   }
 
-  h1 {
+  header h1 {
     font-family: 'Playfair Display', serif;
-    font-weight: 900;
-    font-size: 1.6rem;
-    margin-bottom: 0.1rem;
+    font-size: 1.4rem;
     background: linear-gradient(135deg, #f0a050, #e07830);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
-  .subtitle {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-    font-style: italic;
-    line-height: 1.2;
-    margin-bottom: 0.4rem;
-  }
+  .subtitle { font-size: 0.65rem; color: var(--text-muted); font-style: italic; }
 
-  .legend {
-    display: flex;
-    gap: 1.2rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-
-  .legend-swatch {
-    width: 12px;
-    height: 12px;
-    border-radius: 3px;
-  }
-
+  .legend { display: flex; gap: 1rem; margin-top: 5px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.65rem; color: var(--text-muted); }
+  .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
   .legend-swatch.dolled { background: var(--bar-dolled); }
   .legend-swatch.attract { background: var(--bar-attract); }
 
@@ -105,139 +86,73 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1rem 0.4rem 0.5rem;
-    width: 100%;
+    padding: 10px 5px;
+    flex-grow: 1; /* Allows chart to take available space */
+    margin: 10px 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .columns-area {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     position: relative;
-    height: 420px;
+    height: 100%; /* Dynamic height */
     width: 100%;
   }
 
-  .grid-lines {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none;
-  }
+  .grid-lines { position: absolute; inset: 0; pointer-events: none; }
+  .grid-line { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.06); }
 
-  .grid-line {
-    position: absolute;
-    left: 0; right: 0;
-    height: 1px;
-    background: rgba(255,255,255,0.06);
-  }
-
-  .day-column {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-width: 0;
-  }
-
-  .bars-area {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 2px;
-    padding-bottom: 8px;
-  }
-
-  .bar-outer {
-    flex: 0 1 12px; /* Thinned the bars slightly for a cleaner look */
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-  }
-
-  .bar-fill {
-    border-radius: 2px 2px 0 0;
-    transition: height 0.35s cubic-bezier(0.25, 1, 0.5, 1);
-    min-height: 2px;
-    width: 100%;
-  }
-
+  .day-column { display: flex; flex-direction: column; align-items: center; height: 100%; }
+  .bars-area { width: 100%; height: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; padding-bottom: 5px; }
+  .bar-outer { flex: 0 1 12px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+  .bar-fill { border-radius: 2px 2px 0 0; transition: height 0.3s ease-out; min-height: 2px; width: 100%; }
   .bar-fill.dolled { background: var(--bar-dolled); }
   .bar-fill.attract { background: var(--bar-attract); }
 
-  .day-label {
-    font-weight: 700;
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    padding: 0.5rem 0;
-    text-transform: uppercase;
-  }
+  .day-label { font-weight: 700; font-size: 0.6rem; color: var(--text-muted); padding: 5px 0; }
 
   .slider-wrapper {
-    height: 90px;
-    width: 32px;
+    height: 70px;
+    width: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
+    touch-action: pan-y; /* Allows interacting with sliders despite global lock */
   }
 
   input[type="range"].day-slider {
     -webkit-appearance: none;
-    appearance: none;
     position: absolute;
-    width: 80px;
-    height: 4px;
+    width: 60px;
+    height: 3px;
     background: var(--slider-track);
-    border-radius: 2px;
     transform: rotate(-90deg);
-    cursor: pointer;
     outline: none;
+    cursor: pointer;
   }
 
   input[type="range"].day-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 14px; height: 14px;
     border-radius: 50%;
     background: var(--slider-thumb);
-    box-shadow: 0 0 8px rgba(240, 160, 80, 0.3);
   }
 
   .delight-area {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1rem;
-    width: 100%;
-    margin-top: 0.5rem;
+    padding: 12px;
+    margin-bottom: 10px;
+    touch-action: pan-x;
   }
 
-  .delight-label {
-    font-weight: 700;
-    font-size: 0.8rem;
-    color: var(--delight-color);
-    margin-bottom: 0.6rem;
-    display: block;
-  }
-
-  input[type="range"].delight-slider {
-    -webkit-appearance: none;
-    width: 100%;
-    height: 6px;
-    background: var(--slider-track);
-    border-radius: 3px;
-    outline: none;
-  }
-
-  input[type="range"].delight-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--delight-color);
-    cursor: pointer;
-  }
+  .delight-label { font-weight: 700; font-size: 0.75rem; color: var(--delight-color); margin-bottom: 6px; display: block; }
+  input[type="range"].delight-slider { -webkit-appearance: none; width: 100%; height: 6px; background: var(--slider-track); border-radius: 3px; outline: none; }
+  input[type="range"].delight-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--delight-color); }
 </style>
 </head>
 <body>
@@ -245,7 +160,7 @@
 <div class="container">
   <header>
     <h1>Attraction Chart</h1>
-    <p class="subtitle">* willingness to seek to bless each other</p>
+    <p class="subtitle">* willingness to bless each other</p>
     <div class="legend">
       <div class="legend-item"><div class="legend-swatch dolled"></div><span>Effort</span></div>
       <div class="legend-item"><div class="legend-swatch attract"></div><span>Attraction</span></div>
@@ -259,43 +174,36 @@
   </div>
 
   <div class="delight-area">
-    <div class="delight-label">Comfort / Connection: <span id="delightValue">0</span></div>
+    <div class="delight-label">Comfort: <span id="delightValue">0</span></div>
     <input type="range" class="delight-slider" min="-200" max="200" value="0" id="delightSlider" />
   </div>
 </div>
 
 <script>
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const MAX_INPUT = 200;
-  const CHART_MAX = 1000; // Increased to 1000 to prevent bars from hitting the top
+  const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const CHART_MAX = 1000; 
   const values = [0, 0, 0, 0, 0, 0, 0];
   let delightLevel = 0;
 
   function calculateValue(inputVal, dayIndex) {
     let base = 0;
     for (let d = 0; d < dayIndex; d++) {
-      const prevEffective = values[d] + 50;
-      const excess = Math.max(0, prevEffective - 50);
-      base = (base + excess) * 0.75;
+      base = (base + Math.max(0, values[d])) * 0.75;
     }
-    const currentEffective = values[dayIndex] + 50;
-    let rawScore = base + currentEffective;
+    let rawScore = base + values[dayIndex] + 50;
 
     if (delightLevel < 0) {
-      let multiplier = 1 + (delightLevel / 200);
-      rawScore = rawScore * multiplier;
+      rawScore = rawScore * (1 + (delightLevel / 200));
     } else {
       rawScore += delightLevel;
     }
-
     return Math.max(0, Math.round(rawScore));
   }
 
   function buildGridLines() {
     const grid = document.getElementById('gridLines');
     grid.innerHTML = '';
-    // Grid lines every 200 units
-    for (let i = 0; i <= CHART_MAX; i += 200) {
+    for (let i = 0; i <= CHART_MAX; i += 250) {
       const line = document.createElement('div');
       line.className = 'grid-line';
       line.style.bottom = (i / CHART_MAX * 100) + '%';
@@ -315,11 +223,10 @@
         </div>
         <div class="day-label">${day}</div>
         <div class="slider-wrapper">
-          <input type="range" class="day-slider" min="0" max="${MAX_INPUT}" value="0" />
+          <input type="range" class="day-slider" min="0" max="200" value="0" />
         </div>
       `;
       area.appendChild(col);
-
       col.querySelector('.day-slider').addEventListener('input', (e) => {
         values[i] = parseInt(e.target.value);
         updateAll();
@@ -330,12 +237,8 @@
   function updateAll() {
     for (let i = 0; i < 7; i++) {
       const calcVal = calculateValue(values[i], i);
-      const dolledBar = document.getElementById(`bar-dolled-${i}`);
-      const attractBar = document.getElementById(`bar-attract-${i}`);
-      
-      dolledBar.style.height = (values[i] / CHART_MAX * 100) + '%';
-      // Bars are now capped at 1000, which is higher than they can realistically reach
-      attractBar.style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
+      document.getElementById(`bar-dolled-${i}`).style.height = (values[i] / CHART_MAX * 100) + '%';
+      document.getElementById(`bar-attract-${i}`).style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
     }
   }
 
