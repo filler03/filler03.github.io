@@ -34,8 +34,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start; /* Aligns content to the top */
-    padding: 1rem 0.5rem; /* Minimal top padding */
+    justify-content: flex-start;
+    padding: 1rem 0.5rem;
     overflow-x: hidden;
   }
 
@@ -113,7 +113,7 @@
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     position: relative;
-    height: 420px; /* Increased height back up for better resolution */
+    height: 420px;
     width: 100%;
   }
 
@@ -143,12 +143,12 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    gap: 3px;
+    gap: 2px;
     padding-bottom: 8px;
   }
 
   .bar-outer {
-    flex: 0 1 16px;
+    flex: 0 1 12px; /* Thinned the bars slightly for a cleaner look */
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -156,7 +156,7 @@
   }
 
   .bar-fill {
-    border-radius: 3px 3px 0 0;
+    border-radius: 2px 2px 0 0;
     transition: height 0.35s cubic-bezier(0.25, 1, 0.5, 1);
     min-height: 2px;
     width: 100%;
@@ -267,7 +267,7 @@
 <script>
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const MAX_INPUT = 200;
-  const CHART_MAX = 800; 
+  const CHART_MAX = 1000; // Increased to 1000 to prevent bars from hitting the top
   const values = [0, 0, 0, 0, 0, 0, 0];
   let delightLevel = 0;
 
@@ -294,6 +294,7 @@
   function buildGridLines() {
     const grid = document.getElementById('gridLines');
     grid.innerHTML = '';
+    // Grid lines every 200 units
     for (let i = 0; i <= CHART_MAX; i += 200) {
       const line = document.createElement('div');
       line.className = 'grid-line';
@@ -329,8 +330,12 @@
   function updateAll() {
     for (let i = 0; i < 7; i++) {
       const calcVal = calculateValue(values[i], i);
-      document.getElementById(`bar-dolled-${i}`).style.height = (values[i] / CHART_MAX * 100) + '%';
-      document.getElementById(`bar-attract-${i}`).style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
+      const dolledBar = document.getElementById(`bar-dolled-${i}`);
+      const attractBar = document.getElementById(`bar-attract-${i}`);
+      
+      dolledBar.style.height = (values[i] / CHART_MAX * 100) + '%';
+      // Bars are now capped at 1000, which is higher than they can realistically reach
+      attractBar.style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
     }
   }
 
