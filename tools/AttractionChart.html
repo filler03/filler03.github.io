@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Attraction Chart</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e8e6e1;
+    --text-muted: #7a7d8a;
+    --bar-dolled: #f0a050;
+    --bar-attract: #50b0e0;
+    --slider-track: #2a2d3a;
+    --slider-thumb: #f0a050;
+    --delight-color: #c080e0;
+  }
+
+  /* Strict anti-scroll rules */
+  *, *::before, *::after { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* Disables all scrolling */
+    position: fixed; /* Prevents "bounce" scrolling on iOS */
+    touch-action: none; /* Prevents gesture-based scrolling */
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(240, 160, 80, 0.04) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 500px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* Spreads content to fill screen height */
+  }
+
+  header h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem;
+    background: linear-gradient(135deg, #f0a050, #e07830);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle { font-size: 0.65rem; color: var(--text-muted); font-style: italic; }
+
+  .legend { display: flex; gap: 1rem; margin-top: 5px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.65rem; color: var(--text-muted); }
+  .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
+  .legend-swatch.dolled { background: var(--bar-dolled); }
+  .legend-swatch.attract { background: var(--bar-attract); }
+
+  .chart-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 5px;
+    flex-grow: 1; /* Allows chart to take available space */
+    margin: 10px 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .columns-area {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    position: relative;
+    height: 100%; /* Dynamic height */
+    width: 100%;
+  }
+
+  .grid-lines { position: absolute; inset: 0; pointer-events: none; }
+  .grid-line { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.06); }
+
+  .day-column { display: flex; flex-direction: column; align-items: center; height: 100%; }
+  .bars-area { width: 100%; height: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; padding-bottom: 5px; }
+  .bar-outer { flex: 0 1 12px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+  .bar-fill { border-radius: 2px 2px 0 0; transition: height 0.3s ease-out; min-height: 2px; width: 100%; }
+  .bar-fill.dolled { background: var(--bar-dolled); }
+  .bar-fill.attract { background: var(--bar-attract); }
+
+  .day-label { font-weight: 700; font-size: 0.6rem; color: var(--text-muted); padding: 5px 0; }
+
+  .slider-wrapper {
+    height: 70px;
+    width: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    touch-action: pan-y; /* Allows interacting with sliders despite global lock */
+  }
+
+  input[type="range"].day-slider {
+    -webkit-appearance: none;
+    position: absolute;
+    width: 60px;
+    height: 3px;
+    background: var(--slider-track);
+    transform: rotate(-90deg);
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type="range"].day-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--slider-thumb);
+  }
+
+  .delight-area {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    touch-action: pan-x;
+  }
+
+  .delight-label { font-weight: 700; font-size: 0.75rem; color: var(--delight-color); margin-bottom: 6px; display: block; }
+  input[type="range"].delight-slider { -webkit-appearance: none; width: 100%; height: 6px; background: var(--slider-track); border-radius: 3px; outline: none; }
+  input[type="range"].delight-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--delight-color); }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>Attraction Chart</h1>
+    <p class="subtitle">* willingness to bless each other</p>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-swatch dolled"></div><span>Effort</span></div>
+      <div class="legend-item"><div class="legend-swatch attract"></div><span>Attraction</span></div>
+    </div>
+  </header>
+
+  <div class="chart-wrapper">
+    <div class="columns-area" id="columnsArea">
+      <div class="grid-lines" id="gridLines"></div>
+    </div>
+  </div>
+
+  <div class="delight-area">
+    <div class="delight-label">Comfort: <span id="delightValue">0</span></div>
+    <input type="range" class="delight-slider" min="-200" max="200" value="0" id="delightSlider" />
+  </div>
+</div>
+
+<script>
+  const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const CHART_MAX = 1000; 
+  const values = [0, 0, 0, 0, 0, 0, 0];
+  let delightLevel = 0;
+
+  function calculateValue(inputVal, dayIndex) {
+    let base = 0;
+    for (let d = 0; d < dayIndex; d++) {
+      base = (base + Math.max(0, values[d])) * 0.75;
+    }
+    let rawScore = base + values[dayIndex] + 50;
+
+    if (delightLevel < 0) {
+      rawScore = rawScore * (1 + (delightLevel / 200));
+    } else {
+      rawScore += delightLevel;
+    }
+    return Math.max(0, Math.round(rawScore));
+  }
+
+  function buildGridLines() {
+    const grid = document.getElementById('gridLines');
+    grid.innerHTML = '';
+    for (let i = 0; i <= CHART_MAX; i += 250) {
+      const line = document.createElement('div');
+      line.className = 'grid-line';
+      line.style.bottom = (i / CHART_MAX * 100) + '%';
+      grid.appendChild(line);
+    }
+  }
+
+  function buildColumns() {
+    const area = document.getElementById('columnsArea');
+    days.forEach((day, i) => {
+      const col = document.createElement('div');
+      col.className = 'day-column';
+      col.innerHTML = `
+        <div class="bars-area">
+          <div class="bar-outer"><div class="bar-fill dolled" id="bar-dolled-${i}"></div></div>
+          <div class="bar-outer"><div class="bar-fill attract" id="bar-attract-${i}"></div></div>
+        </div>
+        <div class="day-label">${day}</div>
+        <div class="slider-wrapper">
+          <input type="range" class="day-slider" min="0" max="200" value="0" />
+        </div>
+      `;
+      area.appendChild(col);
+      col.querySelector('.day-slider').addEventListener('input', (e) => {
+        values[i] = parseInt(e.target.value);
+        updateAll();
+      });
+    });
+  }
+
+  function updateAll() {
+    for (let i = 0; i < 7; i++) {
+      const calcVal = calculateValue(values[i], i);
+      document.getElementById(`bar-dolled-${i}`).style.height = (values[i] / CHART_MAX * 100) + '%';
+      document.getElementById(`bar-attract-${i}`).style.height = (Math.min(calcVal, CHART_MAX) / CHART_MAX * 100) + '%';
+    }
+  }
+
+  document.getElementById('delightSlider').addEventListener('input', (e) => {
+    delightLevel = parseInt(e.target.value);
+    document.getElementById('delightValue').textContent = (delightLevel >= 0 ? '+' : '') + delightLevel;
+    updateAll();
+  });
+
+  buildGridLines();
+  buildColumns();
+  updateAll();
+</script>
+
+</body>
+</html>
