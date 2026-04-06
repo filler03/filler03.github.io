@@ -23,6 +23,31 @@
 
       canvas {
         display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 0;
+      }
+
+      /* Emoji layer sits on top of canvas but below UI */
+      #emoji-layer {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .emoji-sprite {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        line-height: 1;
+        text-align: center;
+        will-change: transform;
       }
 
       #ui-overlay {
@@ -109,6 +134,9 @@
     </style>
   </head>
   <body>
+    <canvas id="canvas"></canvas>
+    <div id="emoji-layer"></div>
+
     <div id="ui-overlay">
       <div id="title">Orbital</div>
     </div>
@@ -126,12 +154,11 @@
       <button class="btn" onclick="togglePause()">Pause</button>
     </div>
 
-    <canvas id="canvas"></canvas>
-
     <script>
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
       const statsEl = document.getElementById("stats");
+      const emojiLayer = document.getElementById("emoji-layer");
 
       let W, H;
       function resize() {
@@ -147,14 +174,38 @@
       const EARTH_RADIUS = 36;
       const MOON_RADIUS = 6;
 
-      // State
+      // ── DOM Emoji Sprite System ──
+      // All emoji are rendered as positioned DOM elements over the canvas.
+      // The browser's native text renderer handles emoji perfectly on iOS/Android/desktop.
+
+      function createEmojiSprite(emoji, sizePx) {
+        const el = document.createElement("div");
+        el.className = "emoji-sprite";
+        el.textContent = emoji;
+        el.style.fontSize = sizePx + "px";
+        emojiLayer.appendChild(el);
+        return el;
+      }
+
+      function positionSprite(el, x, y) {
+        el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+      }
+
+      function removeSprite(el) {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      }
+
+      // ── State ──
       let moons = [];
       let stars = [];
-      let placing = null; // { x, y } when first click happened
+      let placing = null;
       let showTrails = true;
       let paused = false;
-      let explosions = []; // { x, y, age, particles: [{x,y,vx,vy,color,size}] }
-      let impacts = []; // { x, y, emoji } persistent markers on earth
+      let explosions = [];
+      let impacts = [];
+
+      // Earth sprite (created once)
+      const earthEl = createEmojiSprite("🌍", Math.round(EARTH_RADIUS * 2.2));
 
       // Pre-generate stars
       function generateStars() {
@@ -188,26 +239,53 @@
       ];
       let colorIndex = 0;
 
-      // Click handling
+      // ── Input Handling ──
       canvas.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
-        const x = e.clientX;
-        const y = e.clientY;
-
-        if (!placing) {
-          placing = { x, y };
-        }
+        if (!placing) placing = { x: e.clientX, y: e.clientY };
       });
 
       canvas.addEventListener("mouseup", (e) => {
+        finishPlacing(e.clientX, e.clientY);
+      });
+
+      canvas.addEventListener(
+        "touchstart",
+        (e) => {
+          e.preventDefault();
+          const t = e.touches[0];
+          if (!placing) placing = { x: t.clientX, y: t.clientY };
+        },
+        { passive: false },
+      );
+
+      canvas.addEventListener(
+        "touchmove",
+        (e) => {
+          e.preventDefault();
+          const t = e.touches[0];
+          mouseX = t.clientX;
+          mouseY = t.clientY;
+        },
+        { passive: false },
+      );
+
+      canvas.addEventListener(
+        "touchend",
+        (e) => {
+          e.preventDefault();
+          const t = e.changedTouches[0];
+          finishPlacing(t.clientX, t.clientY);
+        },
+        { passive: false },
+      );
+
+      function finishPlacing(x, y) {
         if (!placing) return;
-        const x = e.clientX;
-        const y = e.clientY;
 
         const dx = x - placing.x;
         const dy = y - placing.y;
 
-        // Velocity scaled down
         const vScale = 0.35;
         const vx = dx * vScale;
         const vy = dy * vScale;
@@ -215,11 +293,12 @@
         const color = moonColors[colorIndex % moonColors.length];
         colorIndex++;
 
-        // Pick emoji - mostly moon, small chance of donut or coffee
         const roll = Math.random();
         let emoji = "🌕";
         if (roll < 0.05) emoji = "☕";
         else if (roll < 0.12) emoji = "🍩";
+
+        const el = createEmojiSprite(emoji, Math.round(MOON_RADIUS * 3));
 
         moons.push({
           x: placing.x,
@@ -228,16 +307,19 @@
           vy,
           color,
           emoji,
+          el,
           trail: [],
           alive: true,
         });
 
         placing = null;
-      });
+      }
 
-      // Controls
+      // ── Controls ──
       function clearMoons() {
+        for (const m of moons) removeSprite(m.el);
         moons = [];
+        for (const imp of impacts) removeSprite(imp.el);
         impacts = [];
         explosions = [];
       }
@@ -256,7 +338,8 @@
         return H / 2;
       }
 
-      // Draw stars
+      // ── Canvas Drawing (effects only — no emoji on canvas) ──
+
       function drawStars(time) {
         for (const s of stars) {
           const alpha =
@@ -269,8 +352,7 @@
         }
       }
 
-      // Draw Earth with emoji
-      function drawEarth(time) {
+      function drawEarthEffects(time) {
         const ex = earthX();
         const ey = earthY();
 
@@ -302,22 +384,10 @@
           ctx.stroke();
         }
 
-        // Earth emoji
-        ctx.font = `${EARTH_RADIUS * 2.2}px serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("🌍", ex, ey + 2);
-
-        // Draw persistent impact markers on earth
-        for (const imp of impacts) {
-          ctx.font = `${MOON_RADIUS * 1.8}px serif`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(imp.emoji, imp.x, imp.y);
-        }
+        // Position earth DOM sprite
+        positionSprite(earthEl, ex, ey + 2);
       }
 
-      // Update and draw explosions
       function updateExplosions(dt) {
         for (const exp of explosions) {
           exp.age += dt;
@@ -329,7 +399,6 @@
             p.size *= 0.98;
           }
         }
-        // Remove old explosions
         explosions = explosions.filter((e) => e.age < 1.5);
       }
 
@@ -337,7 +406,6 @@
         for (const exp of explosions) {
           const progress = exp.age / 1.5;
 
-          // Central flash (brief)
           if (exp.age < 0.15) {
             const flashAlpha = 1 - exp.age / 0.15;
             const flashR = EARTH_RADIUS * 0.6 * (1 - flashAlpha * 0.5);
@@ -358,7 +426,6 @@
             ctx.fill();
           }
 
-          // Particles
           for (const p of exp.particles) {
             const alpha = Math.max(0, 1 - progress);
             ctx.beginPath();
@@ -371,7 +438,6 @@
             ctx.fill();
           }
 
-          // Expanding shockwave ring
           if (exp.age < 0.5) {
             const ringProgress = exp.age / 0.5;
             const ringR = EARTH_RADIUS * 1.5 * ringProgress;
@@ -385,14 +451,12 @@
         }
       }
 
-      // Draw velocity arrow while placing
       function drawPlacingArrow(mouseX, mouseY) {
         if (!placing) return;
 
         const sx = placing.x;
         const sy = placing.y;
 
-        // Moon preview
         ctx.beginPath();
         ctx.arc(sx, sy, MOON_RADIUS + 2, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
@@ -401,7 +465,6 @@
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Arrow
         const dx = mouseX - sx;
         const dy = mouseY - sy;
         const len = Math.sqrt(dx * dx + dy * dy);
@@ -416,7 +479,6 @@
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Arrowhead
         const angle = Math.atan2(dy, dx);
         const aLen = 10;
         ctx.beginPath();
@@ -434,7 +496,6 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Speed label
         const speed = (len * 0.35).toFixed(1);
         ctx.font = '11px "Exo 2", sans-serif';
         ctx.fillStyle = "rgba(79, 195, 247, 0.7)";
@@ -442,8 +503,7 @@
         ctx.fillText(`v = ${speed}`, (sx + mouseX) / 2, (sy + mouseY) / 2 - 12);
       }
 
-      // Draw moons and trails
-      function drawMoons() {
+      function drawMoonEffects() {
         const ex = earthX();
         const ey = earthY();
 
@@ -462,7 +522,7 @@
             ctx.stroke();
           }
 
-          // Moon glow
+          // Glow
           const glow = ctx.createRadialGradient(
             moon.x,
             moon.y,
@@ -478,11 +538,8 @@
           ctx.fillStyle = glow;
           ctx.fill();
 
-          // Moon emoji
-          ctx.font = `${MOON_RADIUS * 3}px serif`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(moon.emoji, moon.x, moon.y + 1);
+          // Position DOM sprite
+          positionSprite(moon.el, moon.x, moon.y + 1);
 
           // Gravitational line to earth
           const dx = ex - moon.x;
@@ -500,7 +557,7 @@
         }
       }
 
-      // Physics update
+      // ── Physics ──
       function updatePhysics(dt) {
         if (paused) return;
 
@@ -518,16 +575,14 @@
             const distSq = dx * dx + dy * dy;
             const dist = Math.sqrt(distSq);
 
-            // Collision with earth
             if (dist < EARTH_RADIUS + MOON_RADIUS) {
               moon.alive = false;
+              removeSprite(moon.el);
 
-              // Calculate impact point on earth's surface
               const angle = Math.atan2(moon.y - ey, moon.x - ex);
               const impactX = ex + Math.cos(angle) * EARTH_RADIUS * 0.85;
               const impactY = ey + Math.sin(angle) * EARTH_RADIUS * 0.85;
 
-              // Spawn explosion particles
               const particles = [];
               const speed = Math.sqrt(moon.vx * moon.vx + moon.vy * moon.vy);
               const intensity = Math.min(speed / 3, 8);
@@ -551,16 +606,16 @@
               }
               explosions.push({ x: impactX, y: impactY, age: 0, particles });
 
-              impacts.push({
-                x: impactX,
-                y: impactY,
-                emoji: "💥",
-              });
+              const impactEl = createEmojiSprite(
+                "💥",
+                Math.round(MOON_RADIUS * 1.8),
+              );
+              positionSprite(impactEl, impactX, impactY);
+              impacts.push({ x: impactX, y: impactY, el: impactEl });
 
               break;
             }
 
-            // Gravitational acceleration
             const force = (G * EARTH_MASS) / distSq;
             const ax = (force * dx) / dist;
             const ay = (force * dy) / dist;
@@ -571,14 +626,12 @@
             moon.y += moon.vy * subDt;
           }
 
-          // Trail
           if (moon.alive) {
             moon.trail.push({ x: moon.x, y: moon.y });
             if (moon.trail.length > 600) moon.trail.shift();
           }
         }
 
-        // Clean dead moons
         moons = moons.filter((m) => m.alive);
       }
 
@@ -588,7 +641,7 @@
         statsEl.innerHTML = `MOONS: ${active}${paused ? " · PAUSED" : ""}`;
       }
 
-      // Mouse tracking for arrow
+      // Mouse tracking
       let mouseX = 0,
         mouseY = 0;
       canvas.addEventListener("mousemove", (e) => {
@@ -596,7 +649,7 @@
         mouseY = e.clientY;
       });
 
-      // Main loop
+      // ── Main Loop ──
       let lastTime = performance.now();
       function loop(time) {
         const dt = Math.min((time - lastTime) / 1000, 0.05);
@@ -608,8 +661,8 @@
         drawStars(time / 1000);
         updatePhysics(dt);
         updateExplosions(dt);
-        drawEarth(time / 1000);
-        drawMoons();
+        drawEarthEffects(time / 1000);
+        drawMoonEffects();
         drawExplosions();
         drawPlacingArrow(mouseX, mouseY);
         updateStats();
