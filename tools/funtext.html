@@ -1,0 +1,3492 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Text Studio</title>
+    <style>
+      :root {
+        --cyc-light: #ecebe7;
+        --cyc-dark: #c7c4bd;
+        --ink: #211f1b;
+        --panel: #fbfaf8;
+        --line: #d8d5cf;
+        --accent: #e2452d;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+        color: var(--ink);
+      }
+
+      /* ---------- Stage ---------- */
+      #stage {
+        position: fixed;
+        inset: 0;
+        perspective: 1100px;
+        overflow: hidden;
+      }
+
+      .mover {
+        position: absolute;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .mover.dragging {
+        cursor: grabbing;
+      }
+      .mover.hidden {
+        visibility: hidden;
+      }
+
+      .mover.selected .text3d {
+        outline: 1px dashed rgba(226, 69, 45, 0.45);
+        outline-offset: 12px;
+      }
+
+      .floater {
+        transform-style: preserve-3d;
+      }
+
+      .spinner {
+        transform-style: preserve-3d;
+        transform: translate(-50%, -50%) rotateX(var(--rx, -12deg))
+          rotateY(var(--ry, 18deg));
+      }
+
+      .stack3d {
+        position: relative;
+        transform-style: preserve-3d;
+        font-family: "Arial Black", "Segoe UI Black", Impact, sans-serif;
+        font-weight: 900;
+        letter-spacing: 0.02em;
+        line-height: 1.05;
+        white-space: pre;
+        text-align: center;
+      }
+      .stack3d .layer {
+        position: absolute;
+        inset: 0;
+        white-space: pre;
+        text-align: center;
+      }
+      .stack3d .face {
+        position: relative;
+      }
+
+      /* ---------- Floating animations (parameterized via CSS vars) ---------- */
+      @keyframes floatAnim {
+        0%,
+        100% {
+          transform: translate(0, 0);
+        }
+        25% {
+          transform: translate(
+            calc(var(--dist, 14px) * 0.55),
+            calc(var(--dist, 14px) * -1)
+          );
+        }
+        50% {
+          transform: translate(
+            calc(var(--dist, 14px) * -0.4),
+            calc(var(--dist, 14px) * 0.15)
+          );
+        }
+        75% {
+          transform: translate(
+            calc(var(--dist, 14px) * 0.35),
+            calc(var(--dist, 14px) * 0.9)
+          );
+        }
+      }
+      @keyframes spinAnim {
+        from {
+          transform: rotateY(0deg);
+        }
+        to {
+          transform: rotateY(360deg);
+        }
+      }
+      @keyframes pulseAnim {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(var(--amt, 1.12));
+        }
+      }
+      @keyframes swayAnim {
+        0%,
+        100% {
+          transform: rotateZ(calc(var(--ang, 5deg) * -1));
+        }
+        50% {
+          transform: rotateZ(var(--ang, 5deg));
+        }
+      }
+      .anim-float {
+        animation: floatAnim 5s ease-in-out infinite;
+      }
+      .anim-spin {
+        animation: spinAnim 6s linear infinite;
+        transform-style: preserve-3d;
+      }
+      .anim-pulse {
+        animation: pulseAnim 2.4s ease-in-out infinite;
+      }
+      .anim-sway {
+        animation: swayAnim 3.2s ease-in-out infinite;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .floater {
+          animation: none !important;
+        }
+      }
+
+      /* ---------- Physics letters (gravity) ---------- */
+      #physLayer {
+        position: absolute;
+        inset: 0;
+        perspective: 1100px;
+        pointer-events: none;
+      }
+      .phys-letter {
+        position: absolute;
+        left: 0;
+        top: 0;
+        will-change: transform;
+      }
+      .phys-rot {
+        transform-style: preserve-3d;
+      }
+
+      /* ---------- Control panel ---------- */
+      #panel {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        width: 280px;
+        max-height: calc(100% - 32px);
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: 0 12px 32px rgba(33, 31, 27, 0.14);
+        padding: 14px 16px 16px;
+        z-index: 10;
+      }
+
+      #panel.hidden {
+        display: none;
+      }
+
+      #panel h1 {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #panelHide {
+        margin-left: auto;
+        width: 22px;
+        height: 22px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: #fff;
+        color: #6f6b63;
+        font: inherit;
+        font-size: 12px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+      }
+      #panelHide:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
+      #panelShow {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        width: 38px;
+        height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+        box-shadow: 0 6px 18px rgba(33, 31, 27, 0.18);
+        z-index: 10;
+        display: none;
+      }
+      #panelShow.visible {
+        display: block;
+      }
+      #panelShow:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      #panel h1 .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+        align-self: center;
+      }
+
+      .field {
+        margin-bottom: 13px;
+      }
+
+      .field label,
+      .field .lbl {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #6f6b63;
+        margin-bottom: 5px;
+      }
+      .field label output,
+      .field .lbl output {
+        color: var(--ink);
+      }
+      .lbl .toggles {
+        display: inline-flex;
+        gap: 10px;
+      }
+
+      textarea#textInput {
+        width: 100%;
+        font: inherit;
+        font-size: 14px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        resize: vertical;
+        min-height: 56px;
+        max-height: 140px;
+      }
+      textarea#textInput:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+        border-color: transparent;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      input[type="color"] {
+        width: 100%;
+        height: 34px;
+        padding: 2px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+      }
+
+      input[type="number"] {
+        width: 100%;
+        font: inherit;
+        font-size: 12px;
+        padding: 6px 6px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+      }
+
+      .gradtoggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        text-transform: none;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+        color: #6f6b63;
+      }
+      .gradtoggle input {
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      .stops {
+        display: flex;
+        gap: 7px;
+        align-items: center;
+      }
+      .stop {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+      }
+      .delstop {
+        position: absolute;
+        top: -7px;
+        right: -6px;
+        width: 17px;
+        height: 17px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: #6f6b63;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+      }
+      .delstop:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .addstop {
+        flex: 0 0 34px;
+        width: 34px;
+        height: 34px;
+        border: 1px dashed var(--line);
+        border-radius: 6px;
+        background: transparent;
+        color: #6f6b63;
+        font: inherit;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .addstop:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
+      /* color animation step editor */
+      .canim {
+        margin-top: 8px;
+      }
+      .canim .cahdr {
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9a958c;
+        margin-bottom: 4px;
+      }
+      .cstep {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .cstep input[type="color"] {
+        height: 26px;
+        flex: 1;
+        min-width: 0;
+        padding: 1px;
+      }
+      .cstep input[type="number"] {
+        width: 48px;
+        flex: 0 0 48px;
+        padding: 4px 4px;
+      }
+      .cstep .delseq {
+        flex: 0 0 18px;
+        width: 18px;
+        height: 18px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: #fff;
+        color: #6f6b63;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+      }
+      .cstep .delseq:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .canim .smallbtn {
+        width: 100%;
+      }
+
+      select {
+        width: 100%;
+        font: inherit;
+        font-size: 12px;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .stops + div > select {
+        margin-top: 7px;
+      }
+
+      .animrow {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 7px;
+      }
+      .blockrow {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 7px;
+      }
+      .smallbtn {
+        font: inherit;
+        font-size: 12px;
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .smallbtn:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .smallbtn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      #animParams {
+        margin-top: 8px;
+      }
+      #animParams .param {
+        margin-bottom: 7px;
+      }
+      #animParams .param:last-child {
+        margin-bottom: 0;
+      }
+
+      .seqstep {
+        display: grid;
+        grid-template-columns: 1fr 50px 20px 20px;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .seqstep .delseq,
+      .delseq {
+        width: 20px;
+        height: 20px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: #fff;
+        color: #6f6b63;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+      }
+      .seqstep .delseq:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      #seqEmpty {
+        font-size: 11px;
+        color: #9a958c;
+        margin-bottom: 6px;
+      }
+      .gearbtn {
+        width: 20px;
+        height: 20px;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: #fff;
+        color: #6f6b63;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+      }
+      .gearbtn:hover,
+      .gearbtn.open {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .stepparams {
+        margin: 0 0 8px;
+        padding: 8px 8px 6px;
+        border: 1px dashed var(--line);
+        border-radius: 6px;
+      }
+      .stepparams .param {
+        margin-bottom: 7px;
+      }
+      .stepparams .param:last-child {
+        margin-bottom: 0;
+      }
+
+      .row2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      button#reset {
+        width: 100%;
+        font: inherit;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 8px 0;
+        margin-top: 2px;
+        border: 1px solid var(--ink);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      button#reset:hover {
+        background: var(--ink);
+        color: var(--panel);
+      }
+      button#reset:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      #hint {
+        position: fixed;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #7a766e;
+        background: rgba(251, 250, 248, 0.8);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 6px 14px;
+        z-index: 10;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 560px) {
+        #panel {
+          width: calc(100% - 32px);
+        }
+        #hint {
+          white-space: normal;
+          text-align: center;
+          max-width: 90%;
+        }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .spinner {
+          transition: transform 0.08s linear;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="physLayer"></div>
+    </div>
+
+    <aside id="panel">
+      <h1>
+        <span class="dot"></span>3D Text Studio
+        <button id="panelHide" type="button" title="Hide controls (H)">
+          &#8211;
+        </button>
+      </h1>
+
+      <div class="field">
+        <label for="blockSel">Blocks</label>
+        <div class="blockrow">
+          <select id="blockSel" aria-label="Select text block"></select>
+          <button
+            id="blockAdd"
+            type="button"
+            class="smallbtn"
+            title="Add a text block"
+          >
+            +
+          </button>
+          <button
+            id="blockDel"
+            type="button"
+            class="smallbtn"
+            title="Delete this block"
+          >
+            &#215;
+          </button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="textInput">Text (multiple lines OK)</label>
+        <textarea id="textInput" rows="2" maxlength="200" autocomplete="off">
+HELLO</textarea
+        >
+      </div>
+
+      <div class="field">
+        <div class="lbl">
+          Animation sequence (this block)
+          <span class="gradtoggle"
+            ><input type="checkbox" id="seqLoop" /> loop</span
+          >
+        </div>
+        <div id="seqSteps"></div>
+        <div class="blockrow">
+          <button id="seqAdd" type="button" class="smallbtn">+ Add step</button>
+          <button
+            id="seqPlay"
+            type="button"
+            class="smallbtn"
+            title="Play or stop every block's sequence"
+          >
+            &#9654; Play all
+          </button>
+          <button
+            id="replay"
+            type="button"
+            class="smallbtn"
+            title="Restart every block's sequence from step 1"
+          >
+            &#8635;
+          </button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="sizeInput">Size <output id="sizeOut">96px</output></label>
+        <input type="range" id="sizeInput" min="24" max="220" value="96" />
+      </div>
+
+      <div class="field">
+        <label for="depthInput">Depth <output id="depthOut">18</output></label>
+        <input type="range" id="depthInput" min="2" max="48" value="18" />
+      </div>
+
+      <div class="field">
+        <div class="lbl">
+          Face color
+          <span class="toggles">
+            <span class="gradtoggle"
+              ><input type="checkbox" id="faceGrad" /> gradient</span
+            >
+            <span class="gradtoggle"
+              ><input type="checkbox" id="faceAnim" /> animate</span
+            >
+          </span>
+        </div>
+        <div class="stops" id="faceStops"></div>
+        <div id="faceDirWrap">
+          <select id="faceDir" aria-label="Face gradient direction"></select>
+        </div>
+        <div class="canim" id="faceAnimWrap">
+          <div class="cahdr">
+            Color steps (lerps from base &rarr; steps &rarr; base)
+          </div>
+          <div id="faceAnimSteps"></div>
+          <button id="faceAnimAdd" type="button" class="smallbtn">
+            + Add color step
+          </button>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="lbl">
+          Depth color
+          <span class="toggles">
+            <span class="gradtoggle"
+              ><input type="checkbox" id="depthGrad" /> gradient</span
+            >
+            <span class="gradtoggle"
+              ><input type="checkbox" id="depthAnim" /> animate</span
+            >
+          </span>
+        </div>
+        <div class="stops" id="depthStops"></div>
+        <div id="depthDirWrap">
+          <select id="depthDir" aria-label="Depth gradient direction"></select>
+        </div>
+        <div class="canim" id="depthAnimWrap">
+          <div class="cahdr">
+            Color steps (lerps from base &rarr; steps &rarr; base)
+          </div>
+          <div id="depthAnimSteps"></div>
+          <button id="depthAnimAdd" type="button" class="smallbtn">
+            + Add color step
+          </button>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="lbl">
+          Background
+          <span class="toggles">
+            <span class="gradtoggle"
+              ><input type="checkbox" id="bgGrad" /> gradient</span
+            >
+            <span class="gradtoggle"
+              ><input type="checkbox" id="bgAnim" /> animate</span
+            >
+          </span>
+        </div>
+        <div class="stops" id="bgStops"></div>
+        <div id="bgDirWrap">
+          <select
+            id="bgDir"
+            aria-label="Background gradient direction"
+          ></select>
+        </div>
+        <div class="canim" id="bgAnimWrap">
+          <div class="cahdr">
+            Color steps (lerps from base &rarr; steps &rarr; base)
+          </div>
+          <div id="bgAnimSteps"></div>
+          <button id="bgAnimAdd" type="button" class="smallbtn">
+            + Add color step
+          </button>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label for="rxInput">Tilt <output id="rxOut">-12&deg;</output></label>
+          <input type="range" id="rxInput" min="-80" max="80" value="-12" />
+        </div>
+        <div class="field">
+          <label for="ryInput">Spin <output id="ryOut">18&deg;</output></label>
+          <input type="range" id="ryInput" min="-180" max="180" value="18" />
+        </div>
+      </div>
+
+      <button
+        id="shareUrl"
+        type="button"
+        class="smallbtn"
+        style="width: 100%; margin-bottom: 8px"
+        title="Copy a URL that recreates this scene"
+      >
+        Copy share URL
+      </button>
+      <div id="shareBox" style="display: none; margin: -2px 0 8px">
+        <input
+          type="text"
+          id="shareBoxInput"
+          readonly
+          style="
+            width: 100%;
+            font: inherit;
+            font-size: 11px;
+            padding: 6px 8px;
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            background: #fff;
+            color: var(--ink);
+          "
+        />
+        <div style="font-size: 10px; color: #9a958c; margin-top: 3px">
+          Couldn't access the clipboard &mdash; press Ctrl+C to copy (Esc to
+          dismiss)
+        </div>
+      </div>
+      <button
+        id="export"
+        type="button"
+        class="smallbtn"
+        style="width: 100%; margin-bottom: 8px"
+        title="Save a standalone page that plays this scene"
+      >
+        Export HTML&hellip;
+      </button>
+      <button id="reset">Reset</button>
+    </aside>
+
+    <button id="panelShow" type="button" title="Show controls (H)">
+      &#9881;
+    </button>
+
+    <div id="hint">
+      Click a block to select &middot; Drag to move &middot; Shift + drag to
+      rotate
+    </div>
+
+    <script type="text/template" id="playerEngine">
+      /* 3D Text Studio - exported player (no controls, renders the saved config) */
+      (function () {
+        var stage     = document.getElementById('stage');
+        var physLayer = document.getElementById('physLayer');
+
+        var GRID =
+          'linear-gradient(rgba(33,31,27,0.05) 1px, transparent 1px), ' +
+          'linear-gradient(90deg, rgba(33,31,27,0.05) 1px, transparent 1px)';
+        var RETURN_MS = 800;
+
+        /* ----- color helpers ----- */
+        function hexToRgb(hex) {
+          var n = parseInt(hex.slice(1), 16);
+          return [ (n >> 16) & 255, (n >> 8) & 255, n & 255 ];
+        }
+        function shade(hex, factor) {
+          var rgb = hexToRgb(hex);
+          return 'rgb(' + rgb.map(function (c) {
+            return Math.max(0, Math.round(c * factor));
+          }).join(',') + ')';
+        }
+        function mix(hex1, hex2, t) {
+          var a = hexToRgb(hex1), b = hexToRgb(hex2);
+          return 'rgb(' + a.map(function (c, i) {
+            return Math.round(c + (b[i] - c) * t);
+          }).join(',') + ')';
+        }
+        function mixHex(hex1, hex2, t) {
+          var a = hexToRgb(hex1), b = hexToRgb(hex2);
+          function hx(v) {
+            var x = Math.round(v).toString(16);
+            return x.length === 1 ? '0' + x : x;
+          }
+          return '#' +
+            hx(a[0] + (b[0] - a[0]) * t) +
+            hx(a[1] + (b[1] - a[1]) * t) +
+            hx(a[2] + (b[2] - a[2]) * t);
+        }
+        function multiMix(cols, t) {
+          if (cols.length === 1) return cols[0];
+          var segs = cols.length - 1;
+          var p = Math.min(0.9999, Math.max(0, t)) * segs;
+          var i = Math.floor(p);
+          return mix(cols[i], cols[i + 1], p - i);
+        }
+        function easeInOutCubic(t) {
+          return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+        function padTo(arr, n) {
+          var out = arr.slice(0, n);
+          while (out.length < n) out.push(out.length ? out[out.length - 1] : '#888888');
+          return out;
+        }
+
+        /* ----- color group helpers ----- */
+        function activeColors(s) { return s.grad ? s.colors.slice() : [s.colors[0]]; }
+        function groupView(s)    { return { grad: s.grad, colors: activeColors(s), dir: s.dir }; }
+        function groupAnimated(s) { return s.anim && s.anim.on && s.anim.steps.length > 0; }
+        function paletteAt(s, sec) {
+          var base = activeColors(s);
+          if (!groupAnimated(s)) return base;
+          var n = base.length;
+          var frames = [base], legs = [];
+          s.anim.steps.forEach(function (st) {
+            frames.push(padTo(st.colors, n));
+            legs.push(Math.max(0.2, st.dur));
+          });
+          frames.push(base);
+          legs.push(Math.max(0.2, s.anim.steps[0].dur));
+          var total = 0;
+          legs.forEach(function (d) { total += d; });
+          var t = sec % total, acc = 0;
+          for (var i = 0; i < legs.length; i++) {
+            if (t < acc + legs[i]) {
+              var u = (t - acc) / legs[i];
+              return frames[i].map(function (c, k) { return mixHex(c, frames[i + 1][k], u); });
+            }
+            acc += legs[i];
+          }
+          return base;
+        }
+        function groupViewAt(s, sec) { return { grad: s.grad, colors: paletteAt(s, sec), dir: s.dir }; }
+
+        /* ----- 3D stack styling ----- */
+        function styleFace(el, f) {
+          if (f.grad) {
+            el.style.backgroundImage = 'linear-gradient(' + f.dir + ', ' + f.colors.join(', ') + ')';
+            el.style.webkitBackgroundClip = 'text';
+            el.style.backgroundClip = 'text';
+            el.style.color = 'transparent';
+          } else {
+            el.style.backgroundImage = '';
+            el.style.color = f.colors[0];
+          }
+        }
+        function styleDepthLayer(layer, t, d) {
+          if (!d.grad) {
+            layer.style.backgroundImage = '';
+            layer.style.filter = '';
+            layer.style.color = shade(d.colors[0], 1 - t * 0.3);
+          } else if (d.dir === 'fb' || d.dir === 'bf') {
+            layer.style.backgroundImage = '';
+            layer.style.filter = '';
+            var tt = d.dir === 'fb' ? t : 1 - t;
+            layer.style.color = multiMix(d.colors, tt);
+          } else {
+            layer.style.backgroundImage = 'linear-gradient(' + d.dir + ', ' + d.colors.join(', ') + ')';
+            layer.style.webkitBackgroundClip = 'text';
+            layer.style.backgroundClip = 'text';
+            layer.style.color = 'transparent';
+            layer.style.filter = 'brightness(' + (1 - t * 0.35) + ')';
+          }
+        }
+        function buildStack(target, txt, depth, f, d) {
+          var refs = { face: null, layers: [] };
+          var face = document.createElement('div');
+          face.className = 'face';
+          face.textContent = txt;
+          styleFace(face, f);
+          target.appendChild(face);
+          refs.face = face;
+          for (var i = 1; i <= depth; i++) {
+            var layer = document.createElement('div');
+            layer.className = 'layer';
+            layer.textContent = txt;
+            var t = i / depth;
+            styleDepthLayer(layer, t, d);
+            layer.style.transform = 'translateZ(' + (-i) + 'px)';
+            target.appendChild(layer);
+            refs.layers.push({ el: layer, t: t });
+          }
+          return refs;
+        }
+
+        /* ----- blocks ----- */
+        var blocks = [];
+        var bgState = CONFIG.bg;
+
+        function createBlock(cfg) {
+          var moverEl   = document.createElement('div');
+          moverEl.className = 'mover';
+          moverEl.style.cursor = 'default';
+          var floaterEl = document.createElement('div');
+          floaterEl.className = 'floater';
+          var spinnerEl = document.createElement('div');
+          spinnerEl.className = 'spinner';
+          var textEl    = document.createElement('div');
+          textEl.className = 'stack3d text3d';
+
+          spinnerEl.appendChild(textEl);
+          floaterEl.appendChild(spinnerEl);
+          moverEl.appendChild(floaterEl);
+          stage.appendChild(moverEl);
+
+          var b = cfg;
+          b.els = { mover: moverEl, floater: floaterEl, spinner: spinnerEl, text3d: textEl };
+          b.refs = null;
+          b.phys = null;
+          b.currentAnim = 'none';
+          b.motion = null;
+          b.motionTrans = null;
+          b.seqRun = { playing: false, idx: 0, timer: 0 };
+
+          blocks.push(b);
+          renderBlock(b);
+          b.els.spinner.style.setProperty('--rx', b.rx + 'deg');
+          b.els.spinner.style.setProperty('--ry', b.ry + 'deg');
+          b.els.mover.style.left = (b.pos.x * 100) + '%';
+          b.els.mover.style.top  = (b.pos.y * 100) + '%';
+          return b;
+        }
+
+        function renderBlock(b) {
+          b.els.text3d.style.fontSize = b.size + 'px';
+          b.els.text3d.innerHTML = '';
+          b.refs = buildStack(
+            b.els.text3d,
+            b.text.length ? b.text : ' ',
+            b.depth,
+            groupView(b.face),
+            groupView(b.depthC)
+          );
+        }
+
+        /* ----- background ----- */
+        function paintBackgroundCols(cols) {
+          if (!bgState.grad) {
+            stage.style.backgroundImage = GRID;
+            stage.style.backgroundSize  = '64px 64px, 64px 64px';
+            stage.style.backgroundColor = cols[0];
+          } else {
+            var g = bgState.dir === 'radial'
+              ? 'radial-gradient(120% 90% at 50% 30%, ' + cols.join(', ') + ')'
+              : 'linear-gradient(' + bgState.dir + ', ' + cols.join(', ') + ')';
+            stage.style.backgroundImage = GRID + ', ' + g;
+            stage.style.backgroundSize  = '64px 64px, 64px 64px, auto';
+            stage.style.backgroundColor = '';
+          }
+        }
+        function paintBackground() { paintBackgroundCols(activeColors(bgState)); }
+
+        /* ----- color animation loop ----- */
+        var colAnim = { raf: 0, lastText: 0 };
+
+        function anyColorAnim() {
+          if (groupAnimated(bgState)) return true;
+          for (var i = 0; i < blocks.length; i++) {
+            if (groupAnimated(blocks[i].face) || groupAnimated(blocks[i].depthC)) return true;
+          }
+          return false;
+        }
+        function restyleBlock(b, sec) {
+          var f = sec == null ? groupView(b.face)   : groupViewAt(b.face, sec);
+          var d = sec == null ? groupView(b.depthC) : groupViewAt(b.depthC, sec);
+          if (b.refs) {
+            styleFace(b.refs.face, f);
+            b.refs.layers.forEach(function (l) { styleDepthLayer(l.el, l.t, d); });
+          }
+          if (b.phys) {
+            b.phys.letters.forEach(function (L) {
+              styleFace(L.refs.face, f);
+              L.refs.layers.forEach(function (l) { styleDepthLayer(l.el, l.t, d); });
+            });
+          }
+        }
+        function colTick(ts) {
+          if (!anyColorAnim()) { colAnim.raf = 0; return; }
+          var sec = ts / 1000;
+          if (groupAnimated(bgState)) paintBackgroundCols(paletteAt(bgState, sec));
+          if (ts - colAnim.lastText > 50) {
+            blocks.forEach(function (b) {
+              if (groupAnimated(b.face) || groupAnimated(b.depthC)) restyleBlock(b, sec);
+            });
+            colAnim.lastText = ts;
+          }
+          colAnim.raf = requestAnimationFrame(colTick);
+        }
+        function ensureColLoop() {
+          if (!colAnim.raf && anyColorAnim()) colAnim.raf = requestAnimationFrame(colTick);
+        }
+
+        /* ----- gravity physics ----- */
+        var physGlobal = { raf: 0, last: 0 };
+
+        function anyPhysActive() {
+          for (var i = 0; i < blocks.length; i++) if (blocks[i].phys) return true;
+          return false;
+        }
+        function ensurePhysLoop() {
+          if (!physGlobal.raf && anyPhysActive()) {
+            physGlobal.last = 0;
+            physGlobal.raf = requestAnimationFrame(physTick);
+          }
+        }
+        function clearPhys(b) {
+          if (!b.phys) return;
+          b.phys.letters.forEach(function (L) {
+            if (L.el.parentNode) physLayer.removeChild(L.el);
+          });
+          b.phys = null;
+          b.els.mover.classList.remove('hidden');
+        }
+
+        function measureLetters(b) {
+          var meas = document.createElement('div');
+          meas.className = 'stack3d';
+          meas.style.position = 'absolute';
+          meas.style.inset = '0';
+          meas.style.visibility = 'hidden';
+          meas.style.fontSize = b.els.text3d.style.fontSize;
+
+          var spans = [];
+          var lines = (b.text.length ? b.text : ' ').split('\n');
+          lines.forEach(function (line) {
+            var row = document.createElement('div');
+            var chars = line.length ? line : ' ';
+            for (var i = 0; i < chars.length; i++) {
+              var sp = document.createElement('span');
+              sp.textContent = chars[i];
+              row.appendChild(sp);
+              spans.push(sp);
+            }
+            meas.appendChild(row);
+          });
+
+          b.els.spinner.appendChild(meas);
+          var stageR = stage.getBoundingClientRect();
+          var out = [];
+          spans.forEach(function (sp) {
+            var ch = sp.textContent;
+            if (ch.trim() === '') return;
+            var r = sp.getBoundingClientRect();
+            out.push({
+              ch: ch,
+              x: r.left - stageR.left,
+              y: r.top - stageR.top,
+              w: r.width,
+              h: r.height
+            });
+          });
+          b.els.spinner.removeChild(meas);
+          return out;
+        }
+
+        function buildPhysLetter(b, info, depth, f, d) {
+          var outer = document.createElement('div');
+          outer.className = 'phys-letter';
+          outer.style.width = info.w + 'px';
+          outer.style.height = info.h + 'px';
+
+          var rot = document.createElement('div');
+          rot.className = 'phys-rot';
+          rot.style.transform = 'rotateX(' + b.rx + 'deg) rotateY(' + b.ry + 'deg)';
+
+          var stack = document.createElement('div');
+          stack.className = 'stack3d';
+          stack.style.fontSize = b.els.text3d.style.fontSize;
+          var refs = buildStack(stack, info.ch, depth, f, d);
+
+          rot.appendChild(stack);
+          outer.appendChild(rot);
+          return { el: outer, refs: refs };
+        }
+
+        function startGravity(b) {
+          clearPhys(b);
+          var spawn = measureLetters(b);     // current on-screen positions (mid-motion)
+          stopMotionInstant(b);              // home positions use the at-rest pose
+          var homes = measureLetters(b);
+          if (!spawn.length) return;
+
+          var f = groupView(b.face);
+          var d = groupView(b.depthC);
+          var boom = b.animParams.gravity.boom;
+
+          var cx = 0, cy = 0;
+          spawn.forEach(function (i) { cx += i.x + i.w / 2; cy += i.y + i.h / 2; });
+          cx /= spawn.length; cy /= spawn.length;
+
+          b.phys = { mode: 'fall', letters: [], pendingAnim: null, returnStart: 0 };
+
+          spawn.forEach(function (info, idx) {
+            var home = homes[idx] || info;
+            var built = buildPhysLetter(b, info, b.depth, f, d);
+            built.el.style.transform = 'translate3d(' + info.x + 'px,' + info.y + 'px,0)';
+            physLayer.appendChild(built.el);
+
+            var lx = info.x + info.w / 2, ly = info.y + info.h / 2;
+            var dx = lx - cx, dy = ly - cy;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var pow = boom * (0.6 + Math.random() * 0.8);
+
+            b.phys.letters.push({
+              el: built.el, refs: built.refs,
+              x: info.x, y: info.y, w: info.w, h: info.h,
+              hx: home.x, hy: home.y,
+              vx: (dx / len) * pow + (Math.random() - 0.5) * 60,
+              vy: (dy / len) * pow - boom * 0.25 - Math.random() * 50,
+              rot: 0,
+              vr: (Math.random() - 0.5) * (180 + boom * 0.6)
+            });
+          });
+
+          b.els.mover.classList.add('hidden');
+          ensurePhysLoop();
+        }
+
+        function beginReturn(b, nextAnim) {
+          b.phys.mode = 'return';
+          b.phys.pendingAnim = nextAnim;
+          b.phys.returnStart = performance.now();
+          b.phys.letters.forEach(function (L) {
+            L.sx = L.x;
+            L.sy = L.y;
+            L.srot = L.rot;
+            L.trot = Math.round(L.rot / 360) * 360;
+          });
+        }
+        function finishReturn(b) {
+          var next = b.phys.pendingAnim;
+          clearPhys(b);
+          applyCssAnim(b, next);
+        }
+
+        function physTick(ts) {
+          if (!physGlobal.last) physGlobal.last = ts;
+          var dt = Math.min(0.04, (ts - physGlobal.last) / 1000);
+          physGlobal.last = ts;
+
+          var R = stage.getBoundingClientRect();
+
+          blocks.forEach(function (b) {
+            if (!b.phys) return;
+
+            if (b.phys.mode === 'fall') {
+              var G = b.animParams.gravity.g;
+              b.phys.letters.forEach(function (L) {
+                L.vy += G * dt;
+                L.x  += L.vx * dt;
+                L.y  += L.vy * dt;
+                L.rot += L.vr * dt;
+
+                var maxX = R.width  - L.w;
+                var maxY = R.height - L.h;
+
+                if (L.x < 0)         { L.x = 0;    L.vx = -L.vx * 0.8; L.vr *= 0.9; }
+                else if (L.x > maxX) { L.x = maxX; L.vx = -L.vx * 0.8; L.vr *= 0.9; }
+
+                if (L.y < 0 && L.vy < 0) { L.y = 0; L.vy = -L.vy * 0.7; }
+
+                if (L.y > maxY) {
+                  L.y = maxY;
+                  L.vy = -L.vy * 0.72;
+                  L.vx *= 0.96;
+                  L.vr *= 0.85;
+                  if (Math.abs(L.vy) < Math.max(70, G * 0.03)) {
+                    L.vy = 0;
+                    L.vx *= 0.85;
+                    if (Math.abs(L.vx) < 6)  L.vx = 0;
+                    if (Math.abs(L.vr) < 15) L.vr = 0;
+                  }
+                }
+
+                L.el.style.transform =
+                  'translate3d(' + L.x + 'px,' + L.y + 'px,0) rotate(' + L.rot + 'deg)';
+              });
+            } else if (b.phys.mode === 'return') {
+              var t = (ts - b.phys.returnStart) / RETURN_MS;
+              if (t >= 1) {
+                finishReturn(b);
+                return;
+              }
+              var e = easeInOutCubic(t);
+              b.phys.letters.forEach(function (L) {
+                L.x   = L.sx + (L.hx - L.sx) * e;
+                L.y   = L.sy + (L.hy - L.sy) * e;
+                L.rot = L.srot + (L.trot - L.srot) * e;
+                L.el.style.transform =
+                  'translate3d(' + L.x + 'px,' + L.y + 'px,0) rotate(' + L.rot + 'deg)';
+              });
+            }
+          });
+
+          if (anyPhysActive()) physGlobal.raf = requestAnimationFrame(physTick);
+          else physGlobal.raf = 0;
+        }
+
+        /* ----- motion engine (JS-driven so animation steps blend smoothly) ----- */
+        var MOTION_TRANS_MS = 600;
+        var REDUCED_MOTION = window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var motionRaf = 0;
+
+        function parseOrigin(str) {
+          if (!str) return [50, 50];
+          var parts = str.split(' ');
+          return [parseFloat(parts[0]), parseFloat(parts[1])];
+        }
+        function normAngle(a) {
+          var x = a % 360;
+          if (x > 180) x -= 360;
+          if (x < -180) x += 360;
+          return x;
+        }
+        function identityState() {
+          return { tx: 0, ty: 0, ry: 0, rz: 0, s: 1, ox: 50, oy: 50 };
+        }
+
+        // target transform of the block's current motion at a moment in time;
+        // every motion starts from (and periodically passes through) the identity pose
+        function motionState(b, now) {
+          var m = b.motion;
+          if (!m || m.name === 'none' || REDUCED_MOTION) return identityState();
+          var p = b.animParams[m.name] || {};
+          var t = (now - m.start) / 1000;
+          var W = Math.PI * 2;
+
+          if (m.name === 'float') {
+            var T = p.speed || 5, D = p.dist || 14;
+            return { tx: D * 0.45 * Math.sin(W * t / T * 2 + 1.3),
+                     ty: -D * Math.sin(W * t / T),
+                     ry: 0, rz: 0, s: 1, ox: 50, oy: 50 };
+          }
+          if (m.name === 'spin') {
+            var o = parseOrigin(p.origin);
+            var dirMul = p.dir === 'reverse' ? -1 : 1;
+            return { tx: 0, ty: 0, ry: dirMul * 360 * t / (p.speed || 6),
+                     rz: 0, s: 1, ox: o[0], oy: o[1] };
+          }
+          if (m.name === 'pulse') {
+            var o2 = parseOrigin(p.origin);
+            var A = p.amt || 1.12;
+            return { tx: 0, ty: 0, ry: 0, rz: 0,
+                     s: 1 + (A - 1) * (0.5 - 0.5 * Math.cos(W * t / (p.speed || 2.4))),
+                     ox: o2[0], oy: o2[1] };
+          }
+          if (m.name === 'sway') {
+            var o3 = parseOrigin(p.origin);
+            return { tx: 0, ty: 0, ry: 0,
+                     rz: (p.ang || 5) * Math.sin(W * t / (p.speed || 3.2)),
+                     s: 1, ox: o3[0], oy: o3[1] };
+          }
+          return identityState();
+        }
+
+        // the rendered state: the new motion's target, blended out of the snapshot
+        // taken from the previous motion at the moment of the switch
+        function currentRenderedState(b, now) {
+          var target = motionState(b, now);
+          if (b.motionTrans) {
+            var u = (now - b.motionTrans.start) / MOTION_TRANS_MS;
+            if (u >= 1) return target;
+            var e = easeInOutCubic(Math.max(0, u));
+            var f = b.motionTrans.from;
+            return {
+              tx: f.tx + (target.tx - f.tx) * e,
+              ty: f.ty + (target.ty - f.ty) * e,
+              ry: f.ry + (target.ry - f.ry) * e,
+              rz: f.rz + (target.rz - f.rz) * e,
+              s:  f.s  + (target.s  - f.s)  * e,
+              ox: f.ox + (target.ox - f.ox) * e,
+              oy: f.oy + (target.oy - f.oy) * e
+            };
+          }
+          return target;
+        }
+
+        function applyMotionTransform(b, st) {
+          b.els.floater.style.transformOrigin = st.ox + '% ' + st.oy + '%';
+          b.els.floater.style.transform =
+            'translate(' + st.tx + 'px,' + st.ty + 'px) rotateY(' + st.ry +
+            'deg) rotateZ(' + st.rz + 'deg) scale(' + st.s + ')';
+        }
+
+        function anyMotionActive() {
+          for (var i = 0; i < blocks.length; i++) {
+            var b = blocks[i];
+            if (b.motionTrans) return true;
+            if (b.motion && b.motion.name !== 'none') return true;
+          }
+          return false;
+        }
+        function motionTick(now) {
+          blocks.forEach(function (b) {
+            if (!b.motion && !b.motionTrans) return;
+            var st = currentRenderedState(b, now);
+            applyMotionTransform(b, st);
+            if (b.motionTrans && now - b.motionTrans.start >= MOTION_TRANS_MS) {
+              b.motionTrans = null;
+            }
+          });
+          if (anyMotionActive()) motionRaf = requestAnimationFrame(motionTick);
+          else motionRaf = 0;
+        }
+        function ensureMotionLoop() {
+          if (!motionRaf) motionRaf = requestAnimationFrame(motionTick);
+        }
+
+        // switch motions, blending from wherever the block visually is right now;
+        // angles are normalized so e.g. a long spin unwinds by the shortest path
+        function setMotion(b, name) {
+          var now = performance.now();
+          var cur = currentRenderedState(b, now);
+          cur.ry = normAngle(cur.ry);
+          cur.rz = normAngle(cur.rz);
+          b.motionTrans = { from: cur, start: now };
+          b.motion = { name: name || 'none', start: now };
+          ensureMotionLoop();
+        }
+
+        // hard stop at the identity pose (used when gravity takes the letters over)
+        function stopMotionInstant(b) {
+          b.motion = null;
+          b.motionTrans = null;
+          b.els.floater.style.transform = '';
+          b.els.floater.style.transformOrigin = '';
+        }
+
+        function applyCssAnim(b, name) {
+          setMotion(b, name === 'gravity' ? 'none' : name);
+        }
+        function setAnimation(b, name) {
+          if (name === 'gravity') {
+            b.currentAnim = 'gravity';
+            b.els.floater.className = 'floater';
+            startGravity(b);
+            return;
+          }
+          b.currentAnim = name;
+          if (b.phys && b.phys.mode === 'fall' && b.phys.letters.length) {
+            beginReturn(b, name);
+            ensurePhysLoop();
+            return;
+          }
+          if (b.phys && b.phys.mode === 'return') {
+            b.phys.pendingAnim = name;
+            return;
+          }
+          clearPhys(b);
+          applyCssAnim(b, name);
+        }
+
+        /* ----- per-block sequence runner ----- */
+        function runBlockStep(b) {
+          var st = b.seq.steps[b.seqRun.idx];
+          setAnimation(b, st.anim);
+          b.seqRun.timer = setTimeout(function () {
+            b.seqRun.idx++;
+            if (b.seqRun.idx >= b.seq.steps.length) {
+              if (b.seq.loop) {
+                b.seqRun.idx = 0;
+                runBlockStep(b);
+              } else {
+                b.seqRun.playing = false;
+                setAnimation(b, 'none');
+              }
+            } else {
+              runBlockStep(b);
+            }
+          }, st.dur * 1000);
+        }
+        function playBlockSeq(b) {
+          if (!b.seq.steps.length) return;
+          b.seqRun.playing = true;
+          b.seqRun.idx = 0;
+          runBlockStep(b);
+        }
+
+        /* ----- boot ----- */
+        paintBackground();
+        CONFIG.blocks.forEach(createBlock);
+        ensureColLoop();
+        blocks.forEach(function (b) { playBlockSeq(b); });
+      })();
+    </script>
+
+    <script>
+      (function () {
+        var stage = document.getElementById("stage");
+        var physLayer = document.getElementById("physLayer");
+
+        var blockSel = document.getElementById("blockSel");
+        var blockAdd = document.getElementById("blockAdd");
+        var blockDel = document.getElementById("blockDel");
+        var textInput = document.getElementById("textInput");
+        var sizeInput = document.getElementById("sizeInput");
+        var depthInput = document.getElementById("depthInput");
+        var rxInput = document.getElementById("rxInput");
+        var ryInput = document.getElementById("ryInput");
+        var seqLoop = document.getElementById("seqLoop");
+        var seqStepsBox = document.getElementById("seqSteps");
+        var seqPlayBtn = document.getElementById("seqPlay");
+
+        var sizeOut = document.getElementById("sizeOut");
+        var depthOut = document.getElementById("depthOut");
+        var rxOut = document.getElementById("rxOut");
+        var ryOut = document.getElementById("ryOut");
+
+        var GRID =
+          "linear-gradient(rgba(33,31,27,0.05) 1px, transparent 1px), " +
+          "linear-gradient(90deg, rgba(33,31,27,0.05) 1px, transparent 1px)";
+
+        var LINEAR_DIRS = [
+          { v: "180deg", label: "\u2193  Top \u2192 bottom" },
+          { v: "0deg", label: "\u2191  Bottom \u2192 top" },
+          { v: "90deg", label: "\u2192  Left \u2192 right" },
+          { v: "270deg", label: "\u2190  Right \u2192 left" },
+          { v: "135deg", label: "\u2198  Diagonal down-right" },
+          { v: "225deg", label: "\u2199  Diagonal down-left" },
+          { v: "45deg", label: "\u2197  Diagonal up-right" },
+          { v: "315deg", label: "\u2196  Diagonal up-left" },
+        ];
+        var DEPTH_DIRS = [
+          { v: "fb", label: "\u2299  Front \u2192 back" },
+          { v: "bf", label: "\u2299  Back \u2192 front" },
+        ].concat(LINEAR_DIRS.slice(0, 4));
+        var BG_DIRS = [
+          { v: "radial", label: "\u25CE  Radial (studio)" },
+        ].concat(LINEAR_DIRS);
+
+        var ANIM_NAMES = [
+          { v: "none", label: "None (hold still)" },
+          { v: "float", label: "Float" },
+          { v: "spin", label: "Spin" },
+          { v: "pulse", label: "Pulse" },
+          { v: "sway", label: "Sway" },
+          { v: "gravity", label: "Gravity" },
+        ];
+
+        var ORIGIN_X = [
+          { v: "50% 50%", label: "Center" },
+          { v: "0% 50%", label: "Left edge" },
+          { v: "100% 50%", label: "Right edge" },
+        ];
+        var ORIGIN_Y = [
+          { v: "50% 50%", label: "Center" },
+          { v: "50% 0%", label: "Top edge" },
+          { v: "50% 100%", label: "Bottom edge" },
+        ];
+
+        var ANIM_PARAM_DEFS = {
+          float: [
+            {
+              k: "speed",
+              label: "Speed",
+              min: 2,
+              max: 12,
+              step: 0.5,
+              val: 5,
+              unit: "s",
+            },
+            {
+              k: "dist",
+              label: "Distance",
+              min: 4,
+              max: 48,
+              step: 1,
+              val: 14,
+              unit: "px",
+            },
+          ],
+          spin: [
+            {
+              k: "speed",
+              label: "Rev time",
+              min: 1,
+              max: 15,
+              step: 0.5,
+              val: 6,
+              unit: "s",
+            },
+            {
+              k: "dir",
+              label: "Direction",
+              type: "select",
+              options: [
+                { v: "normal", label: "Clockwise" },
+                { v: "reverse", label: "Counter-clockwise" },
+              ],
+              val: "normal",
+            },
+            {
+              k: "origin",
+              label: "Rotation point",
+              type: "select",
+              options: ORIGIN_X,
+              val: "50% 50%",
+            },
+          ],
+          pulse: [
+            {
+              k: "speed",
+              label: "Speed",
+              min: 0.8,
+              max: 6,
+              step: 0.2,
+              val: 2.4,
+              unit: "s",
+            },
+            {
+              k: "amt",
+              label: "Amount",
+              min: 1.05,
+              max: 1.6,
+              step: 0.01,
+              val: 1.12,
+              unit: "x",
+            },
+            {
+              k: "origin",
+              label: "Scale from",
+              type: "select",
+              options: ORIGIN_Y,
+              val: "50% 50%",
+            },
+          ],
+          sway: [
+            {
+              k: "speed",
+              label: "Speed",
+              min: 1,
+              max: 8,
+              step: 0.2,
+              val: 3.2,
+              unit: "s",
+            },
+            {
+              k: "ang",
+              label: "Angle",
+              min: 2,
+              max: 30,
+              step: 1,
+              val: 5,
+              unit: "\u00b0",
+            },
+            {
+              k: "origin",
+              label: "Pivot point",
+              type: "select",
+              options: ORIGIN_Y,
+              val: "50% 50%",
+            },
+          ],
+          gravity: [
+            {
+              k: "g",
+              label: "Gravity force",
+              min: 200,
+              max: 6000,
+              step: 50,
+              val: 2400,
+              unit: "",
+            },
+            {
+              k: "boom",
+              label: "Explosive force",
+              min: 0,
+              max: 1500,
+              step: 25,
+              val: 250,
+              unit: "",
+            },
+          ],
+        };
+
+        function defaultAnimParams() {
+          var out = {};
+          Object.keys(ANIM_PARAM_DEFS).forEach(function (name) {
+            out[name] = {};
+            ANIM_PARAM_DEFS[name].forEach(function (p) {
+              out[name][p.k] = p.val;
+            });
+          });
+          return out;
+        }
+
+        var NEW_BLOCK_COLORS = [
+          { face: ["#e2452d", "#f5a623"], depth: ["#7a2114", "#2b0d05"] },
+          { face: ["#2d7ae2", "#23d3e0"], depth: ["#143a7a", "#050f2b"] },
+          { face: ["#27a35a", "#b3d932"], depth: ["#0f5a2e", "#052b13"] },
+          { face: ["#9038c9", "#e23ba6"], depth: ["#4a1470", "#1d052b"] },
+        ];
+
+        var RETURN_MS = 800;
+
+        /* ----- color helpers ----- */
+        function hexToRgb(hex) {
+          var n = parseInt(hex.slice(1), 16);
+          return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+        }
+        function shade(hex, factor) {
+          var rgb = hexToRgb(hex);
+          return (
+            "rgb(" +
+            rgb
+              .map(function (c) {
+                return Math.max(0, Math.round(c * factor));
+              })
+              .join(",") +
+            ")"
+          );
+        }
+        function mix(hex1, hex2, t) {
+          var a = hexToRgb(hex1),
+            b = hexToRgb(hex2);
+          return (
+            "rgb(" +
+            a
+              .map(function (c, i) {
+                return Math.round(c + (b[i] - c) * t);
+              })
+              .join(",") +
+            ")"
+          );
+        }
+        function mixHex(hex1, hex2, t) {
+          var a = hexToRgb(hex1),
+            b = hexToRgb(hex2);
+          function hx(v) {
+            var x = Math.round(v).toString(16);
+            return x.length === 1 ? "0" + x : x;
+          }
+          return (
+            "#" +
+            hx(a[0] + (b[0] - a[0]) * t) +
+            hx(a[1] + (b[1] - a[1]) * t) +
+            hx(a[2] + (b[2] - a[2]) * t)
+          );
+        }
+        function multiMix(cols, t) {
+          if (cols.length === 1) return cols[0];
+          var segs = cols.length - 1;
+          var p = Math.min(0.9999, Math.max(0, t)) * segs;
+          var i = Math.floor(p);
+          return mix(cols[i], cols[i + 1], p - i);
+        }
+        function easeInOutCubic(t) {
+          return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+        function padTo(arr, n) {
+          var out = arr.slice(0, n);
+          while (out.length < n)
+            out.push(out.length ? out[out.length - 1] : "#888888");
+          return out;
+        }
+
+        /* ----- color group state helpers ----- */
+        function activeColors(s) {
+          return s.grad ? s.colors.slice() : [s.colors[0]];
+        }
+        function groupView(s) {
+          return { grad: s.grad, colors: activeColors(s), dir: s.dir };
+        }
+        function groupAnimated(s) {
+          return s.anim && s.anim.on && s.anim.steps.length > 0;
+        }
+        // palette at a moment in time: base -> step1 -> step2 ... -> base, looping
+        function paletteAt(s, sec) {
+          var base = activeColors(s);
+          if (!groupAnimated(s)) return base;
+          var n = base.length;
+
+          var frames = [base],
+            legs = [];
+          s.anim.steps.forEach(function (st) {
+            frames.push(padTo(st.colors, n));
+            legs.push(Math.max(0.2, st.dur));
+          });
+          frames.push(base);
+          legs.push(Math.max(0.2, s.anim.steps[0].dur)); // return leg to base
+
+          var total = 0;
+          legs.forEach(function (d) {
+            total += d;
+          });
+
+          var t = sec % total,
+            acc = 0;
+          for (var i = 0; i < legs.length; i++) {
+            if (t < acc + legs[i]) {
+              var u = (t - acc) / legs[i];
+              return frames[i].map(function (c, k) {
+                return mixHex(c, frames[i + 1][k], u);
+              });
+            }
+            acc += legs[i];
+          }
+          return base;
+        }
+        function groupViewAt(s, sec) {
+          return { grad: s.grad, colors: paletteAt(s, sec), dir: s.dir };
+        }
+
+        /* ----- reusable color group: stops, gradient, direction, color animation ----- */
+        function makeGroup(prefix, dirs, onChange) {
+          var gradCb = document.getElementById(prefix + "Grad");
+          var stopsBox = document.getElementById(prefix + "Stops");
+          var dirSel = document.getElementById(prefix + "Dir");
+          var dirWrap = document.getElementById(prefix + "DirWrap");
+          var animCb = document.getElementById(prefix + "Anim");
+          var animWrap = document.getElementById(prefix + "AnimWrap");
+          var animSteps = document.getElementById(prefix + "AnimSteps");
+          var animAdd = document.getElementById(prefix + "AnimAdd");
+          var st = null;
+
+          dirs.forEach(function (d) {
+            var o = document.createElement("option");
+            o.value = d.v;
+            o.textContent = d.label;
+            dirSel.appendChild(o);
+          });
+
+          function rebuildStops() {
+            stopsBox.innerHTML = "";
+            if (!st) return;
+            var visible = st.grad ? st.colors.length : 1;
+
+            for (var i = 0; i < visible; i++) {
+              (function (i) {
+                var wrap = document.createElement("div");
+                wrap.className = "stop";
+
+                var inp = document.createElement("input");
+                inp.type = "color";
+                inp.value = st.colors[i];
+                inp.title = st.grad ? "Gradient color " + (i + 1) : "Color";
+                inp.addEventListener("input", function () {
+                  st.colors[i] = inp.value;
+                  onChange();
+                });
+                wrap.appendChild(inp);
+
+                if (st.grad && st.colors.length > 2) {
+                  var del = document.createElement("button");
+                  del.type = "button";
+                  del.className = "delstop";
+                  del.textContent = "\u00d7";
+                  del.title = "Remove this color";
+                  del.addEventListener("click", function () {
+                    st.colors.splice(i, 1);
+                    rebuildStops();
+                    rebuildAnim();
+                    onChange();
+                  });
+                  wrap.appendChild(del);
+                }
+                stopsBox.appendChild(wrap);
+              })(i);
+            }
+
+            if (st.grad && st.colors.length < 4) {
+              var add = document.createElement("button");
+              add.type = "button";
+              add.className = "addstop";
+              add.textContent = "+";
+              add.title = "Add a color (up to 4)";
+              add.addEventListener("click", function () {
+                st.colors.push(st.colors[st.colors.length - 1]);
+                rebuildStops();
+                rebuildAnim();
+                onChange();
+              });
+              stopsBox.appendChild(add);
+            }
+
+            dirWrap.style.display = st.grad ? "" : "none";
+          }
+
+          function rebuildAnim() {
+            if (!st) {
+              animWrap.style.display = "none";
+              return;
+            }
+            animWrap.style.display = st.anim.on ? "" : "none";
+            animSteps.innerHTML = "";
+            if (!st.anim.on) return;
+
+            var n = st.grad ? st.colors.length : 1;
+
+            st.anim.steps.forEach(function (stp, idx) {
+              stp.colors = padTo(stp.colors, n);
+
+              var row = document.createElement("div");
+              row.className = "cstep";
+
+              for (var k = 0; k < n; k++) {
+                (function (k) {
+                  var inp = document.createElement("input");
+                  inp.type = "color";
+                  inp.value = stp.colors[k];
+                  inp.title = "Step " + (idx + 1) + " color " + (k + 1);
+                  inp.addEventListener("input", function () {
+                    stp.colors[k] = inp.value;
+                    ensureColLoop();
+                  });
+                  row.appendChild(inp);
+                })(k);
+              }
+
+              var dur = document.createElement("input");
+              dur.type = "number";
+              dur.min = "0.2";
+              dur.max = "30";
+              dur.step = "0.1";
+              dur.value = stp.dur;
+              dur.title = "Seconds to lerp into this step";
+              dur.addEventListener("change", function () {
+                var v = parseFloat(dur.value);
+                if (isNaN(v) || v < 0.2) v = 0.2;
+                if (v > 30) v = 30;
+                dur.value = v;
+                stp.dur = v;
+              });
+              row.appendChild(dur);
+
+              var del = document.createElement("button");
+              del.type = "button";
+              del.className = "delseq";
+              del.textContent = "\u00d7";
+              del.title = "Remove this color step";
+              del.addEventListener("click", function () {
+                st.anim.steps.splice(idx, 1);
+                rebuildAnim();
+                onChange();
+                ensureColLoop();
+              });
+              row.appendChild(del);
+
+              animSteps.appendChild(row);
+            });
+          }
+
+          gradCb.addEventListener("change", function () {
+            if (!st) return;
+            st.grad = gradCb.checked;
+            rebuildStops();
+            rebuildAnim();
+            onChange();
+          });
+          dirSel.addEventListener("change", function () {
+            if (!st) return;
+            st.dir = dirSel.value;
+            onChange();
+          });
+          animCb.addEventListener("change", function () {
+            if (!st) return;
+            st.anim.on = animCb.checked;
+            rebuildAnim();
+            onChange();
+            ensureColLoop();
+          });
+          animAdd.addEventListener("click", function () {
+            if (!st || st.anim.steps.length >= 4) return;
+            st.anim.steps.push({ colors: activeColors(st), dur: 2 });
+            rebuildAnim();
+            ensureColLoop();
+          });
+
+          return {
+            load: function (stateObj) {
+              st = stateObj;
+              gradCb.checked = st.grad;
+              dirSel.value = st.dir;
+              animCb.checked = st.anim.on;
+              rebuildStops();
+              rebuildAnim();
+            },
+          };
+        }
+
+        /* ----- shared styling for faces and depth layers ----- */
+        function styleFace(el, f) {
+          if (f.grad) {
+            el.style.backgroundImage =
+              "linear-gradient(" + f.dir + ", " + f.colors.join(", ") + ")";
+            el.style.webkitBackgroundClip = "text";
+            el.style.backgroundClip = "text";
+            el.style.color = "transparent";
+          } else {
+            el.style.backgroundImage = "";
+            el.style.color = f.colors[0];
+          }
+        }
+        function styleDepthLayer(layer, t, d) {
+          if (!d.grad) {
+            layer.style.backgroundImage = "";
+            layer.style.filter = "";
+            layer.style.color = shade(d.colors[0], 1 - t * 0.3);
+          } else if (d.dir === "fb" || d.dir === "bf") {
+            layer.style.backgroundImage = "";
+            layer.style.filter = "";
+            var tt = d.dir === "fb" ? t : 1 - t;
+            layer.style.color = multiMix(d.colors, tt);
+          } else {
+            layer.style.backgroundImage =
+              "linear-gradient(" + d.dir + ", " + d.colors.join(", ") + ")";
+            layer.style.webkitBackgroundClip = "text";
+            layer.style.backgroundClip = "text";
+            layer.style.color = "transparent";
+            layer.style.filter = "brightness(" + (1 - t * 0.35) + ")";
+          }
+        }
+
+        function buildStack(target, txt, depth, f, d) {
+          var refs = { face: null, layers: [] };
+
+          var face = document.createElement("div");
+          face.className = "face";
+          face.textContent = txt;
+          styleFace(face, f);
+          target.appendChild(face);
+          refs.face = face;
+
+          for (var i = 1; i <= depth; i++) {
+            var layer = document.createElement("div");
+            layer.className = "layer";
+            layer.textContent = txt;
+            var t = i / depth;
+            styleDepthLayer(layer, t, d);
+            layer.style.transform = "translateZ(" + -i + "px)";
+            target.appendChild(layer);
+            refs.layers.push({ el: layer, t: t });
+          }
+          return refs;
+        }
+
+        /* =================== BLOCKS =================== */
+        var blocks = [];
+        var selected = null;
+        var blockCounter = 0;
+
+        function newBlockState() {
+          var n = blocks.length;
+          blockCounter++;
+
+          var pal =
+            NEW_BLOCK_COLORS[(blockCounter - 1) % NEW_BLOCK_COLORS.length];
+          return {
+            id: blockCounter,
+            text: n === 0 ? "HELLO" : "TEXT " + blockCounter,
+            size: 96,
+            depth: 18,
+            face: {
+              grad: false,
+              colors: pal.face.slice(),
+              dir: "180deg",
+              anim: { on: false, steps: [] },
+            },
+            depthC: {
+              grad: false,
+              colors: pal.depth.slice(),
+              dir: "fb",
+              anim: { on: false, steps: [] },
+            },
+            animParams: defaultAnimParams(),
+            seq: { steps: [], loop: false },
+            seqRun: { playing: false, idx: 0, timer: 0 },
+            pos: { x: 0.5, y: n === 0 ? 0.5 : Math.min(0.85, 0.5 + n * 0.18) },
+            rx: -12,
+            ry: 18,
+          };
+        }
+
+        function createBlock(state) {
+          var moverEl = document.createElement("div");
+          moverEl.className = "mover";
+          var floaterEl = document.createElement("div");
+          floaterEl.className = "floater";
+          var spinnerEl = document.createElement("div");
+          spinnerEl.className = "spinner";
+          var textEl = document.createElement("div");
+          textEl.className = "stack3d text3d";
+
+          spinnerEl.appendChild(textEl);
+          floaterEl.appendChild(spinnerEl);
+          moverEl.appendChild(floaterEl);
+          stage.appendChild(moverEl);
+
+          var b = state;
+          b.els = {
+            mover: moverEl,
+            floater: floaterEl,
+            spinner: spinnerEl,
+            text3d: textEl,
+          };
+          b.refs = null;
+          b.phys = null;
+          b.currentAnim = "none";
+          b.motion = null;
+          b.motionTrans = null;
+
+          attachDrag(b);
+          blocks.push(b);
+
+          renderBlock(b);
+          applyBlockRotation(b);
+          applyBlockPosition(b);
+          return b;
+        }
+
+        function destroyBlock(b) {
+          stopBlockSeq(b, false);
+          clearPhys(b);
+          stage.removeChild(b.els.mover);
+          blocks.splice(blocks.indexOf(b), 1);
+        }
+
+        function selectBlock(b) {
+          selected = b;
+          blocks.forEach(function (x) {
+            x.els.mover.classList.toggle("selected", x === b);
+          });
+          syncPanel();
+        }
+
+        function blockLabel(b, i) {
+          var t = b.text.replace(/\n/g, " ").trim() || "(empty)";
+          if (t.length > 14) t = t.slice(0, 14) + "\u2026";
+          return i + 1 + ": " + t;
+        }
+
+        function renderBlockList() {
+          blockSel.innerHTML = "";
+          blocks.forEach(function (b, i) {
+            var o = document.createElement("option");
+            o.value = i;
+            o.textContent = blockLabel(b, i);
+            blockSel.appendChild(o);
+          });
+          blockSel.value = blocks.indexOf(selected);
+          blockDel.disabled = blocks.length <= 1;
+        }
+
+        function syncPanel() {
+          var b = selected;
+          seqExpanded = -1;
+          textInput.value = b.text;
+          sizeInput.value = b.size;
+          depthInput.value = b.depth;
+          rxInput.value = b.rx;
+          ryInput.value = b.ry;
+          sizeOut.textContent = b.size + "px";
+          depthOut.textContent = b.depth;
+          rxOut.innerHTML = b.rx + "&deg;";
+          ryOut.innerHTML = b.ry + "&deg;";
+          faceGroup.load(b.face);
+          depthGroup.load(b.depthC);
+          seqLoop.checked = b.seq.loop;
+          renderSeq();
+          updateSeqBtn();
+          renderBlockList();
+        }
+
+        function renderBlock(b) {
+          b.els.text3d.style.fontSize = b.size + "px";
+          b.els.text3d.innerHTML = "";
+          b.refs = buildStack(
+            b.els.text3d,
+            b.text.length ? b.text : " ",
+            b.depth,
+            groupView(b.face),
+            groupView(b.depthC),
+          );
+          if (b.currentAnim === "gravity" && b.phys) startGravity(b);
+        }
+
+        function applyBlockRotation(b) {
+          b.els.spinner.style.setProperty("--rx", b.rx + "deg");
+          b.els.spinner.style.setProperty("--ry", b.ry + "deg");
+        }
+        function applyBlockPosition(b) {
+          b.els.mover.style.left = b.pos.x * 100 + "%";
+          b.els.mover.style.top = b.pos.y * 100 + "%";
+        }
+
+        /* ----- background (global) ----- */
+        var bgState = {
+          grad: true,
+          colors: ["#ecebe7", "#c7c4bd"],
+          dir: "radial",
+          anim: { on: false, steps: [] },
+        };
+
+        function paintBackgroundCols(cols) {
+          if (!bgState.grad) {
+            stage.style.backgroundImage = GRID;
+            stage.style.backgroundSize = "64px 64px, 64px 64px";
+            stage.style.backgroundColor = cols[0];
+          } else {
+            var g =
+              bgState.dir === "radial"
+                ? "radial-gradient(120% 90% at 50% 30%, " +
+                  cols.join(", ") +
+                  ")"
+                : "linear-gradient(" +
+                  bgState.dir +
+                  ", " +
+                  cols.join(", ") +
+                  ")";
+            stage.style.backgroundImage = GRID + ", " + g;
+            stage.style.backgroundSize = "64px 64px, 64px 64px, auto";
+            stage.style.backgroundColor = "";
+          }
+        }
+        function paintBackground() {
+          paintBackgroundCols(activeColors(bgState));
+        }
+
+        /* ----- panel color groups ----- */
+        var faceGroup = makeGroup("face", LINEAR_DIRS, function () {
+          if (selected) renderBlock(selected);
+        });
+        var depthGroup = makeGroup("depth", DEPTH_DIRS, function () {
+          if (selected) renderBlock(selected);
+        });
+        var bgGroup = makeGroup("bg", BG_DIRS, function () {
+          paintBackground();
+        });
+
+        /* =================== COLOR ANIMATION LOOP =================== */
+        var colAnim = { raf: 0, lastText: 0 };
+
+        function anyColorAnim() {
+          if (groupAnimated(bgState)) return true;
+          for (var i = 0; i < blocks.length; i++) {
+            if (
+              groupAnimated(blocks[i].face) ||
+              groupAnimated(blocks[i].depthC)
+            )
+              return true;
+          }
+          return false;
+        }
+
+        function restyleBlock(b, sec) {
+          var f = sec == null ? groupView(b.face) : groupViewAt(b.face, sec);
+          var d =
+            sec == null ? groupView(b.depthC) : groupViewAt(b.depthC, sec);
+          if (b.refs) {
+            styleFace(b.refs.face, f);
+            b.refs.layers.forEach(function (l) {
+              styleDepthLayer(l.el, l.t, d);
+            });
+          }
+          if (b.phys) {
+            b.phys.letters.forEach(function (L) {
+              styleFace(L.refs.face, f);
+              L.refs.layers.forEach(function (l) {
+                styleDepthLayer(l.el, l.t, d);
+              });
+            });
+          }
+        }
+
+        function colTick(ts) {
+          if (!anyColorAnim()) {
+            colAnim.raf = 0;
+            blocks.forEach(function (b) {
+              restyleBlock(b, null);
+            }); // restore statics
+            paintBackground();
+            return;
+          }
+          var sec = ts / 1000;
+
+          if (groupAnimated(bgState))
+            paintBackgroundCols(paletteAt(bgState, sec));
+
+          if (ts - colAnim.lastText > 50) {
+            // ~20fps is plenty for color
+            blocks.forEach(function (b) {
+              if (groupAnimated(b.face) || groupAnimated(b.depthC))
+                restyleBlock(b, sec);
+            });
+            colAnim.lastText = ts;
+          }
+          colAnim.raf = requestAnimationFrame(colTick);
+        }
+
+        function ensureColLoop() {
+          if (!colAnim.raf && anyColorAnim()) {
+            colAnim.raf = requestAnimationFrame(colTick);
+          }
+        }
+        /* ============================================================ */
+
+        /* =================== GRAVITY PHYSICS (all blocks) =================== */
+        var physGlobal = { raf: 0, last: 0 };
+
+        function anyPhysActive() {
+          for (var i = 0; i < blocks.length; i++)
+            if (blocks[i].phys) return true;
+          return false;
+        }
+        function ensurePhysLoop() {
+          if (!physGlobal.raf && anyPhysActive()) {
+            physGlobal.last = 0;
+            physGlobal.raf = requestAnimationFrame(physTick);
+          }
+        }
+        function clearPhys(b) {
+          if (!b.phys) return;
+          b.phys.letters.forEach(function (L) {
+            if (L.el.parentNode) physLayer.removeChild(L.el);
+          });
+          b.phys = null;
+          b.els.mover.classList.remove("hidden");
+        }
+
+        function measureLetters(b) {
+          var meas = document.createElement("div");
+          meas.className = "stack3d";
+          meas.style.position = "absolute";
+          meas.style.inset = "0";
+          meas.style.visibility = "hidden";
+          meas.style.fontSize = b.els.text3d.style.fontSize;
+
+          var spans = [];
+          var lines = (b.text.length ? b.text : " ").split("\n");
+          lines.forEach(function (line) {
+            var row = document.createElement("div");
+            var chars = line.length ? line : " ";
+            for (var i = 0; i < chars.length; i++) {
+              var sp = document.createElement("span");
+              sp.textContent = chars[i];
+              row.appendChild(sp);
+              spans.push(sp);
+            }
+            meas.appendChild(row);
+          });
+
+          b.els.spinner.appendChild(meas);
+          var stageR = stage.getBoundingClientRect();
+          var out = [];
+          spans.forEach(function (sp) {
+            var ch = sp.textContent;
+            if (ch.trim() === "") return;
+            var r = sp.getBoundingClientRect();
+            out.push({
+              ch: ch,
+              x: r.left - stageR.left,
+              y: r.top - stageR.top,
+              w: r.width,
+              h: r.height,
+            });
+          });
+          b.els.spinner.removeChild(meas);
+          return out;
+        }
+
+        function buildPhysLetter(b, info, depth, f, d) {
+          var outer = document.createElement("div");
+          outer.className = "phys-letter";
+          outer.style.width = info.w + "px";
+          outer.style.height = info.h + "px";
+
+          var rot = document.createElement("div");
+          rot.className = "phys-rot";
+          rot.style.transform =
+            "rotateX(" + b.rx + "deg) rotateY(" + b.ry + "deg)";
+
+          var stack = document.createElement("div");
+          stack.className = "stack3d";
+          stack.style.fontSize = b.els.text3d.style.fontSize;
+          var refs = buildStack(stack, info.ch, depth, f, d);
+
+          rot.appendChild(stack);
+          outer.appendChild(rot);
+          return { el: outer, refs: refs };
+        }
+
+        function startGravity(b) {
+          clearPhys(b);
+
+          var spawn = measureLetters(b); // current on-screen positions (mid-motion)
+          stopMotionInstant(b); // home positions use the at-rest pose
+          var homes = measureLetters(b);
+          if (!spawn.length) return;
+
+          var f = groupView(b.face);
+          var d = groupView(b.depthC);
+          var boom = b.animParams.gravity.boom;
+
+          var cx = 0,
+            cy = 0;
+          spawn.forEach(function (i) {
+            cx += i.x + i.w / 2;
+            cy += i.y + i.h / 2;
+          });
+          cx /= spawn.length;
+          cy /= spawn.length;
+
+          b.phys = {
+            mode: "fall",
+            letters: [],
+            pendingAnim: null,
+            returnStart: 0,
+          };
+
+          spawn.forEach(function (info, idx) {
+            var home = homes[idx] || info;
+            var built = buildPhysLetter(b, info, b.depth, f, d);
+            built.el.style.transform =
+              "translate3d(" + info.x + "px," + info.y + "px,0)";
+            physLayer.appendChild(built.el);
+
+            var lx = info.x + info.w / 2,
+              ly = info.y + info.h / 2;
+            var dx = lx - cx,
+              dy = ly - cy;
+            var len = Math.sqrt(dx * dx + dy * dy) || 1;
+            var pow = boom * (0.6 + Math.random() * 0.8);
+
+            b.phys.letters.push({
+              el: built.el,
+              refs: built.refs,
+              x: info.x,
+              y: info.y,
+              w: info.w,
+              h: info.h,
+              hx: home.x,
+              hy: home.y,
+              vx: (dx / len) * pow + (Math.random() - 0.5) * 60,
+              vy: (dy / len) * pow - boom * 0.25 - Math.random() * 50,
+              rot: 0,
+              vr: (Math.random() - 0.5) * (180 + boom * 0.6),
+            });
+          });
+
+          b.els.mover.classList.add("hidden");
+          ensurePhysLoop();
+        }
+
+        function beginReturn(b, nextAnim) {
+          b.phys.mode = "return";
+          b.phys.pendingAnim = nextAnim;
+          b.phys.returnStart = performance.now();
+          b.phys.letters.forEach(function (L) {
+            L.sx = L.x;
+            L.sy = L.y;
+            L.srot = L.rot;
+            L.trot = Math.round(L.rot / 360) * 360;
+          });
+        }
+
+        function finishReturn(b) {
+          var next = b.phys.pendingAnim;
+          clearPhys(b);
+          applyCssAnim(b, next);
+        }
+
+        function physTick(ts) {
+          if (!physGlobal.last) physGlobal.last = ts;
+          var dt = Math.min(0.04, (ts - physGlobal.last) / 1000);
+          physGlobal.last = ts;
+
+          var R = stage.getBoundingClientRect();
+
+          blocks.forEach(function (b) {
+            if (!b.phys) return;
+
+            if (b.phys.mode === "fall") {
+              var G = b.animParams.gravity.g;
+              b.phys.letters.forEach(function (L) {
+                L.vy += G * dt;
+                L.x += L.vx * dt;
+                L.y += L.vy * dt;
+                L.rot += L.vr * dt;
+
+                var maxX = R.width - L.w;
+                var maxY = R.height - L.h;
+
+                if (L.x < 0) {
+                  L.x = 0;
+                  L.vx = -L.vx * 0.8;
+                  L.vr *= 0.9;
+                } else if (L.x > maxX) {
+                  L.x = maxX;
+                  L.vx = -L.vx * 0.8;
+                  L.vr *= 0.9;
+                }
+
+                if (L.y < 0 && L.vy < 0) {
+                  L.y = 0;
+                  L.vy = -L.vy * 0.7;
+                }
+
+                if (L.y > maxY) {
+                  L.y = maxY;
+                  L.vy = -L.vy * 0.72;
+                  L.vx *= 0.96;
+                  L.vr *= 0.85;
+                  if (Math.abs(L.vy) < Math.max(70, G * 0.03)) {
+                    L.vy = 0;
+                    L.vx *= 0.85;
+                    if (Math.abs(L.vx) < 6) L.vx = 0;
+                    if (Math.abs(L.vr) < 15) L.vr = 0;
+                  }
+                }
+
+                L.el.style.transform =
+                  "translate3d(" +
+                  L.x +
+                  "px," +
+                  L.y +
+                  "px,0) rotate(" +
+                  L.rot +
+                  "deg)";
+              });
+            } else if (b.phys.mode === "return") {
+              var t = (ts - b.phys.returnStart) / RETURN_MS;
+              if (t >= 1) {
+                finishReturn(b);
+                return;
+              }
+              var e = easeInOutCubic(t);
+              b.phys.letters.forEach(function (L) {
+                L.x = L.sx + (L.hx - L.sx) * e;
+                L.y = L.sy + (L.hy - L.sy) * e;
+                L.rot = L.srot + (L.trot - L.srot) * e;
+                L.el.style.transform =
+                  "translate3d(" +
+                  L.x +
+                  "px," +
+                  L.y +
+                  "px,0) rotate(" +
+                  L.rot +
+                  "deg)";
+              });
+            }
+          });
+
+          if (anyPhysActive()) {
+            physGlobal.raf = requestAnimationFrame(physTick);
+          } else {
+            physGlobal.raf = 0;
+          }
+        }
+        /* ===================================================================== */
+
+        /* ----- motion engine (JS-driven so animation steps blend smoothly) ----- */
+        var MOTION_TRANS_MS = 600;
+        var REDUCED_MOTION =
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var motionRaf = 0;
+
+        function parseOrigin(str) {
+          if (!str) return [50, 50];
+          var parts = str.split(" ");
+          return [parseFloat(parts[0]), parseFloat(parts[1])];
+        }
+        function normAngle(a) {
+          var x = a % 360;
+          if (x > 180) x -= 360;
+          if (x < -180) x += 360;
+          return x;
+        }
+        function identityState() {
+          return { tx: 0, ty: 0, ry: 0, rz: 0, s: 1, ox: 50, oy: 50 };
+        }
+
+        // target transform of the block's current motion at a moment in time;
+        // every motion starts from (and periodically passes through) the identity pose
+        function motionState(b, now) {
+          var m = b.motion;
+          if (!m || m.name === "none" || REDUCED_MOTION) return identityState();
+          var p = b.animParams[m.name] || {};
+          var t = (now - m.start) / 1000;
+          var W = Math.PI * 2;
+
+          if (m.name === "float") {
+            var T = p.speed || 5,
+              D = p.dist || 14;
+            return {
+              tx: D * 0.45 * Math.sin(((W * t) / T) * 2 + 1.3),
+              ty: -D * Math.sin((W * t) / T),
+              ry: 0,
+              rz: 0,
+              s: 1,
+              ox: 50,
+              oy: 50,
+            };
+          }
+          if (m.name === "spin") {
+            var o = parseOrigin(p.origin);
+            var dirMul = p.dir === "reverse" ? -1 : 1;
+            return {
+              tx: 0,
+              ty: 0,
+              ry: (dirMul * 360 * t) / (p.speed || 6),
+              rz: 0,
+              s: 1,
+              ox: o[0],
+              oy: o[1],
+            };
+          }
+          if (m.name === "pulse") {
+            var o2 = parseOrigin(p.origin);
+            var A = p.amt || 1.12;
+            return {
+              tx: 0,
+              ty: 0,
+              ry: 0,
+              rz: 0,
+              s:
+                1 +
+                (A - 1) * (0.5 - 0.5 * Math.cos((W * t) / (p.speed || 2.4))),
+              ox: o2[0],
+              oy: o2[1],
+            };
+          }
+          if (m.name === "sway") {
+            var o3 = parseOrigin(p.origin);
+            return {
+              tx: 0,
+              ty: 0,
+              ry: 0,
+              rz: (p.ang || 5) * Math.sin((W * t) / (p.speed || 3.2)),
+              s: 1,
+              ox: o3[0],
+              oy: o3[1],
+            };
+          }
+          return identityState();
+        }
+
+        // the rendered state: the new motion's target, blended out of the snapshot
+        // taken from the previous motion at the moment of the switch
+        function currentRenderedState(b, now) {
+          var target = motionState(b, now);
+          if (b.motionTrans) {
+            var u = (now - b.motionTrans.start) / MOTION_TRANS_MS;
+            if (u >= 1) return target;
+            var e = easeInOutCubic(Math.max(0, u));
+            var f = b.motionTrans.from;
+            return {
+              tx: f.tx + (target.tx - f.tx) * e,
+              ty: f.ty + (target.ty - f.ty) * e,
+              ry: f.ry + (target.ry - f.ry) * e,
+              rz: f.rz + (target.rz - f.rz) * e,
+              s: f.s + (target.s - f.s) * e,
+              ox: f.ox + (target.ox - f.ox) * e,
+              oy: f.oy + (target.oy - f.oy) * e,
+            };
+          }
+          return target;
+        }
+
+        function applyMotionTransform(b, st) {
+          b.els.floater.style.transformOrigin = st.ox + "% " + st.oy + "%";
+          b.els.floater.style.transform =
+            "translate(" +
+            st.tx +
+            "px," +
+            st.ty +
+            "px) rotateY(" +
+            st.ry +
+            "deg) rotateZ(" +
+            st.rz +
+            "deg) scale(" +
+            st.s +
+            ")";
+        }
+
+        function anyMotionActive() {
+          for (var i = 0; i < blocks.length; i++) {
+            var b = blocks[i];
+            if (b.motionTrans) return true;
+            if (b.motion && b.motion.name !== "none") return true;
+          }
+          return false;
+        }
+        function motionTick(now) {
+          blocks.forEach(function (b) {
+            if (!b.motion && !b.motionTrans) return;
+            var st = currentRenderedState(b, now);
+            applyMotionTransform(b, st);
+            if (b.motionTrans && now - b.motionTrans.start >= MOTION_TRANS_MS) {
+              b.motionTrans = null;
+            }
+          });
+          if (anyMotionActive()) motionRaf = requestAnimationFrame(motionTick);
+          else motionRaf = 0;
+        }
+        function ensureMotionLoop() {
+          if (!motionRaf) motionRaf = requestAnimationFrame(motionTick);
+        }
+
+        // switch motions, blending from wherever the block visually is right now;
+        // angles are normalized so e.g. a long spin unwinds by the shortest path
+        function setMotion(b, name) {
+          var now = performance.now();
+          var cur = currentRenderedState(b, now);
+          cur.ry = normAngle(cur.ry);
+          cur.rz = normAngle(cur.rz);
+          b.motionTrans = { from: cur, start: now };
+          b.motion = { name: name || "none", start: now };
+          ensureMotionLoop();
+        }
+
+        // hard stop at the identity pose (used when gravity takes the letters over)
+        function stopMotionInstant(b) {
+          b.motion = null;
+          b.motionTrans = null;
+          b.els.floater.style.transform = "";
+          b.els.floater.style.transformOrigin = "";
+        }
+
+        function applyCssAnim(b, name) {
+          setMotion(b, name === "gravity" ? "none" : name);
+        }
+
+        function setAnimation(b, name) {
+          if (name === "gravity") {
+            b.currentAnim = "gravity";
+            b.els.floater.className = "floater";
+            startGravity(b);
+            return;
+          }
+
+          b.currentAnim = name;
+
+          if (b.phys && b.phys.mode === "fall" && b.phys.letters.length) {
+            beginReturn(b, name);
+            ensurePhysLoop();
+            return;
+          }
+          if (b.phys && b.phys.mode === "return") {
+            b.phys.pendingAnim = name;
+            return;
+          }
+
+          clearPhys(b);
+          applyCssAnim(b, name);
+        }
+
+        /* parameter editor for one animation type (shared by all steps of that type) */
+        function buildStepParams(container, b, name) {
+          var defs = ANIM_PARAM_DEFS[name];
+          if (!defs) {
+            var note = document.createElement("div");
+            note.style.fontSize = "11px";
+            note.style.color = "#9a958c";
+            note.textContent = "No settings for this step.";
+            container.appendChild(note);
+            return;
+          }
+          var params = b.animParams[name];
+
+          defs.forEach(function (def) {
+            var wrap = document.createElement("div");
+            wrap.className = "param";
+
+            var lbl = document.createElement("label");
+            lbl.style.display = "flex";
+            lbl.style.justifyContent = "space-between";
+            lbl.style.fontSize = "11px";
+            lbl.style.letterSpacing = "0.08em";
+            lbl.style.textTransform = "uppercase";
+            lbl.style.color = "#6f6b63";
+            lbl.style.marginBottom = "4px";
+
+            var out = document.createElement("output");
+            out.style.color = "var(--ink)";
+            lbl.appendChild(document.createTextNode(def.label));
+            lbl.appendChild(out);
+            wrap.appendChild(lbl);
+
+            if (def.type === "select") {
+              var sel = document.createElement("select");
+              def.options.forEach(function (o) {
+                var op = document.createElement("option");
+                op.value = o.v;
+                op.textContent = o.label;
+                sel.appendChild(op);
+              });
+              sel.value = params[def.k];
+              sel.addEventListener("change", function () {
+                params[def.k] = sel.value;
+              });
+              wrap.appendChild(sel);
+            } else {
+              var rng = document.createElement("input");
+              rng.type = "range";
+              rng.min = def.min;
+              rng.max = def.max;
+              rng.step = def.step;
+              rng.value = params[def.k];
+              out.textContent = rng.value + def.unit;
+              rng.addEventListener("input", function () {
+                params[def.k] = +rng.value;
+                out.textContent = rng.value + def.unit;
+              });
+              wrap.appendChild(rng);
+            }
+            container.appendChild(wrap);
+          });
+        }
+
+        /* =================== SEQUENCER (per block) =================== */
+        var seqExpanded = -1; // which step's settings are open in the panel
+
+        function renderSeq() {
+          seqStepsBox.innerHTML = "";
+          var b = selected;
+          var steps = b ? b.seq.steps : [];
+          if (!steps.length) {
+            var empty = document.createElement("div");
+            empty.id = "seqEmpty";
+            empty.textContent = "No steps yet \u2014 add some below.";
+            seqStepsBox.appendChild(empty);
+            return;
+          }
+          steps.forEach(function (st, i) {
+            var row = document.createElement("div");
+            row.className = "seqstep";
+
+            var sel = document.createElement("select");
+            ANIM_NAMES.forEach(function (a) {
+              var op = document.createElement("option");
+              op.value = a.v;
+              op.textContent = a.label;
+              sel.appendChild(op);
+            });
+            sel.value = st.anim;
+            sel.title = "Step " + (i + 1) + " animation";
+            sel.addEventListener("change", function () {
+              st.anim = sel.value;
+              if (seqExpanded === i) renderSeq(); // settings follow the new type
+            });
+            row.appendChild(sel);
+
+            var dur = document.createElement("input");
+            dur.type = "number";
+            dur.min = "0.5";
+            dur.max = "60";
+            dur.step = "0.5";
+            dur.value = st.dur;
+            dur.title = "Duration in seconds";
+            dur.addEventListener("change", function () {
+              var v = parseFloat(dur.value);
+              if (isNaN(v) || v < 0.5) v = 0.5;
+              if (v > 60) v = 60;
+              dur.value = v;
+              st.dur = v;
+            });
+            row.appendChild(dur);
+
+            var gear = document.createElement("button");
+            gear.type = "button";
+            gear.className = "gearbtn" + (seqExpanded === i ? " open" : "");
+            gear.textContent = "\u2699";
+            gear.title = "Settings for this animation type";
+            gear.addEventListener("click", function () {
+              seqExpanded = seqExpanded === i ? -1 : i;
+              renderSeq();
+            });
+            row.appendChild(gear);
+
+            var del = document.createElement("button");
+            del.type = "button";
+            del.className = "delseq";
+            del.textContent = "\u00d7";
+            del.title = "Remove step";
+            del.addEventListener("click", function () {
+              steps.splice(i, 1);
+              if (seqExpanded === i) seqExpanded = -1;
+              else if (seqExpanded > i) seqExpanded--;
+              renderSeq();
+            });
+            row.appendChild(del);
+
+            seqStepsBox.appendChild(row);
+
+            if (seqExpanded === i) {
+              var pp = document.createElement("div");
+              pp.className = "stepparams";
+              buildStepParams(pp, b, st.anim);
+              seqStepsBox.appendChild(pp);
+            }
+          });
+        }
+
+        function updateSeqBtn() {
+          var anyPlaying = blocks.some(function (b) {
+            return b.seqRun.playing;
+          });
+          seqPlayBtn.innerHTML = anyPlaying
+            ? "&#9632; Stop all"
+            : "&#9654; Play all";
+        }
+
+        function runBlockStep(b) {
+          var st = b.seq.steps[b.seqRun.idx];
+          setAnimation(b, st.anim);
+          b.seqRun.timer = setTimeout(function () {
+            b.seqRun.idx++;
+            if (b.seqRun.idx >= b.seq.steps.length) {
+              if (b.seq.loop) {
+                b.seqRun.idx = 0;
+                runBlockStep(b);
+              } else {
+                stopBlockSeq(b, true);
+              }
+            } else {
+              runBlockStep(b);
+            }
+          }, st.dur * 1000);
+        }
+
+        function playBlockSeq(b) {
+          if (!b.seq.steps.length) return;
+          stopBlockSeq(b, false);
+          b.seqRun.playing = true;
+          b.seqRun.idx = 0;
+          updateSeqBtn();
+          runBlockStep(b);
+        }
+
+        function stopBlockSeq(b, restore) {
+          if (b.seqRun.timer) clearTimeout(b.seqRun.timer);
+          b.seqRun.timer = 0;
+          b.seqRun.playing = false;
+          updateSeqBtn();
+          if (restore) setAnimation(b, "none");
+        }
+        /* ===================================================================== */
+
+        /* ----- dragging per block ----- */
+        function attachDrag(b) {
+          var drag = null;
+          var m = b.els.mover;
+
+          m.addEventListener("pointerdown", function (e) {
+            e.preventDefault();
+            selectBlock(b);
+            m.setPointerCapture(e.pointerId);
+            m.classList.add("dragging");
+            drag = {
+              mode: e.shiftKey ? "rotate" : "move",
+              startX: e.clientX,
+              startY: e.clientY,
+              posX: b.pos.x,
+              posY: b.pos.y,
+              rx: b.rx,
+              ry: b.ry,
+            };
+          });
+
+          m.addEventListener("pointermove", function (e) {
+            if (!drag) return;
+            var dx = e.clientX - drag.startX;
+            var dy = e.clientY - drag.startY;
+
+            if (drag.mode === "move") {
+              var r = stage.getBoundingClientRect();
+              b.pos.x = Math.min(1, Math.max(0, drag.posX + dx / r.width));
+              b.pos.y = Math.min(1, Math.max(0, drag.posY + dy / r.height));
+              applyBlockPosition(b);
+            } else {
+              b.ry = Math.min(180, Math.max(-180, drag.ry + dx * 0.4));
+              b.rx = Math.min(80, Math.max(-80, drag.rx - dy * 0.4));
+              applyBlockRotation(b);
+              rxInput.value = b.rx;
+              ryInput.value = b.ry;
+              rxOut.innerHTML = Math.round(b.rx) + "&deg;";
+              ryOut.innerHTML = Math.round(b.ry) + "&deg;";
+            }
+          });
+
+          function endDrag() {
+            drag = null;
+            m.classList.remove("dragging");
+          }
+          m.addEventListener("pointerup", endDrag);
+          m.addEventListener("pointercancel", endDrag);
+        }
+
+        /* ----- panel controls ----- */
+        textInput.addEventListener("input", function () {
+          selected.text = textInput.value;
+          renderBlock(selected);
+          renderBlockList();
+        });
+        sizeInput.addEventListener("input", function () {
+          selected.size = +sizeInput.value;
+          sizeOut.textContent = selected.size + "px";
+          renderBlock(selected);
+        });
+        depthInput.addEventListener("input", function () {
+          selected.depth = +depthInput.value;
+          depthOut.textContent = selected.depth;
+          renderBlock(selected);
+        });
+        rxInput.addEventListener("input", function () {
+          selected.rx = +rxInput.value;
+          rxOut.innerHTML = selected.rx + "&deg;";
+          applyBlockRotation(selected);
+        });
+        ryInput.addEventListener("input", function () {
+          selected.ry = +ryInput.value;
+          ryOut.innerHTML = selected.ry + "&deg;";
+          applyBlockRotation(selected);
+        });
+
+        document
+          .getElementById("replay")
+          .addEventListener("click", function () {
+            blocks.forEach(function (b) {
+              if (b.seq.steps.length) playBlockSeq(b);
+            });
+          });
+
+        blockSel.addEventListener("change", function () {
+          var b = blocks[+blockSel.value];
+          if (b) selectBlock(b);
+        });
+        blockAdd.addEventListener("click", function () {
+          if (blocks.length >= 8) return;
+          var b = createBlock(newBlockState());
+          selectBlock(b);
+        });
+        blockDel.addEventListener("click", function () {
+          if (blocks.length <= 1) return;
+          var idx = blocks.indexOf(selected);
+          destroyBlock(selected);
+          selectBlock(blocks[Math.min(idx, blocks.length - 1)]);
+        });
+
+        document
+          .getElementById("seqAdd")
+          .addEventListener("click", function () {
+            if (selected.seq.steps.length >= 12) return;
+            selected.seq.steps.push({ anim: "float", dur: 3 });
+            renderSeq();
+          });
+        seqPlayBtn.addEventListener("click", function () {
+          var anyPlaying = blocks.some(function (b) {
+            return b.seqRun.playing;
+          });
+          if (anyPlaying) {
+            blocks.forEach(function (b) {
+              stopBlockSeq(b, true);
+            });
+          } else {
+            blocks.forEach(function (b) {
+              playBlockSeq(b);
+            });
+          }
+        });
+        seqLoop.addEventListener("change", function () {
+          selected.seq.loop = seqLoop.checked;
+        });
+
+        /* ----- panel show/hide ----- */
+        var panelEl = document.getElementById("panel");
+        var panelShowEl = document.getElementById("panelShow");
+
+        function setPanelVisible(visible) {
+          panelEl.classList.toggle("hidden", !visible);
+          panelShowEl.classList.toggle("visible", !visible);
+        }
+        document
+          .getElementById("panelHide")
+          .addEventListener("click", function () {
+            setPanelVisible(false);
+          });
+        panelShowEl.addEventListener("click", function () {
+          setPanelVisible(true);
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.key !== "h" && e.key !== "H") return;
+          var tag = (e.target.tagName || "").toLowerCase();
+          if (tag === "input" || tag === "textarea" || tag === "select") return;
+          setPanelVisible(panelEl.classList.contains("hidden"));
+        });
+
+        document.getElementById("reset").addEventListener("click", function () {
+          while (blocks.length) destroyBlock(blocks[0]);
+          blockCounter = 0;
+
+          bgState.grad = true;
+          bgState.colors = ["#ecebe7", "#c7c4bd"];
+          bgState.dir = "radial";
+          bgState.anim = { on: false, steps: [] };
+          bgGroup.load(bgState);
+          paintBackground();
+
+          var b = createBlock(newBlockState());
+          selectBlock(b);
+          ensureColLoop();
+          playBlockSeq(b);
+        });
+
+        /* =================== EXPORT =================== */
+        function cloneGroupState(s) {
+          return {
+            grad: s.grad,
+            colors: s.colors.slice(),
+            dir: s.dir,
+            anim: {
+              on: s.anim.on,
+              steps: s.anim.steps.map(function (st) {
+                return { colors: st.colors.slice(), dur: st.dur };
+              }),
+            },
+          };
+        }
+
+        function serializeConfig() {
+          return {
+            bg: cloneGroupState(bgState),
+            blocks: blocks.map(function (b) {
+              return {
+                text: b.text,
+                size: b.size,
+                depth: b.depth,
+                face: cloneGroupState(b.face),
+                depthC: cloneGroupState(b.depthC),
+                animParams: JSON.parse(JSON.stringify(b.animParams)),
+                seq: {
+                  loop: b.seq.loop,
+                  steps: b.seq.steps.map(function (st) {
+                    return { anim: st.anim, dur: st.dur };
+                  }),
+                },
+                pos: { x: b.pos.x, y: b.pos.y },
+                rx: b.rx,
+                ry: b.ry,
+              };
+            }),
+          };
+        }
+
+        function buildExportHtml() {
+          var css = document.querySelector("style").textContent;
+          var engine = document.getElementById("playerEngine").textContent;
+          // \u003c-escape so user text can never break out of the script tag
+          var json = JSON.stringify(serializeConfig()).replace(/</g, "\\u003c");
+
+          return (
+            '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n' +
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n' +
+            "<title>3D Text</title>\n<style>" +
+            css +
+            "</style>\n</head>\n<body>\n" +
+            '<div id="stage"><div id="physLayer"></div></div>\n' +
+            "<scr" +
+            "ipt>\nvar CONFIG = " +
+            json +
+            ";\n" +
+            engine +
+            "\n</scr" +
+            "ipt>\n" +
+            "</body>\n</html>\n"
+          );
+        }
+
+        function exportHtml() {
+          var html = buildExportHtml();
+          var blob = new Blob([html], { type: "text/html" });
+
+          function downloadFallback() {
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "3d-text.html";
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () {
+              URL.revokeObjectURL(a.href);
+              a.remove();
+            }, 0);
+          }
+
+          // native Save As dialog where supported (Chrome/Edge); download otherwise
+          if (window.showSaveFilePicker) {
+            window
+              .showSaveFilePicker({
+                suggestedName: "3d-text.html",
+                types: [
+                  {
+                    description: "HTML page",
+                    accept: { "text/html": [".html"] },
+                  },
+                ],
+              })
+              .then(function (handle) {
+                return handle.createWritable().then(function (w) {
+                  return w.write(blob).then(function () {
+                    return w.close();
+                  });
+                });
+              })
+              .catch(function (err) {
+                if (err && err.name === "AbortError") return; // user cancelled
+                downloadFallback();
+              });
+            return;
+          }
+          downloadFallback();
+        }
+        document.getElementById("export").addEventListener("click", exportHtml);
+        /* ============================================== */
+
+        /* =================== SCENE IN THE URL =================== */
+        function b64urlEncode(bytes) {
+          var bin = "";
+          for (var i = 0; i < bytes.length; i++)
+            bin += String.fromCharCode(bytes[i]);
+          return btoa(bin)
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=+$/, "");
+        }
+        function b64urlDecode(str) {
+          str = str.replace(/-/g, "+").replace(/_/g, "/");
+          while (str.length % 4) str += "=";
+          var bin = atob(str);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          return bytes;
+        }
+        function compressBytes(bytes) {
+          if (typeof CompressionStream === "undefined")
+            return Promise.reject(new Error("no cs"));
+          var stream = new Blob([bytes])
+            .stream()
+            .pipeThrough(new CompressionStream("deflate-raw"));
+          return new Response(stream).arrayBuffer().then(function (ab) {
+            return new Uint8Array(ab);
+          });
+        }
+        function decompressBytes(bytes) {
+          var stream = new Blob([bytes])
+            .stream()
+            .pipeThrough(new DecompressionStream("deflate-raw"));
+          return new Response(stream).arrayBuffer().then(function (ab) {
+            return new Uint8Array(ab);
+          });
+        }
+
+        // 'z' prefix = deflated, 'j' prefix = plain JSON (fallback for old browsers)
+        function encodeScene() {
+          var bytes = new TextEncoder().encode(
+            JSON.stringify(serializeConfig()),
+          );
+          return compressBytes(bytes)
+            .then(function (z) {
+              return "z" + b64urlEncode(z);
+            })
+            .catch(function () {
+              return "j" + b64urlEncode(bytes);
+            });
+        }
+        function decodeScene(s) {
+          try {
+            var kind = s.charAt(0);
+            var data = b64urlDecode(s.slice(1));
+            if (kind === "j") {
+              return Promise.resolve(
+                JSON.parse(new TextDecoder().decode(data)),
+              );
+            }
+            if (kind === "z") {
+              return decompressBytes(data)
+                .then(function (b) {
+                  return JSON.parse(new TextDecoder().decode(b));
+                })
+                .catch(function () {
+                  return null;
+                });
+            }
+          } catch (e) {}
+          return Promise.resolve(null);
+        }
+
+        /* rebuild app state from a decoded config (defensively normalized) */
+        function mergeAnimParams(p) {
+          var out = defaultAnimParams();
+          if (p)
+            Object.keys(out).forEach(function (name) {
+              if (p[name])
+                Object.keys(out[name]).forEach(function (k) {
+                  if (p[name][k] !== undefined) out[name][k] = p[name][k];
+                });
+            });
+          return out;
+        }
+        function normGroup(g, fallback) {
+          g = g || {};
+          var colors =
+            g.colors && g.colors.length
+              ? g.colors.slice(0, 4)
+              : fallback.slice();
+          var grad = !!g.grad;
+          if (grad && colors.length < 2) colors.push(colors[0]);
+          return {
+            grad: grad,
+            colors: colors,
+            dir: g.dir || "180deg",
+            anim: {
+              on: !!(g.anim && g.anim.on),
+              steps: (g.anim && g.anim.steps
+                ? g.anim.steps.slice(0, 4)
+                : []
+              ).map(function (st) {
+                return {
+                  colors: (st.colors || colors).slice(0, 4),
+                  dur: +st.dur || 2,
+                };
+              }),
+            },
+          };
+        }
+        function applyConfig(cfg) {
+          while (blocks.length) destroyBlock(blocks[0]);
+          blockCounter = 0;
+
+          var bg = normGroup(cfg.bg, ["#ecebe7", "#c7c4bd"]);
+          if (bg.dir === "180deg" && cfg.bg && !cfg.bg.dir) bg.dir = "radial";
+          bgState.grad = bg.grad;
+          bgState.colors = bg.colors;
+          bgState.dir = (cfg.bg && cfg.bg.dir) || "radial";
+          bgState.anim = bg.anim;
+          bgGroup.load(bgState);
+          paintBackground();
+
+          (cfg.blocks || []).forEach(function (cb) {
+            blockCounter++;
+            createBlock({
+              id: blockCounter,
+              text:
+                typeof cb.text === "string" ? cb.text.slice(0, 200) : "HELLO",
+              size: Math.min(220, Math.max(24, +cb.size || 96)),
+              depth: Math.min(48, Math.max(2, +cb.depth || 18)),
+              face: normGroup(cb.face, ["#e2452d"]),
+              depthC: normGroup(cb.depthC, ["#7a2114"]),
+              animParams: mergeAnimParams(cb.animParams),
+              seq: {
+                loop: !!(cb.seq && cb.seq.loop),
+                steps: (cb.seq && cb.seq.steps
+                  ? cb.seq.steps.slice(0, 12)
+                  : []
+                ).map(function (s) {
+                  return { anim: s.anim || "none", dur: +s.dur || 2 };
+                }),
+              },
+              seqRun: { playing: false, idx: 0, timer: 0 },
+              pos: {
+                x:
+                  cb.pos && isFinite(cb.pos.x)
+                    ? Math.min(1, Math.max(0, +cb.pos.x))
+                    : 0.5,
+                y:
+                  cb.pos && isFinite(cb.pos.y)
+                    ? Math.min(1, Math.max(0, +cb.pos.y))
+                    : 0.5,
+              },
+              rx: isFinite(cb.rx) ? Math.min(80, Math.max(-80, +cb.rx)) : -12,
+              ry: isFinite(cb.ry) ? Math.min(180, Math.max(-180, +cb.ry)) : 18,
+            });
+          });
+
+          if (!blocks.length) createBlock(newBlockState());
+          selectBlock(blocks[0]);
+          ensureColLoop();
+          blocks.forEach(function (b) {
+            playBlockSeq(b);
+          });
+        }
+
+        // copy with layered fallbacks: async Clipboard API -> legacy execCommand
+        function copyTextToClipboard(text) {
+          return new Promise(function (resolve, reject) {
+            function tryLegacy() {
+              try {
+                var ta = document.createElement("textarea");
+                ta.value = text;
+                ta.setAttribute("readonly", "");
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                ta.style.top = "0";
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                ta.setSelectionRange(0, text.length);
+                var ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                if (ok) resolve();
+                else reject(new Error("execCommand failed"));
+              } catch (e) {
+                reject(e);
+              }
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(resolve, tryLegacy);
+            } else {
+              tryLegacy();
+            }
+          });
+        }
+
+        var shareBox = document.getElementById("shareBox");
+        var shareBoxInput = document.getElementById("shareBoxInput");
+
+        function showShareBox(url) {
+          shareBoxInput.value = url;
+          shareBox.style.display = "";
+          shareBoxInput.focus();
+          shareBoxInput.select();
+          shareBoxInput.setSelectionRange(0, url.length);
+        }
+        function hideShareBox() {
+          shareBox.style.display = "none";
+        }
+        shareBoxInput.addEventListener("click", function () {
+          shareBoxInput.select();
+          shareBoxInput.setSelectionRange(0, shareBoxInput.value.length);
+        });
+        shareBoxInput.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") hideShareBox();
+        });
+        shareBoxInput.addEventListener("copy", function () {
+          setTimeout(hideShareBox, 400); // they got it - tidy up
+        });
+
+        document
+          .getElementById("shareUrl")
+          .addEventListener("click", function () {
+            var btn = this;
+            encodeScene().then(function (enc) {
+              var url =
+                location.href.split("#")[0].split("?")[0] + "?scene=" + enc;
+              copyTextToClipboard(url).then(
+                function () {
+                  hideShareBox();
+                  btn.textContent = "Copied!";
+                  setTimeout(function () {
+                    btn.textContent = "Copy share URL";
+                  }, 1600);
+                },
+                function () {
+                  // nothing programmatic worked (e.g. sandboxed iframe):
+                  // show the URL pre-selected so one Ctrl+C finishes the job
+                  showShareBox(url);
+                  btn.textContent = "Press Ctrl+C to copy";
+                  setTimeout(function () {
+                    btn.textContent = "Copy share URL";
+                  }, 2500);
+                },
+              );
+            });
+          });
+        /* ======================================================== */
+
+        /* ----- init ----- */
+        function bootDefault() {
+          var first = createBlock(newBlockState());
+          selectBlock(first);
+          ensureColLoop();
+          playBlockSeq(first);
+        }
+
+        bgGroup.load(bgState);
+        paintBackground();
+
+        var sceneParam = new URLSearchParams(location.search).get("scene");
+        if (sceneParam) {
+          decodeScene(sceneParam).then(function (cfg) {
+            if (cfg && cfg.blocks) {
+              applyConfig(cfg);
+              setPanelVisible(false); // a shared URL opens as a clean viewer
+            } else {
+              bootDefault();
+            }
+          });
+        } else {
+          bootDefault();
+        }
+      })();
+    </script>
+  </body>
+</html>
