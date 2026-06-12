@@ -599,6 +599,19 @@
         white-space: nowrap;
       }
 
+      /* viewer mode (?scene= in the URL): pure render, no chrome, no interaction */
+      body.viewer #panel,
+      body.viewer #panelShow,
+      body.viewer #hint {
+        display: none !important;
+      }
+      body.viewer .mover {
+        cursor: default;
+      }
+      body.viewer .mover.selected .text3d {
+        outline: none;
+      }
+
       @media (max-width: 560px) {
         #panel {
           width: calc(100% - 32px);
@@ -2036,6 +2049,7 @@ HELLO</textarea
         var blocks = [];
         var selected = null;
         var blockCounter = 0;
+        var viewerMode = false; // true when the scene came from the URL
 
         function newBlockState() {
           var n = blocks.length;
@@ -2941,6 +2955,7 @@ HELLO</textarea
           var m = b.els.mover;
 
           m.addEventListener("pointerdown", function (e) {
+            if (viewerMode) return;
             e.preventDefault();
             selectBlock(b);
             m.setPointerCapture(e.pointerId);
@@ -3078,6 +3093,7 @@ HELLO</textarea
           setPanelVisible(true);
         });
         document.addEventListener("keydown", function (e) {
+          if (viewerMode) return;
           if (e.key !== "h" && e.key !== "H") return;
           var tag = (e.target.tagName || "").toLowerCase();
           if (tag === "input" || tag === "textarea" || tag === "select") return;
@@ -3475,13 +3491,11 @@ HELLO</textarea
 
         var sceneParam = new URLSearchParams(location.search).get("scene");
         if (sceneParam) {
+          viewerMode = true;
+          document.body.classList.add("viewer"); // hides panel, hint, outlines; CSS-enforced
           decodeScene(sceneParam).then(function (cfg) {
-            if (cfg && cfg.blocks) {
-              applyConfig(cfg);
-              setPanelVisible(false); // a shared URL opens as a clean viewer
-            } else {
-              bootDefault();
-            }
+            if (cfg && cfg.blocks) applyConfig(cfg);
+            else bootDefault();
           });
         } else {
           bootDefault();
