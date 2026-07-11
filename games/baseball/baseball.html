@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Swing — 3D Baseball</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #c {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+  #hud {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    z-index: 10;
+  }
+  #flyBtn {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    padding: 10px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.4);
+    border-radius: 999px;
+    backdrop-filter: blur(4px);
+  }
+  #flyBtn.active {
+    background: rgba(90,160,255,0.45);
+    border-color: rgba(150,200,255,0.9);
+  }
+  #message {
+    position: fixed;
+    top: 38%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 28px;
+    font-weight: 700;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.85);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+    z-index: 10;
+    text-align: center;
+    white-space: nowrap;
+  }
+  #prompt {
+    position: fixed;
+    bottom: 34px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 15px;
+    opacity: 0.85;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    transition: opacity 0.4s ease;
+    z-index: 10;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div id="hud">Hits: 0</div>
+  <button id="flyBtn">Fly around</button>
+  <div id="message"></div>
+  <div id="prompt">Swipe through the ball to hit</div>
+  <canvas id="c"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+/* ---------------- Config ---------------- */
+const BALL_RADIUS   = 0.15;
+const GRAVITY       = 22;
+const RESTITUTION   = 0.45;
+const FRICTION      = 0.72;
+const FENCE_RADIUS  = 100;
+const FENCE_HEIGHT  = 3;
+const PITCH_DURATION = 0.55; // seconds
+const MOUND_DIST    = 18.44;
+const HOME_TO_2B    = 38.79;
+const BASE_DIST     = 27.43;
+
+/* ---------------- Renderer / Scene / Camera ---------------- */
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+// Night game
+scene.background = new THREE.Color(0x0b1026);
+scene.fog = new THREE.Fog(0x0b1026, 110, 260);
+
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 500);
+const BATTER_POS = new THREE.Vector3(0, 1.65, 3.2);
+camera.position.copy(BATTER_POS);
+camera.lookAt(0, 1.3, -20);
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener("resize", onResize);
+onResize();
+
+/* ---------------- Lighting (stadium night) ---------------- */
+const hemi = new THREE.HemisphereLight(0x33406b, 0x1c3a1a, 0.55);
+scene.add(hemi);
+
+const stadiumLight = new THREE.DirectionalLight(0xfff4d6, 1.15);
+stadiumLight.position.set(60, 90, 40);
+stadiumLight.castShadow = true;
+stadiumLight.shadow.mapSize.set(2048, 2048);
+stadiumLight.shadow.camera.left = -120;
+stadiumLight.shadow.camera.right = 120;
+stadiumLight.shadow.camera.top = 120;
+stadiumLight.shadow.camera.bottom = -120;
+stadiumLight.shadow.camera.near = 1;
+stadiumLight.shadow.camera.far = 300;
+scene.add(stadiumLight);
+
+const fillLight = new THREE.DirectionalLight(0xd6e4ff, 0.45);
+fillLight.position.set(-70, 60, -30);
+scene.add(fillLight);
+
+// Stars
+(function addStars() {
+  const starGeo = new THREE.BufferGeometry();
+  const positions = [];
+  for (let i = 0; i < 700; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 0.45; // upper dome
+    const r = 380;
+    positions.push(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.cos(phi) + 5,
+      r * Math.sin(phi) * Math.sin(theta)
+    );
+  }
+  starGeo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0xcdd8ff, size: 1.4, sizeAttenuation: false, fog: false });
+  scene.add(new THREE.Points(starGeo, starMat));
+})();
+
+/* ---------------- Helpers ---------------- */
+function fieldPoint(angleDeg, radius, y = 0) {
+  const a = THREE.MathUtils.degToRad(angleDeg);
+  return new THREE.Vector3(radius * Math.cos(a), y, -radius * Math.sin(a));
+}
+
+/* ---------------- Field ---------------- */
+const field = new THREE.Group();
+scene.add(field);
+
+const grassMat = new THREE.MeshStandardMaterial({ color: 0x2e6b2c, roughness: 1 });
+const grass = new THREE.Mesh(new THREE.CircleGeometry(150, 64), grassMat);
+grass.rotation.x = -Math.PI / 2;
+grass.receiveShadow = true;
+field.add(grass);
+
+const dirtMat = new THREE.MeshStandardMaterial({ color: 0x8a6240, roughness: 1 });
+const dirtShape = new THREE.Shape();
+dirtShape.moveTo(0, 0);
+dirtShape.absarc(0, 0, 30, THREE.MathUtils.degToRad(35), THREE.MathUtils.degToRad(145), false);
+dirtShape.lineTo(0, 0);
+const dirtGeo = new THREE.ShapeGeometry(dirtShape, 48);
+dirtGeo.rotateX(-Math.PI / 2);
+const dirt = new THREE.Mesh(dirtGeo, dirtMat);
+dirt.position.y = 0.015;
+dirt.receiveShadow = true;
+field.add(dirt);
+
+const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+const plate = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.04, 0.43), whiteMat);
+plate.position.set(0, 0.02, 0);
+plate.receiveShadow = true;
+field.add(plate);
+
+function makeBase(angle, radius) {
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.38), whiteMat);
+  base.position.copy(fieldPoint(angle, radius, 0.02));
+  base.receiveShadow = true;
+  field.add(base);
+}
+makeBase(45, BASE_DIST);
+makeBase(135, BASE_DIST);
+makeBase(90, HOME_TO_2B);
+
+const mound = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 0.28, 28), dirtMat);
+mound.position.copy(fieldPoint(90, MOUND_DIST, 0.14));
+mound.receiveShadow = true;
+mound.castShadow = true;
+field.add(mound);
+
+const rubber = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, 0.15), whiteMat);
+rubber.position.copy(fieldPoint(90, MOUND_DIST, 0.3));
+field.add(rubber);
+
+function makeLine(pA, pB) {
+  const geo = new THREE.BufferGeometry().setFromPoints([pA, pB]);
+  const mat = new THREE.LineBasicMaterial({ color: 0xffffff });
+  return new THREE.Line(geo, mat);
+}
+field.add(makeLine(new THREE.Vector3(0, 0.03, 0), fieldPoint(45, FENCE_RADIUS, 0.03)));
+field.add(makeLine(new THREE.Vector3(0, 0.03, 0), fieldPoint(135, FENCE_RADIUS, 0.03)));
+
+function buildFence() {
+  const segments = 48;
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const angle = THREE.MathUtils.lerp(45, 135, t);
+    const base = fieldPoint(angle, FENCE_RADIUS, 0);
+    const top = fieldPoint(angle, FENCE_RADIUS, FENCE_HEIGHT);
+    positions.push(base.x, base.y, base.z, top.x, top.y, top.z);
+  }
+  for (let i = 0; i < segments; i++) {
+    const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
+    indices.push(a, b, c, b, d, c);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x14432a, roughness: 0.9, side: THREE.DoubleSide });
+  const fence = new THREE.Mesh(geo, mat);
+  fence.receiveShadow = true;
+  fence.castShadow = true;
+  return fence;
+}
+field.add(buildFence());
+
+const poleMat = new THREE.MeshStandardMaterial({ color: 0xffee00, emissive: 0x554d00 });
+[45, 135].forEach((angle) => {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 6, 10), poleMat);
+  pole.position.copy(fieldPoint(angle, FENCE_RADIUS, 3));
+  field.add(pole);
+});
+
+// Light towers (visual only)
+const towerMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3d });
+const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false });
+[[70, 108], [110, 108], [30, 70], [150, 70]].forEach(([angle, radius]) => {
+  const pos = fieldPoint(angle, radius, 0);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 24, 8), towerMat);
+  pole.position.set(pos.x, 12, pos.z);
+  field.add(pole);
+  const bank = new THREE.Mesh(new THREE.BoxGeometry(4.5, 2.2, 0.5), lampMat);
+  bank.position.set(pos.x, 24.5, pos.z);
+  bank.lookAt(0, 0, 0);
+  field.add(bank);
+});
+
+const backstopMat = new THREE.MeshStandardMaterial({
+  color: 0x0a0a0a,
+  transparent: true,
+  opacity: 0.55,
+  side: THREE.DoubleSide,
+});
+const backstop = new THREE.Mesh(new THREE.PlaneGeometry(18, 6), backstopMat);
+backstop.position.set(0, 3, 8.5);
+field.add(backstop);
+
+/* ---------------- Balls ---------------- */
+const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 16, 16);
+// Glowing white so it pops against the night sky
+const ballMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  emissive: 0xf0f4ff,
+  emissiveIntensity: 0.75,
+  roughness: 0.4,
+});
+
+function newBallMesh() {
+  const m = new THREE.Mesh(ballGeo, ballMat);
+  m.castShadow = true;
+  scene.add(m);
+  return m;
+}
+
+const activeBalls = [];
+// Balls at rest just stay in the scene forever — no cap, no cleanup.
+
+/* ---------------- Pitch state machine ---------------- */
+const PITCH_START = fieldPoint(90, MOUND_DIST, 2.1);
+const PITCH_END = new THREE.Vector3(0, 0.9, 0.4);
+
+let pitchBall = null;
+let pitchStartTime = 0;
+let state = "idle"; // "idle" | "pitching"
+let hits = 0;
+let flyMode = false;
+
+const hudEl = document.getElementById("hud");
+const messageEl = document.getElementById("message");
+const promptEl = document.getElementById("prompt");
+const flyBtn = document.getElementById("flyBtn");
+let messageTimer = null;
+
+function showMessage(text, ms = 1300) {
+  messageEl.textContent = text;
+  messageEl.style.opacity = "1";
+  clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => { messageEl.style.opacity = "0"; }, ms);
+}
+
+let pitchTimer = null;
+function schedulePitch(delay) {
+  clearTimeout(pitchTimer);
+  pitchTimer = setTimeout(startPitch, delay);
+}
+
+function startPitch() {
+  if (flyMode) return; // no pitching while flying
+  pitchBall = newBallMesh();
+  pitchBall.position.copy(PITCH_START);
+  pitchStartTime = performance.now();
+  state = "pitching";
+}
+
+function endPitch() {
+  if (pitchBall) {
+    scene.remove(pitchBall);
+    pitchBall = null;
+  }
+  state = "idle";
+  schedulePitch(900);
+}
+
+schedulePitch(800);
+
+/* ---------------- Fly mode ---------------- */
+// Orbit-style camera: drag to orbit, pinch to zoom.
+const orbit = {
+  target: new THREE.Vector3(0, 0, -45),
+  theta: Math.PI / 2,   // around Y
+  phi: 1.05,            // from vertical
+  radius: 120,
+};
+
+function applyOrbitCamera() {
+  const sinPhi = Math.sin(orbit.phi);
+  camera.position.set(
+    orbit.target.x + orbit.radius * sinPhi * Math.cos(orbit.theta),
+    orbit.target.y + orbit.radius * Math.cos(orbit.phi),
+    orbit.target.z + orbit.radius * sinPhi * Math.sin(orbit.theta)
+  );
+  camera.lookAt(orbit.target);
+}
+
+function enterFlyMode() {
+  flyMode = true;
+  flyBtn.classList.add("active");
+  flyBtn.textContent = "Back to batting";
+  promptEl.textContent = "Drag to orbit • Pinch to zoom";
+  promptEl.style.opacity = "0.85";
+  // cancel any pitch in progress
+  clearTimeout(pitchTimer);
+  if (pitchBall) {
+    scene.remove(pitchBall);
+    pitchBall = null;
+  }
+  state = "idle";
+  orbit.theta = Math.PI / 2;
+  orbit.phi = 1.05;
+  orbit.radius = 120;
+  applyOrbitCamera();
+}
+
+function exitFlyMode() {
+  flyMode = false;
+  flyBtn.classList.remove("active");
+  flyBtn.textContent = "Fly around";
+  promptEl.textContent = "Swipe through the ball to hit";
+  promptEl.style.opacity = "0.85";
+  camera.position.copy(BATTER_POS);
+  camera.lookAt(0, 1.3, -20);
+  schedulePitch(700);
+}
+
+flyBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  flyMode ? exitFlyMode() : enterFlyMode();
+});
+
+/* ---------------- Input ---------------- */
+let swipeStart = null;
+const touches = new Map();
+let lastPinchDist = 0;
+let lastDrag = null;
+
+function onPointerDown(e) {
+  if (e.target === flyBtn) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (flyMode) {
+    if (touches.size === 1) {
+      lastDrag = { x: e.clientX, y: e.clientY };
+    } else if (touches.size === 2) {
+      lastDrag = null;
+      const pts = [...touches.values()];
+      lastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    }
+  } else {
+    swipeStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+  }
+}
+
+function onPointerMove(e) {
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!flyMode) return;
+
+  if (touches.size === 1 && lastDrag) {
+    const dx = e.clientX - lastDrag.x;
+    const dy = e.clientY - lastDrag.y;
+    lastDrag = { x: e.clientX, y: e.clientY };
+    orbit.theta -= dx * 0.005;
+    orbit.phi = THREE.MathUtils.clamp(orbit.phi - dy * 0.004, 0.15, 1.45);
+    applyOrbitCamera();
+  } else if (touches.size === 2) {
+    const pts = [...touches.values()];
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if (lastPinchDist > 0) {
+      orbit.radius = THREE.MathUtils.clamp(orbit.radius * (lastPinchDist / d), 15, 220);
+      applyOrbitCamera();
+    }
+    lastPinchDist = d;
+  }
+}
+
+function onPointerUp(e) {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) lastPinchDist = 0;
+  if (touches.size === 0) lastDrag = null;
+
+  if (flyMode) return;
+  if (!swipeStart) return;
+  const start = { x: swipeStart.x, y: swipeStart.y };
+  const end = { x: e.clientX, y: e.clientY };
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dt = Math.max((performance.now() - swipeStart.t) / 1000, 0.02);
+  swipeStart = null;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 18) return;
+  attemptSwing(start, end, dx, dy, dist, dt);
+}
+
+window.addEventListener("pointerdown", onPointerDown);
+window.addEventListener("pointermove", onPointerMove);
+window.addEventListener("pointerup", onPointerUp);
+window.addEventListener("pointercancel", onPointerUp);
+
+/* ---------------- Swing ---------------- */
+/* Project a world position to 2D screen pixels. */
+function worldToScreen(pos) {
+  const v = pos.clone().project(camera);
+  return {
+    x: (v.x * 0.5 + 0.5) * window.innerWidth,
+    y: (-v.y * 0.5 + 0.5) * window.innerHeight,
+  };
+}
+
+function attemptSwing(start, end, dx, dy, dist, dt) {
+  promptEl.style.opacity = "0";
+  if (state !== "pitching" || !pitchBall) return;
+
+  // Timing window: the ball has to be near the plate to be hittable.
+  const progress = (performance.now() - pitchStartTime) / (PITCH_DURATION * 1000);
+  if (progress < 0.35) {
+    showMessage("Too early!");
+    return;
+  }
+
+  // --- "Swipe toward the ball" check ---
+  // Where is the ball on screen right now?
+  const ballScreen = worldToScreen(pitchBall.position);
+  // Direction of the swipe (normalized).
+  const swipeDirX = dx / dist;
+  const swipeDirY = dy / dist;
+  // Vector from swipe start to the ball.
+  const toBallX = ballScreen.x - start.x;
+  const toBallY = ballScreen.y - start.y;
+  const toBallLen = Math.hypot(toBallX, toBallY) || 1;
+  // How well does the swipe aim at the ball? (1 = dead on)
+  const aim = (swipeDirX * toBallX + swipeDirY * toBallY) / toBallLen;
+  // Closest distance from the ball to the swipe line.
+  const cross = Math.abs(swipeDirX * toBallY - swipeDirY * toBallX);
+
+  const aimedAtBall = aim > 0.55 && cross < 130;
+  if (!aimedAtBall) {
+    showMessage("Swing and a miss!");
+    return;
+  }
+
+  // --- Contact! Ball flies in the direction you swiped. ---
+  const speed = dist / dt; // px/sec
+  const powerT = THREE.MathUtils.clamp(speed / 3000, 0, 1);
+  const exitSpeed = THREE.MathUtils.lerp(20, 46, powerT);
+
+  // Horizontal swipe -> spray angle (left/right).
+  const sprayDeg = THREE.MathUtils.clamp(swipeDirX, -1, 1) * 45;
+  // Vertical swipe -> launch angle. Swipe up (dy negative) = higher.
+  const upness = THREE.MathUtils.clamp(-swipeDirY, -1, 1); // 1 = straight up
+  const launchDeg = THREE.MathUtils.lerp(3, 55, (upness + 1) / 2);
+
+  const angleRad = THREE.MathUtils.degToRad(launchDeg);
+  const sprayRad = THREE.MathUtils.degToRad(sprayDeg);
+  const horizSpeed = exitSpeed * Math.cos(angleRad);
+
+  const velocity = new THREE.Vector3(
+    horizSpeed * Math.sin(sprayRad),
+    exitSpeed * Math.sin(angleRad),
+    -horizSpeed * Math.cos(sprayRad)
+  );
+
+  activeBalls.push({
+    mesh: pitchBall,
+    velocity,
+    overFence: false,
+  });
+
+  pitchBall = null;
+  state = "idle";
+  hits++;
+  hudEl.textContent = "Hits: " + hits;
+  schedulePitch(1100);
+}
+
+/* ---------------- Physics ---------------- */
+function updatePhysics(dt) {
+  for (let i = activeBalls.length - 1; i >= 0; i--) {
+    const ball = activeBalls[i];
+
+    ball.velocity.y -= GRAVITY * dt;
+    ball.mesh.position.addScaledVector(ball.velocity, dt);
+
+    // ground collision
+    if (ball.mesh.position.y <= BALL_RADIUS) {
+      ball.mesh.position.y = BALL_RADIUS;
+      const movingFast =
+        Math.abs(ball.velocity.y) > 0.6 ||
+        Math.hypot(ball.velocity.x, ball.velocity.z) > 0.6;
+
+      if (movingFast) {
+        ball.velocity.y = -ball.velocity.y * RESTITUTION;
+        ball.velocity.x *= FRICTION;
+        ball.velocity.z *= FRICTION;
+      } else {
+        // Ball comes to rest and stays in the world permanently.
+        if (!ball.overFence) {
+          const d = Math.hypot(ball.mesh.position.x, ball.mesh.position.z);
+          showMessage("Nice hit! " + Math.round(d * 3.281) + " ft");
+        }
+        activeBalls.splice(i, 1);
+        continue;
+      }
+    }
+
+    // fence collision (balls below fence height bounce off; above = home run)
+    const dist = Math.hypot(ball.mesh.position.x, ball.mesh.position.z);
+    if (dist >= FENCE_RADIUS) {
+      if (ball.mesh.position.y < FENCE_HEIGHT && !ball.overFence) {
+        const nx = ball.mesh.position.x / dist;
+        const nz = ball.mesh.position.z / dist;
+        const vn = ball.velocity.x * nx + ball.velocity.z * nz;
+        ball.velocity.x -= 1.6 * vn * nx;
+        ball.velocity.z -= 1.6 * vn * nz;
+        const overshoot = dist - FENCE_RADIUS + 0.05;
+        ball.mesh.position.x -= nx * overshoot;
+        ball.mesh.position.z -= nz * overshoot;
+      } else if (!ball.overFence) {
+        ball.overFence = true;
+        showMessage("HOME RUN! \u{1F389}");
+      }
+    }
+  }
+}
+
+/* ---------------- Pitch animation ---------------- */
+function updatePitch() {
+  if (state !== "pitching" || !pitchBall) return;
+  const progress = (performance.now() - pitchStartTime) / (PITCH_DURATION * 1000);
+  if (progress >= 1) {
+    showMessage("Strike!");
+    endPitch();
+    return;
+  }
+  pitchBall.position.lerpVectors(PITCH_START, PITCH_END, progress);
+  pitchBall.position.y -= Math.sin(progress * Math.PI) * 0.25;
+}
+
+/* ---------------- Main loop ---------------- */
+let lastTime = performance.now();
+function animate(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+  updatePitch();
+  updatePhysics(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
