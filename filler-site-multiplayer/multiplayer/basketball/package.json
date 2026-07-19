@@ -1,0 +1,14 @@
+{
+  "name": "basketball-multiplayer",
+  "version": "1.0.0",
+  "description": "Two-player online basketball. Self-contained Node server (static files + WebSocket room relay) with zero runtime dependencies.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT"
+}
