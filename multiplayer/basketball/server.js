@@ -16,7 +16,7 @@ const path = require('path');
 const wslite = require('./ws-lite');
 const Rooms = require('./rooms');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3100;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const rooms = new Rooms({

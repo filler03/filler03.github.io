@@ -49,7 +49,7 @@ the two players. There's nothing to `npm install`.
 ```bash
 cd multiplayer/basketball
 node server.js
-# then open http://localhost:3000 in two tabs and use the same code
+# then open http://localhost:3100 in two tabs and use the same code
 ```
 
 Set a different port with `PORT`:
@@ -65,7 +65,20 @@ WebSocket protocol, then exits):
 node test-server.js
 ```
 
-## Deploy on the VPS (nginx + pm2)
+## Simplest deploy: link straight to the port (no nginx)
+
+You don't strictly need nginx. Run the app under pm2 on its port and open that port
+on the firewall, then link to `http://your-domain:3100/` from your site:
+
+```bash
+pm2 start ecosystem.config.js && pm2 save
+sudo ufw allow 3100/tcp
+```
+
+The reverse proxy below is the tidier option if your site is served over HTTPS (it
+keeps everything same-origin `https`/`wss`). See `DEPLOY.md` for the tradeoffs.
+
+## Deploy on the VPS (nginx + pm2, optional)
 
 This is built to live inside your existing site at `multiplayer/basketball/` and
 be reverse-proxied under `/multiplayer/basketball/` on your domain. Because the
@@ -76,7 +89,7 @@ page and the socket share an origin, an `https://` page automatically gets a
 
 ```bash
 cd /path/to/your-site/multiplayer/basketball
-PORT=3000 pm2 start server.js --name basketball-mp
+pm2 start ecosystem.config.js   # port is set to 3100 in ecosystem.config.js
 pm2 save
 ```
 
@@ -86,7 +99,7 @@ pm2 save
 
 ```nginx
 location /multiplayer/basketball/ {
-    proxy_pass http://127.0.0.1:3000/;   # trailing slash strips the path prefix
+    proxy_pass http://127.0.0.1:3100/;   # trailing slash strips the path prefix
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";

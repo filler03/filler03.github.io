@@ -1,55 +1,64 @@
 # FILLER site + Multiplayer — deploy bundle
 
-This bundle is laid out **exactly as it sits at your site's web root**. It's an
-*overlay* onto your existing site — it contains only the two things that change:
+Structure (drop these into your site's web root; your existing games/tools stay put):
 
 ```
-index.html                 ← updated homepage (adds a "Multiplayer" section)
+index.html          ← homepage; the Multiplayer link points straight at the game's port
 multiplayer/
-  basketball/              ← the new 2-player game (self-contained Node app)
-    server.js, ws-lite.js, rooms.js, package.json, public/index.html, ...
+  basketball/       ← the game (self-contained Node app, zero dependencies)
 ```
 
-Your existing `games/`, `tools/`, `test/`, etc. are **not** included — leave them
-where they are. Only drop these two items into the web root.
+## Deploy — no nginx proxy needed
 
-## Deploy
+1. Copy `index.html` (overwriting the old one) and the `multiplayer/` folder into your web root.
 
-1. **Copy** `index.html` (overwriting the old homepage) and the `multiplayer/`
-   folder into your site's web root on the VPS.
-
-2. **Start the game server** under pm2 (it has zero dependencies — nothing to
-   `npm install`):
+2. Start the game under pm2 (it runs on port **3100**, set in `ecosystem.config.js`):
 
    ```bash
    cd /path/to/your-site/multiplayer/basketball
-   PORT=3000 pm2 start server.js --name basketball-mp
+   pm2 start ecosystem.config.js
    pm2 save
    ```
 
-3. **Reverse-proxy it** by adding this to your site's `server { ... }` in nginx
-   (full explanation in `multiplayer/basketball/README.md`):
+3. Open port 3100 to the internet so people can reach the game directly:
 
-   ```nginx
-   location /multiplayer/basketball/ {
-       proxy_pass http://127.0.0.1:3000/;   # trailing slash strips the prefix
-       proxy_http_version 1.1;
-       proxy_set_header Upgrade $http_upgrade;
-       proxy_set_header Connection "upgrade";
-       proxy_set_header Host $host;
-       proxy_read_timeout 3600s;
-   }
+   ```bash
+   sudo ufw allow 3100/tcp        # if you use ufw
+   # also allow inbound TCP 3100 in any cloud/hPanel firewall your VPS has
    ```
 
-4. **Reload nginx:** `sudo nginx -t && sudo systemctl reload nginx`
+That's it. The homepage's Multiplayer button opens `http://<your-domain>:3100/` — the
+link fills in your domain automatically from whatever address the homepage is on. The
+game serves its own page **and** its WebSocket on that single port, so it's same-origin
+with no CORS and nothing for nginx to route.
 
-The homepage's Multiplayer button points at `/multiplayer/basketball/`, which nginx
-routes to the Node app. Static files (homepage, existing games) are still served
-directly by nginx.
+Verify the app is up:
+
+```bash
+curl -i http://127.0.0.1:3100/health     # expect 200  {"ok":true,...}
+```
+
+## If your site uses HTTPS, read this
+
+Hitting a raw port is plain HTTP, so on an HTTPS site the game page will show
+"Not secure" in the address bar. It still works — the game's WebSocket runs over
+`ws://` on that same port — but two things can bite:
+
+- Some browsers warn when navigating from an `https://` page to an `http://` one.
+- If your domain uses **HSTS**, the browser will force `https://…:3100` and fail,
+  because the app speaks HTTP (not HTTPS) on that port.
+
+If either happens, the clean fix is the nginx reverse proxy after all — it keeps
+everything same-origin HTTPS. That's documented in `multiplayer/basketball/README.md`;
+you'd also change the homepage link back to `/multiplayer/basketball/`.
+
+## Changing the port
+
+Set it in one place — `multiplayer/basketball/ecosystem.config.js` — and update the
+`:3100` in the link script at the bottom of `index.html` to match.
 
 ## Note
 
-The homepage is your existing file, unchanged except for the new Multiplayer
-section — including the pre-existing "Worms" link, which still points at
-`games/orbit/orbit.html` (looked like a typo for `games/worms/worms.html`, but I
-left your file as-is).
+Your homepage is unchanged except for the new Multiplayer section (the pre-existing
+"Worms" link still points at `games/orbit/orbit.html` — looked like a typo, but I left
+your file as-is).
