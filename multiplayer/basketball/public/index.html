@@ -241,6 +241,7 @@
     <button class="btn" id="playBtn" type="button">Play</button>
     <div class="err" id="menuErr"></div>
     <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. Swipe on the court to shoot.</p>
+    <p class="how" id="iosHint" style="display:none">On iPhone/iPad, tap <b>Share → Add to Home Screen</b>, then open it from there for true fullscreen.</p>
   </div>
 </div>
 
@@ -506,6 +507,21 @@ function tryLockLandscape() {
       screen.orientation.lock('landscape').catch(function () {});
     }
   } catch (e) { /* not supported here; the overlay covers it */ }
+}
+// Take over the screen on phones: go fullscreen (hides the browser chrome), then
+// lock landscape (the lock only "sticks" once we're fullscreen). No-op on desktop
+// and on iOS Safari, which has no in-browser fullscreen — there the home-screen
+// install (web manifest) is the path, hinted in the menu.
+function goImmersive() {
+  if (!isTouchDevice()) return;
+  try {
+    var el = document.documentElement;
+    var fn = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (!fn) return;
+    var p = fn.call(el);
+    if (p && p.then) p.then(function () { tryLockLandscape(); }).catch(function () {});
+    else tryLockLandscape();
+  } catch (e) { /* best-effort */ }
 }
 window.addEventListener('resize', checkOrientation);
 window.addEventListener('orientationchange', checkOrientation);
@@ -1207,6 +1223,7 @@ function startPlay() {
   var name = ($('nameInput').value || '').trim().slice(0, 20);
   var code = ($('codeInput').value || '').trim().toUpperCase();
   if (!code) { showMenuError('Enter a room code first.'); return; }
+  goImmersive();   // this tap is a user gesture, so fullscreen + landscape lock are allowed here
   net.name = name || 'Player'; net.code = code; net.token = '';
   net.reconnecting = false; net.manualClose = false; net.connecting = true; net.retries = 0;
   $('menuErr').textContent = '';
@@ -1264,6 +1281,14 @@ function loop(t) {
 function init() {
   resize();
   checkOrientation();
+  // iOS Safari can't go fullscreen from JS; point those users to Add to Home Screen.
+  try {
+    var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var standalone = window.navigator.standalone === true ||
+      (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches));
+    if (isIOS && !standalone) $('iosHint').style.display = 'block';
+  } catch (e) {}
   try { var nm = localStorage.getItem('bmp_name'); if (nm) $('nameInput').value = nm; } catch (e) {}
   showMenu();
   // Orientation lock usually needs a user gesture, so attempt it on first tap.
