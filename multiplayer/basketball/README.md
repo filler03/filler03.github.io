@@ -6,8 +6,8 @@ single-player basketball game — same swipe-to-shoot feel, scoring (1/2/3),
 shot clock, timed halves with a side swap at halftime, and a winner.
 
 It's a single self-contained Node app with **zero runtime dependencies**: one
-process serves the game's static files *and* relays the WebSocket traffic between
-the two players. There's nothing to `npm install`.
+process serves the game's static files, runs the game simulation, and streams it
+to both players over WebSocket. There's nothing to `npm install`.
 
 ## How it plays
 
@@ -20,29 +20,36 @@ the two players. There's nothing to `npm install`.
 
 ## Architecture (short version)
 
-- **Host-authoritative.** The host (role 1) runs the single physics simulation
-  for *both* players' shots on a fixed 60 Hz timestep, and streams the ball
-  position + game events to the joiner. The joiner renders what it receives and
-  sends only its swipe vector; the host validates it and applies it. This keeps
-  the two screens in agreement without lockstep.
-- **Fixed logical court.** Everything is computed in a 540×960 virtual court and
+- **Server-authoritative.** The Node server runs one physics simulation per match
+  on a fixed 60 Hz timestep (`game.js`) and streams the ball position + game
+  events to *both* players. Each client is a pure renderer: it draws what the
+  server sends and forwards only the player's swipe vector (`{t:'shot'}`), which
+  the server validates (right turn, ball grounded, speed clamped) before applying.
+  Both players see the same latency, nobody's phone can drag the other, and a
+  player backgrounding their screen no longer freezes the game.
+- **Leave & come back.** The reconnect token is saved in `localStorage`, so a
+  player can close the tab and reopen it within a 2-minute grace window and drop
+  straight back into the live match. A disconnect *pauses* the match (the seat is
+  held); reconnecting *resumes* it and resyncs full state. The **Leave/Exit**
+  buttons deliberately clear the saved session so they don't auto-rejoin.
+- **Fixed logical court.** Everything is computed in a 960×540 virtual court and
   then scaled + letterboxed to each device, so a phone and a laptop see the same
-  game. (This differs slightly from a "fit to the host's screen" approach — it's
-  cleaner and removes device-size drift.)
-- **Generic relay.** `rooms.js` knows nothing about basketball; it only does
-  matchmaking, presence, a 45-second reconnect grace window, and relaying
-  messages between the two peers. You can drop a different game client on top of
-  the same server.
+  game.
+- **Reverting.** The previous browser-authoritative (relay) version is preserved
+  in `_relay-backup/` — copy the three files back, `rm game.js`, and restart. See
+  `_relay-backup/REVERT.md`.
 
 ### Files
 
 | File               | Purpose                                                        |
 |--------------------|----------------------------------------------------------------|
-| `server.js`        | HTTP static server + WebSocket upgrade + heartbeat             |
+| `server.js`        | HTTP static server + WebSocket upgrade + heartbeat + physics tick |
 | `ws-lite.js`       | Minimal dependency-free WebSocket server (handshake + framing) |
-| `rooms.js`         | Matchmaking, presence, reconnect grace, message relay          |
+| `rooms.js`         | Matchmaking, presence, reconnect/resume, match lifecycle       |
+| `game.js`          | Server-side match: physics, scoring, clocks, broadcasts        |
 | `public/index.html`| The whole game client (HTML + CSS + JS, all inline)            |
 | `test-server.js`   | End-to-end test of the HTTP + WebSocket protocol               |
+| `_relay-backup/`   | Previous browser-authoritative version + revert instructions   |
 
 ## Run it locally
 

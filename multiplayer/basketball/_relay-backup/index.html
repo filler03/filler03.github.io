@@ -423,14 +423,13 @@ function handleControl(m) {
       net.role = m.role; net.token = m.token; net.code = m.roomCode;
       if (m.opponent) net.opponent = m.opponent;
       net.connecting = false;
-      saveSession();
       if (net.reconnecting) { handleReconnected(m); return; }
-      if (m.role === 1) { showWaiting(true); }        // seat 1: waiting room + settings
-      else { showWaiting(false); waitForStart(); }     // seat 2: seat 1 will start it
+      if (m.role === 1) { showWaiting(true); }        // host: wait + settings
+      else { showWaiting(false); waitForStart(); }     // joiner: host will start
       break;
     case 'peer-joined':
       net.opponent = m.name;
-      if (isHost() && !G) requestStart();              // seat 1 asks the server to start the match
+      if (isHost() && (!G || G.phase === 'menu')) hostStart();
       break;
     case 'peer-disconnected': onPeerDropped(); break;
     case 'peer-reconnected': onPeerBack(m); break;
@@ -446,8 +445,14 @@ function handleControl(m) {
   }
 }
 
-// The server runs the game; every client just renders what it sends.
 function handleGame(m) {
+  if (isHost()) {
+    if (m.t === 'shot') applyShot(2, m.vx, m.vy);
+    else if (m.t === 'rematch') hostRematch();
+    else if (m.t === 'aborted') showEnded('Your opponent left. Game ended.');
+    return;
+  }
+  // joiner
   switch (m.t) {
     case 'start': joinerStart(m); break;
     case 'resync': joinerResync(m); break;
@@ -456,6 +461,7 @@ function handleGame(m) {
     case 'turn': applyTurn(m); break;
     case 'evt': applyEvt(m); break;
     case 'phase': applyPhase(m); break;
+    case 'aborted': showEnded('The host left. Game ended.'); break;
   }
 }
 
@@ -521,21 +527,6 @@ function goImmersive() {
     else tryLockLandscape();
   } catch (e) { /* best-effort */ }
 }
-function isImmersive() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
-// Fullscreen can only be entered from a user gesture, so we can't silently force it
-// on reopen. Instead, since the game is touch-driven, the next touch during play
-// re-enters fullscreen + relocks landscape whenever we've dropped out of it (page
-// reopened via the saved session, Esc pressed, returned from halftime, etc.). It
-// runs in the capture phase and never calls preventDefault, so that same touch
-// still aims and shoots — the restore is invisible to the player.
-(function () {
-  var de = document.documentElement;
-  var canFullscreen = !!(de.requestFullscreen || de.webkitRequestFullscreen || de.msRequestFullscreen);
-  if (!canFullscreen) return;   // e.g. iOS Safari — home-screen install is its path (hinted in the menu)
-  document.addEventListener('pointerdown', function () {
-    if (isTouchDevice() && G && G.phase === 'playing' && !isImmersive()) goImmersive();
-  }, true);
-})();
 window.addEventListener('resize', checkOrientation);
 window.addEventListener('orientationchange', checkOrientation);
 function applyWorldTransform() { ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr); }
@@ -579,7 +570,8 @@ function onUp(e) {
   if (dist < 10) return;
   var power = Math.min(dist / 200, 1), speed = power * 55;
   var vx = dx / dist * speed, vy = dy / dist * speed;
-  send({ t: 'shot', vx: vx, vy: vy });
+  if (isHost()) applyShot(1, vx, vy);
+  else send({ t: 'shot', vx: vx, vy: vy });
 }
 canvas.addEventListener('mousedown', onDown);
 canvas.addEventListener('mousemove', onDrag);
@@ -589,11 +581,185 @@ canvas.addEventListener('touchmove', onDrag, { passive: false });
 canvas.addEventListener('touchend', onUp, { passive: false });
 canvas.addEventListener('touchcancel', function () { drag.active = false; });
 
+// ============================================================
+//  Host: authoritative simulation
+// ============================================================
+function applyShot(player, vx, vy) {
+  if (!isHost() || !G) return;
+  if (G.phase !== 'playing' || G.currentPlayer !== player || !G.ball.grounded || G.waitingForNextTurn) return;
+  var c = clampSpeed(vx, vy); vx = c[0]; vy = c[1];
+  var b = G.ball;
+  b.vx = vx; b.vy = vy; b.angularVel = vx * 0.05; b.grounded = false;
+  G.shotClockActive = false; G.scoredThisShot = false; G.wentThroughBelow = false; G.shotOriginX = b.x;
+  G.players[player].shots++;
+  spawnShotFx(b.x, b.y, COLORS[player]);
+  send({ t: 'evt', k: 'shot', x: Math.round(b.x), y: Math.round(b.y), c: COLORS[player] });
+  sendState();
+}
 
-// ============================================================
-//  Physics now runs on the SERVER (see game.js). This client only renders what
-//  the server streams and forwards the player's swipe as { t:'shot' }.
-// ============================================================
+function hostStep() {
+  if (!G || G.phase !== 'playing') return;
+  var b = G.ball, sp = G.options.speed, bnc = G.options.bounce;
+  if (b.grounded) return;
+  b.vy += GRAVITY * sp;
+  b.vx *= Math.pow(AIR, sp); b.vy *= Math.pow(AIR, sp);
+  var prevY = b.y;
+  b.x += b.vx * sp; b.y += b.vy * sp;
+  b.rot += b.angularVel * sp; b.angularVel *= 0.99;
+  G.lastBallY = prevY;
+  checkHoop(hoopLeft); checkHoop(hoopRight);
+  if (b.y + BALL_R > FLOOR_Y) {
+    b.y = FLOOR_Y - BALL_R; b.vy *= -bnc; b.vx *= FRICTION; b.angularVel = b.vx * 0.03;
+    if (Math.abs(b.vy) < 1 && Math.abs(b.vx) < 0.5) { b.vx = 0; b.vy = 0; b.grounded = true; onBallGrounded(); }
+    else { sendBall(true, true); }   // stream the exact floor-contact point so the joiner's bounce lands on the floor
+  }
+  if (b.x - BALL_R < 0) { b.x = BALL_R; b.vx *= -bnc; sendBall(true, true); }
+  if (b.x + BALL_R > WORLD_W) { b.x = WORLD_W - BALL_R; b.vx *= -bnc; sendBall(true, true); }
+}
+
+function checkHoop(hoop) {
+  var b = G.ball;
+  var rimLeftX = hoop.side === 'left' ? hoop.x : hoop.x - HOOP_W;
+  var rimRightX = hoop.side === 'left' ? hoop.x + HOOP_W : hoop.x;
+  var rims = [[rimLeftX, hoop.y], [rimRightX, hoop.y]];
+  for (var i = 0; i < rims.length; i++) {
+    var rx = rims[i][0], ry = rims[i][1];
+    var dx = b.x - rx, dy = b.y - ry, d = Math.hypot(dx, dy), md = BALL_R + RIM_R;
+    if (d < md && d > 0) {
+      var nx = dx / d, ny = dy / d, ov = md - d;
+      b.x += nx * ov; b.y += ny * ov;
+      var dot = b.vx * nx + b.vy * ny;
+      b.vx = (b.vx - 2 * dot * nx) * G.options.bounce;
+      b.vy = (b.vy - 2 * dot * ny) * G.options.bounce;
+      b.angularVel = b.vx * 0.03;
+      spawnRimFx(rx, ry);
+      send({ t: 'evt', k: 'rim', x: Math.round(rx), y: Math.round(ry) });
+    }
+  }
+  if (!G.scoredThisShot) {
+    var inX = b.x > rimLeftX && b.x < rimRightX;
+    var crossedDown = G.lastBallY <= hoop.y && b.y > hoop.y;
+    var crossedUp = G.lastBallY >= hoop.y && b.y < hoop.y;
+    var correct = hoop.side === targetHoop(G.currentPlayer);
+    if (inX && crossedUp && b.vy < 0 && correct) G.wentThroughBelow = true;
+    if (inX && crossedDown && b.vy > 0 && correct) {
+      var pts = G.wentThroughBelow ? 1 : (isThree(G.shotOriginX, hoop.side) ? 3 : 2);
+      G.players[G.currentPlayer].score += pts;
+      G.players[G.currentPlayer].made++;
+      G.scoredThisShot = true;
+      var cx = hoop.side === 'left' ? hoop.x + HOOP_W / 2 : hoop.x - HOOP_W / 2;
+      var py = hoop.y + 60;
+      spawnScoreFx(b.x, b.y, cx, py, pts, COLORS[G.currentPlayer]);
+      send({ t: 'evt', k: 'score', x: Math.round(b.x), y: Math.round(b.y), px: Math.round(cx), py: Math.round(py), pts: pts, c: COLORS[G.currentPlayer] });
+      sendState();
+    }
+  }
+}
+
+function onBallGrounded() {
+  if (G.initialDrop) {
+    G.initialDrop = false; G.shotClockActive = true;
+    G.lastClock = now(); G.lastGameClock = now();
+    sendState();
+  } else if (!G.waitingForNextTurn) {
+    G.waitingForNextTurn = true;
+    sendBall(true);
+    sendState();               // let the joiner know the shot resolved (no re-shoot in this gap)
+    setTimeout(switchTurn, 800);
+  }
+}
+
+function switchTurn() {
+  if (!G || G.phase !== 'playing') return;
+  G.currentPlayer = G.currentPlayer === 1 ? 2 : 1;
+  G.scoredThisShot = false; G.waitingForNextTurn = false;
+  G.shotClock = G.options.shotClock; G.lastClock = now(); G.shotClockActive = true;
+  sendTurn(); sendState();
+}
+
+function updateClocks() {
+  var t = now();
+  if (G.shotClockActive && G.ball.grounded && G.phase === 'playing') {
+    var el = (t - G.lastClock) / 1000;
+    if (el >= 1) {
+      G.shotClock -= Math.floor(el); G.lastClock = t;
+      if (G.shotClock <= 0) {
+        G.shotClock = 0; G.shotClockActive = false;
+        G.players[G.currentPlayer].turnovers++;
+        showTurnover(G.currentPlayer);
+        send({ t: 'evt', k: 'turnover', p: G.currentPlayer });
+        G.waitingForNextTurn = true; sendState();
+        setTimeout(function () { hideTurnover(); switchTurn(); }, 1000);
+      } else { sendState(); }
+    }
+  }
+  if (G.phase === 'playing' && !G.initialDrop) {
+    var el2 = (t - G.lastGameClock) / 1000;
+    if (el2 >= 1) { G.gameTimer -= Math.floor(el2); G.lastGameClock = t; if (G.gameTimer < 0) G.gameTimer = 0; sendState(); }
+    if (G.gameTimer <= 0 && G.ball.grounded && !G.waitingForNextTurn) {
+      if (G.half === 1) hostHalftime(); else hostGameOver();
+    }
+  }
+}
+
+function hostHalftime() {
+  G.phase = 'halftime'; G.shotClockActive = false;
+  sendPhase('halftime'); showHalftime();
+  setTimeout(hostSecondHalf, 4500);
+}
+function hostSecondHalf() {
+  if (!G) return;
+  G.half = 2; G.phase = 'playing'; G.sidesSwapped = true;
+  G.gameTimer = G.options.halfLength; G.currentPlayer = 2;
+  G.initialDrop = true; G.waitingForNextTurn = false; G.shotClockActive = false;
+  particles = []; popups = []; dropBall();
+  hideHalftime(); showGameUI();
+  sendPhase('second'); sendState(); sendBall(true);
+}
+function hostGameOver() {
+  G.phase = 'gameover'; G.shotClockActive = false;
+  sendPhase('gameover'); showGameOver();
+}
+
+function hostRematch() {
+  if (!G) return;
+  var opts = G.options, p1 = G.names[1], p2 = G.names[2];
+  G = newGame(opts, p1, p2);
+  particles = []; popups = []; turnover.active = false; hostAcc = 0;
+  dropBall();
+  hideOverlays(); showGameUI();
+  send({ t: 'start', o: opts, p1: p1, p2: p2 });
+  sendState(); sendBall(true);
+}
+
+// ---- broadcast helpers (host -> joiner) ----
+function sendBall(force, contact) {
+  if (!isHost()) return;
+  var t = now();
+  if (!force && t - lastBallSent < 33) return;
+  lastBallSent = t;
+  var b = G.ball;
+  var m = { t: 'ball', x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.rot * 100) / 100, g: b.grounded ? 1 : 0 };
+  if (contact) m.f = 1;   // exact bounce point — the joiner snaps to it instead of interpolating short
+  send(m);
+}
+function stateObj() {
+  var p = G.players;
+  return {
+    s1: p[1].score, s2: p[2].score, h1: p[1].shots, h2: p[2].shots,
+    m1: p[1].made, m2: p[2].made, o1: p[1].turnovers, o2: p[2].turnovers,
+    cp: G.currentPlayer, sc: G.shotClock, gt: G.gameTimer, hf: G.half,
+    sw: G.sidesSwapped ? 1 : 0, gr: G.ball.grounded ? 1 : 0, wn: G.waitingForNextTurn ? 1 : 0, ph: G.phase
+  };
+}
+function sendState() { if (isHost()) send(Object.assign({ t: 'state' }, stateObj())); }
+function sendTurn() { if (isHost()) send({ t: 'turn', cp: G.currentPlayer, sc: G.shotClock, gt: G.gameTimer }); }
+function sendPhase(ph) { if (isHost()) send({ t: 'phase', ph: ph, cp: G.currentPlayer, gt: G.gameTimer, hf: G.half, sw: G.sidesSwapped ? 1 : 0 }); }
+function sendResync() {
+  if (!isHost() || !G) return;
+  var b = G.ball;
+  send({ t: 'resync', o: G.options, p1: G.names[1], p2: G.names[2], st: stateObj(), ball: { x: Math.round(b.x), y: Math.round(b.y), r: b.rot, g: b.grounded ? 1 : 0 } });
+}
 
 // ============================================================
 //  Joiner: apply authoritative updates
@@ -893,7 +1059,6 @@ function showMenu() {
   setPill(false);
 }
 function showMenuError(msg) {
-  clearSession();
   hideGameUI(); resetPlayButton();
   $('waiting').classList.add('hidden');
   $('menu').classList.remove('hidden');
@@ -939,7 +1104,7 @@ function showGameOver() {
   else if (s2 > s1) { w.style.color = COLORS[2]; w.textContent = '\ud83c\udfc6 ' + G.names[2] + ' wins'; }
   else { w.style.color = 'var(--amber)'; w.textContent = "It\u2019s a tie"; }
   $('gameoverStatus').textContent = '';
-  $('rematchBtn').textContent = 'Rematch';
+  $('rematchBtn').textContent = isHost() ? 'Rematch' : 'Ask for rematch';
 }
 
 function showMsg(title, body, showBtn) {
@@ -950,7 +1115,6 @@ function showMsg(title, body, showBtn) {
 function hideMsg() { $('msg').classList.add('hidden'); }
 function showReconnecting(text) { showMsg('Reconnecting', text || 'Trying to reconnect\u2026', false); setPill('warn'); }
 function showEnded(msg) {
-  clearSession();
   net.manualClose = true; net.reconnecting = false; try { if (net.ws) net.ws.close(); } catch (e) {}
   net.ws = null; net.connected = false; G = null;
   hideGameUI(); hideOverlays();
@@ -985,6 +1149,7 @@ function restoreScreen() {
 function onClose() {
   if (net.manualClose) return;
   if (net.connecting && !net.reconnecting) { net.connecting = false; showMenuError('Could not reach the server. Try again.'); return; }
+  if (isHost() && G) G.pausedByPeer = true;
   if (inGame() || inLobby()) {
     net.reconnecting = true;
     showReconnecting('Connection lost \u2014 reconnecting\u2026');
@@ -1003,43 +1168,34 @@ function tryReconnect() {
 }
 function handleReconnected(m) {
   net.reconnecting = false; net.retries = 0; net.connecting = false;
-  if (!m.reconnect) {
-    // Our seat expired (grace ran out). The server just handed us a fresh, empty
-    // seat we didn't ask for — release it and go back to a clean menu.
-    clearSession();
-    try { send({ t: 'leave' }); } catch (e) {}
-    if (inGame()) { showEnded('Too much time passed \u2014 that game has ended. Start a new one.'); }
-    else { closeSocket(); showMenu(); }
-    return;
-  }
+  if (!m.reconnect) { showEnded('Too much time passed \u2014 the game ended. Start a new one.'); return; }
   net.role = m.role; net.token = m.token || net.token; net.code = m.roomCode;
   if (m.opponent) net.opponent = m.opponent;
-  saveSession();
-  if (m.match) {
-    // A game is live; the server sends a resync right after this, which rebuilds
-    // our state and calls restoreScreen(). Show a brief "rejoining" state.
-    showReconnecting('Rejoining game\u2026'); setPill('warn');
+  if (inGame()) {
+    if (isHost()) { G.pausedByPeer = false; resumeClocks(); sendResync(); }
+    restoreScreen(); setPill(false);
   } else {
-    // Reconnected while still in the lobby (match hadn't started).
-    showWaiting(net.role === 1); setPill(true);
+    // reconnected while still in the lobby
+    if (isHost() && m.opponent) { net.opponent = m.opponent; hostStart(); }
+    else { showWaiting(net.role === 1); }
+    setPill(true);
   }
 }
 function onPeerDropped() {
+  if (isHost() && G) G.pausedByPeer = true;
   if (inGame()) { showReconnecting('Opponent disconnected \u2014 waiting for them to return\u2026'); setPill('warn'); }
 }
 function onPeerBack(m) {
   if (m && m.name) net.opponent = m.name;
-  // The server resumes + resyncs the match itself; we just restore our view.
+  if (isHost() && G) { G.pausedByPeer = false; resumeClocks(); sendResync(); }
   if (inGame()) { restoreScreen(); setPill(false); }
 }
-function onPeerLeftForGood() { clearSession(); showEnded('Your opponent left the game.'); }
+function onPeerLeftForGood() { showEnded('Your opponent left the game.'); }
 
-// Leave the current match: tell the server (which frees our seat and notifies the
-// opponent immediately), forget the saved session so we don't auto-rejoin, and go
-// back to the menu without triggering our own reconnect.
+// Leave the current match: tell the opponent (so they aren't stuck waiting out the
+// reconnect grace), close without triggering our own auto-reconnect, go to menu.
 function leaveGame() {
-  try { send({ t: 'leave' }); } catch (e) {}
-  clearSession();
+  try { send({ t: 'aborted' }); } catch (e) {}
   closeSocket();
   showMenu();
 }
@@ -1080,25 +1236,27 @@ function startPlay() {
   var b = $('playBtn'); b.textContent = 'Connecting\u2026'; b.disabled = true;
   connect(function () { send({ type: 'join', code: net.code, name: net.name }); });
 }
-// Seat 1 asks the server to start the match with the chosen settings. The server
-// creates the match and broadcasts 'start' to BOTH clients, so we don't build any
-// game state here — joinerStart (triggered by that 'start') sets it up for everyone.
-function requestStart() {
+function hostStart() {
   var opts = { speed: setState.speed, shotClock: Math.round(setState.shotClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce };
-  send({ t: 'start', o: opts });
+  G = newGame(opts, net.name, net.opponent);
+  particles = []; popups = []; turnover.active = false; hostAcc = 0;
+  dropBall();
+  hideOverlays(); showGameUI(); setPill(false);
+  send({ t: 'start', o: opts, p1: net.name, p2: net.opponent });
+  sendState(); sendBall(true);
 }
 
 $('playBtn').addEventListener('click', startPlay);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
-$('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
-$('exitBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
+$('cancelBtn').addEventListener('click', function () { closeSocket(); showMenu(); });
+$('exitBtn').addEventListener('click', function () { try { send({ t: 'aborted' }); } catch (e) {} closeSocket(); showMenu(); });
 $('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });
 $('confirmLeaveNo').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); });
 $('confirmLeaveYes').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); leaveGame(); });
-$('msgBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
+$('msgBtn').addEventListener('click', function () { closeSocket(); showMenu(); });
 $('rematchBtn').addEventListener('click', function () {
-  send({ t: 'rematch' });
-  $('gameoverStatus').textContent = 'Restarting\u2026';
+  if (isHost()) hostRematch();
+  else { send({ t: 'rematch' }); $('gameoverStatus').textContent = 'Waiting for the host to restart\u2026'; }
 });
 $('codeInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') startPlay(); });
 $('nameInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('codeInput').focus(); });
@@ -1109,36 +1267,21 @@ $('nameInput').addEventListener('keydown', function (e) { if (e.key === 'Enter')
 var lastFrame = performance.now();
 function loop(t) {
   var dt = (t - lastFrame) / 1000; lastFrame = t;
-  if (G) lerpBall();          // smooth toward the server's latest ball position
+  if (isHost() && G && G.phase === 'playing' && !G.pausedByPeer && net.connected) {
+    hostAcc += Math.min(dt, 0.1);
+    var guard = 0;
+    while (hostAcc >= STEP && guard < 8) { hostStep(); hostAcc -= STEP; guard++; }
+    if (hostAcc > STEP) hostAcc = 0;
+    updateClocks();
+    if (!G.ball.grounded) sendBall(false);
+    if (t - lastHeartbeat > 1000) { lastHeartbeat = t; sendState(); }
+  }
+  if (!isHost() && G) lerpBall();
   updateFx(dt);
   render();
   if (G) updateHud();
   requestAnimationFrame(loop);
 }
-
-// ============================================================
-//  Session persistence (leave & come back)
-// ============================================================
-// We remember the room code + reconnect token in localStorage. If the page is
-// closed and reopened within the server's grace window, we auto-rejoin the live
-// match. The "Leave"/"Exit"/"Back" buttons clear this so they DON'T auto-rejoin.
-var SESSION_KEY = 'bmp_session';
-var SESSION_TTL = 130000;   // a touch longer than the server's 120s grace
-function saveSession() {
-  if (!net.token || !net.code) return;
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ code: net.code, name: net.name, token: net.token, role: net.role, ts: now() })); } catch (e) {}
-}
-function loadSession() {
-  try {
-    var s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
-    if (s && s.token && s.code && (now() - (s.ts || 0)) < SESSION_TTL) return s;
-  } catch (e) {}
-  return null;
-}
-function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
-// Keep the timestamp fresh while we're in a session, so reopening soon after
-// closing still lands inside the grace window.
-setInterval(function () { if (net.token && net.code && !net.manualClose) saveSession(); }, 10000);
 
 function init() {
   resize();
@@ -1152,18 +1295,7 @@ function init() {
     if (isIOS && !standalone) $('iosHint').style.display = 'block';
   } catch (e) {}
   try { var nm = localStorage.getItem('bmp_name'); if (nm) $('nameInput').value = nm; } catch (e) {}
-
-  var sess = loadSession();
-  if (sess) {
-    // We were in a game recently — try to drop back in.
-    net.name = sess.name || 'Player'; net.code = sess.code; net.token = sess.token; net.role = sess.role || 0;
-    net.reconnecting = true; net.manualClose = false; net.retries = 0;
-    showReconnecting('Rejoining game\u2026'); setPill('warn');
-    connect(function () { send({ type: 'join', code: net.code, name: net.name, token: net.token }); });
-  } else {
-    showMenu();
-  }
-
+  showMenu();
   // Orientation lock usually needs a user gesture, so attempt it on first tap.
   window.addEventListener('pointerdown', function once() {
     tryLockLandscape();

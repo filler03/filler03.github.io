@@ -25,7 +25,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const rooms = new Rooms({
   max: 2,
-  graceMs: 120000, // hold the seat (and the paused match) for 2 min so a player can close the tab and reopen
+  graceMs: 45000, // keep a seat warm this long after a drop, for reconnects
   log: (...args) => console.log('[rooms]', ...args),
 });
 
@@ -115,18 +115,6 @@ server.on('upgrade', (req, socket, head) => {
 // Drop dead sockets (and trigger the reconnect grace window) roughly every 25s.
 const heartbeat = setInterval(() => rooms.heartbeat(), 25000);
 if (heartbeat.unref) heartbeat.unref();
-
-// Physics tick: step every active match ~60x/sec. Each match uses a fixed-timestep
-// accumulator internally, so a little jitter in this interval is fine.
-let lastTick = Date.now();
-const tick = setInterval(() => {
-  const t = Date.now();
-  const dt = t - lastTick;
-  lastTick = t;
-  const list = rooms.matches();
-  for (let i = 0; i < list.length; i++) list[i].step(dt);
-}, 1000 / 60);
-if (tick.unref) tick.unref();
 
 server.listen(PORT, HOST, () => {
   console.log('Basketball multiplayer server listening on ' + HOST + ':' + PORT);
