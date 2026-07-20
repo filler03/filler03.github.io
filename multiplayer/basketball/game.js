@@ -11,6 +11,10 @@ var BALL_R = 18, HOOP_W = 60, RIM_R = 5;
 var GRAVITY = 0.55, AIR = 0.997, FRICTION = 0.98;
 var STEP = 1 / 60;                 // fixed physics timestep
 var MAX_SHOT_SPEED = 60;           // clamp against bad/malicious input
+// How often the server streams the ball position while it's moving, in ms.
+// Lower = smoother on the client (more updates), at a tiny bandwidth cost.
+// ~16ms ≈ 60/sec (one per physics tick); 33ms ≈ 30/sec. Tune to taste.
+var BALL_SEND_MS = 16;
 var COLORS = { 1: '#ff6b6b', 2: '#4a9eff' };
 var DEFAULTS = { speed: 1.1, shotClock: 10, halfLength: 60, bounce: 0.7 };
 
@@ -264,7 +268,7 @@ class Match {
   // ---- broadcast ----
   sendBall(force, contact) {
     var t = now();
-    if (!force && t - this.lastBallSent < 33) return;
+    if (!force && t - this.lastBallSent < BALL_SEND_MS) return;
     this.lastBallSent = t;
     var b = this.ball;
     var m = { t: 'ball', x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.rot * 100) / 100, g: b.grounded ? 1 : 0 };

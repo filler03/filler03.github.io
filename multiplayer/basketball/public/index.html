@@ -698,10 +698,16 @@ function applyPhase(m) {
     G.phase = 'playing'; particles = []; popups = []; G._gotBall = false; hideHalftime(); showGameUI();
   } else if (m.ph === 'gameover') { G.phase = 'gameover'; showGameOver(); }
 }
-function lerpBall() {
+// How tightly the rendered ball tracks the server's latest position, per 60fps
+// frame (0..1). Higher = snappier/more responsive but shows jitter more; lower =
+// smoother but laggier. Made frame-rate independent below so it feels the same
+// whether the device runs at 30, 60, or 120 fps.
+var BALL_SMOOTH = 0.5;
+function lerpBall(dt) {
   if (!G || !G.ballTarget) return;
   var b = G.ball, tg = G.ballTarget;
-  b.x += (tg.x - b.x) * 0.35; b.y += (tg.y - b.y) * 0.35; b.rot = tg.r;
+  var k = 1 - Math.pow(1 - BALL_SMOOTH, Math.max(0, dt) * 60);   // dt-normalized to 60fps
+  b.x += (tg.x - b.x) * k; b.y += (tg.y - b.y) * k; b.rot = tg.r;
   if (tg.g && Math.abs(tg.x - b.x) < 0.6 && Math.abs(tg.y - b.y) < 0.6) { b.x = tg.x; b.y = tg.y; }
 }
 
@@ -1165,7 +1171,7 @@ $('nameInput').addEventListener('keydown', function (e) { if (e.key === 'Enter')
 var lastFrame = performance.now();
 function loop(t) {
   var dt = (t - lastFrame) / 1000; lastFrame = t;
-  if (G) lerpBall();          // smooth toward the server's latest ball position
+  if (G) lerpBall(dt);        // smooth toward the server's latest ball position
   updateFx(dt);
   render();
   if (G) updateHud();
