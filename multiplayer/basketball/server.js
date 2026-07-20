@@ -17,6 +17,10 @@ const wslite = require('./ws-lite');
 const Rooms = require('./rooms');
 
 const PORT = process.env.PORT || 3100;
+// Bind to localhost by default: only the reverse proxy (nginx, same machine) can
+// reach it, so the app is NOT exposed directly on its port to the internet.
+// Set HOST=0.0.0.0 to expose it directly (e.g. running without a proxy).
+const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const rooms = new Rooms({
@@ -112,7 +116,7 @@ server.on('upgrade', (req, socket, head) => {
 const heartbeat = setInterval(() => rooms.heartbeat(), 25000);
 if (heartbeat.unref) heartbeat.unref();
 
-server.listen(PORT, () => {
-  console.log('Basketball multiplayer server listening on port ' + PORT);
+server.listen(PORT, HOST, () => {
+  console.log('Basketball multiplayer server listening on ' + HOST + ':' + PORT);
   console.log('Serving ' + PUBLIC_DIR);
 });

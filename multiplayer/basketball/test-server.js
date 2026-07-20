@@ -183,7 +183,7 @@ const child = spawn(process.execPath, ['server.js'], {
 let ready = false;
 child.stdout.on('data', (d) => {
   process.stdout.write('[server] ' + d);
-  if (!ready && /listening on port/i.test(d.toString())) {
+  if (!ready && /listening on/i.test(d.toString())) {
     ready = true;
     run()
       .then((success) => {
