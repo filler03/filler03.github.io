@@ -1,0 +1,11 @@
+{
+  "name": "Basketball Multiplayer",
+  "short_name": "Hoops",
+  "description": "Two-player online basketball.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b1622",
+  "theme_color": "#0b1622"
+}

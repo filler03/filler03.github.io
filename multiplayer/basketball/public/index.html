@@ -4,6 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#0b1622" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="manifest" href="manifest.webmanifest" />
 <title>Basketball · Multiplayer</title>
 <style>
   :root {
@@ -174,6 +178,35 @@
   @media (prefers-reduced-motion: reduce) {
     .waiting-dots::after, #pill.warn .dot { animation: none; }
   }
+  #leaveBtn {
+    position: absolute;
+    left: max(10px, env(safe-area-inset-left));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    pointer-events: auto;
+    background: rgba(6,14,22,0.72);
+    border: 1px solid var(--glass-line);
+    color: var(--muted);
+    font: 600 12px/1 system-ui, -apple-system, sans-serif;
+    padding: 9px 15px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  #leaveBtn:active { transform: scale(0.96); }
+  #rotate {
+    z-index: 60;
+    background: var(--court);
+    flex-direction: column;
+    text-align: center;
+  }
+  #rotate .rot-icon {
+    font-size: 64px;
+    margin-bottom: 10px;
+    animation: rotatehint 2.2s ease-in-out infinite;
+  }
+  @keyframes rotatehint {
+    0%, 35% { transform: rotate(0deg); }
+    55%, 100% { transform: rotate(-90deg); }
+  }
 </style>
 </head>
 <body>
@@ -187,6 +220,7 @@
     <div class="pcard p2" id="p2card"><span class="pname" id="p2name">Player 2</span><span class="pscore" id="p2score">0</span></div>
   </div>
   <div id="turnhint"></div>
+  <button id="leaveBtn" type="button">Leave</button>
 </div>
 
 <div id="pill"><span class="dot"></span><span id="pilltext">Connected</span></div>
@@ -260,6 +294,23 @@
   </div>
 </div>
 
+<!-- confirm leaving mid-game -->
+<div class="overlay hidden" id="confirmLeave">
+  <div class="card" style="text-align:center">
+    <h1 class="title" style="font-size:24px">Leave the game?</h1>
+    <p class="sub" style="margin-bottom:18px">Your opponent will be sent back to the menu.</p>
+    <button class="btn" id="confirmLeaveYes" type="button" style="background:linear-gradient(135deg,#ff5b5b,#c62828);color:#fff;box-shadow:0 10px 24px rgba(198,40,40,0.32)">Leave game</button>
+    <button class="btn ghost" id="confirmLeaveNo" type="button">Keep playing</button>
+  </div>
+</div>
+
+<!-- shown on phones held in portrait -->
+<div class="overlay hidden" id="rotate">
+  <div class="rot-icon">📱</div>
+  <h1 class="title" style="font-size:24px">Rotate your device</h1>
+  <p class="sub">This game plays in landscape — turn your phone sideways.</p>
+</div>
+
 <script>
 "use strict";
 // ============================================================
@@ -274,7 +325,7 @@
 var $ = function (id) { return document.getElementById(id); };
 
 // ---- fixed logical court + physics (ported from the single-player game) ----
-var WORLD_W = 540, WORLD_H = 960;
+var WORLD_W = 960, WORLD_H = 540;   // fixed logical court, landscape 16:9 (everyone renders this, letterboxed)
 var FLOOR_Y = WORLD_H - 90;
 var BALL_R = 18, HOOP_W = 60, RIM_R = 5, NET_H = 30;
 var GRAVITY = 0.55, AIR = 0.997, FRICTION = 0.98;
@@ -436,6 +487,28 @@ function resize() {
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
 }
 window.addEventListener('resize', resize);
+
+// --- landscape enforcement ---
+// A real orientation lock only works on some browsers (Android/Chrome in
+// fullscreen; iOS Safari not at all), so the reliable path is a "rotate your
+// device" overlay on phones held in portrait. The manifest handles the hard
+// lock when the game is installed to the home screen.
+function isTouchDevice() {
+  return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || ('ontouchstart' in window);
+}
+function checkOrientation() {
+  var portrait = window.innerHeight > window.innerWidth;
+  $('rotate').classList.toggle('hidden', !(portrait && isTouchDevice()));
+}
+function tryLockLandscape() {
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(function () {});
+    }
+  } catch (e) { /* not supported here; the overlay covers it */ }
+}
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', checkOrientation);
 function applyWorldTransform() { ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr); }
 function screenToWorld(cx, cy) {
   var r = canvas.getBoundingClientRect();
@@ -518,9 +591,10 @@ function hostStep() {
   if (b.y + BALL_R > FLOOR_Y) {
     b.y = FLOOR_Y - BALL_R; b.vy *= -bnc; b.vx *= FRICTION; b.angularVel = b.vx * 0.03;
     if (Math.abs(b.vy) < 1 && Math.abs(b.vx) < 0.5) { b.vx = 0; b.vy = 0; b.grounded = true; onBallGrounded(); }
+    else { sendBall(true, true); }   // stream the exact floor-contact point so the joiner's bounce lands on the floor
   }
-  if (b.x - BALL_R < 0) { b.x = BALL_R; b.vx *= -bnc; }
-  if (b.x + BALL_R > WORLD_W) { b.x = WORLD_W - BALL_R; b.vx *= -bnc; }
+  if (b.x - BALL_R < 0) { b.x = BALL_R; b.vx *= -bnc; sendBall(true, true); }
+  if (b.x + BALL_R > WORLD_W) { b.x = WORLD_W - BALL_R; b.vx *= -bnc; sendBall(true, true); }
 }
 
 function checkHoop(hoop) {
@@ -639,13 +713,15 @@ function hostRematch() {
 }
 
 // ---- broadcast helpers (host -> joiner) ----
-function sendBall(force) {
+function sendBall(force, contact) {
   if (!isHost()) return;
   var t = now();
   if (!force && t - lastBallSent < 33) return;
   lastBallSent = t;
   var b = G.ball;
-  send({ t: 'ball', x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.rot * 100) / 100, g: b.grounded ? 1 : 0 });
+  var m = { t: 'ball', x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.rot * 100) / 100, g: b.grounded ? 1 : 0 };
+  if (contact) m.f = 1;   // exact bounce point — the joiner snaps to it instead of interpolating short
+  send(m);
 }
 function stateObj() {
   var p = G.players;
@@ -711,6 +787,9 @@ function setBallTarget(m) {
   if (!G) return;
   G.ballTarget = { x: m.x, y: m.y, r: m.r, g: m.g };
   if (!G._gotBall) { G._gotBall = true; G.ball.x = m.x; G.ball.y = m.y; }
+  // A flagged contact point is the exact spot the ball touched a surface; snap to
+  // it so the bounce lands on the floor/wall instead of interpolating short of it.
+  if (m.f) { G.ball.x = m.x; G.ball.y = m.y; }
   G.ball.grounded = !!m.g;
 }
 function applyEvt(m) {
@@ -755,6 +834,10 @@ function showTurnover(player) { turnover.active = true; turnover.start = now(); 
 function hideTurnover() { turnover.active = false; }
 function updateFx(dt) {
   var f = Math.min(dt * 60, 3);
+  // The turnover banner is cosmetic and must clear itself on BOTH players. The host
+  // also clears it via switchTurn, but the joiner only ever received the event, so
+  // without this it would stay "active" forever and block the joiner from shooting.
+  if (turnover.active && now() - turnover.start > 1000) turnover.active = false;
   var np = [];
   for (var i = 0; i < particles.length; i++) {
     var p = particles[i];
@@ -942,7 +1025,7 @@ function updateHud() {
   } else { th.textContent = ''; }
 }
 
-function hideOverlays() { ['menu', 'waiting', 'msg', 'halftime', 'gameover'].forEach(function (id) { $(id).classList.add('hidden'); }); }
+function hideOverlays() { ['menu', 'waiting', 'msg', 'halftime', 'gameover', 'confirmLeave'].forEach(function (id) { $(id).classList.add('hidden'); }); }
 function showGameUI() { hideOverlays(); $('hud').style.display = 'block'; }
 function hideGameUI() { $('hud').style.display = 'none'; }
 function showGameOverlaysReset() { turnover.active = false; }
@@ -1088,6 +1171,14 @@ function onPeerBack(m) {
 }
 function onPeerLeftForGood() { showEnded('Your opponent left the game.'); }
 
+// Leave the current match: tell the opponent (so they aren't stuck waiting out the
+// reconnect grace), close without triggering our own auto-reconnect, go to menu.
+function leaveGame() {
+  try { send({ t: 'aborted' }); } catch (e) {}
+  closeSocket();
+  showMenu();
+}
+
 // ============================================================
 //  Settings (host) + lobby wiring
 // ============================================================
@@ -1136,7 +1227,10 @@ function hostStart() {
 $('playBtn').addEventListener('click', startPlay);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
 $('cancelBtn').addEventListener('click', function () { closeSocket(); showMenu(); });
-$('exitBtn').addEventListener('click', function () { closeSocket(); showMenu(); });
+$('exitBtn').addEventListener('click', function () { try { send({ t: 'aborted' }); } catch (e) {} closeSocket(); showMenu(); });
+$('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });
+$('confirmLeaveNo').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); });
+$('confirmLeaveYes').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); leaveGame(); });
 $('msgBtn').addEventListener('click', function () { closeSocket(); showMenu(); });
 $('rematchBtn').addEventListener('click', function () {
   if (isHost()) hostRematch();
@@ -1169,8 +1263,14 @@ function loop(t) {
 
 function init() {
   resize();
+  checkOrientation();
   try { var nm = localStorage.getItem('bmp_name'); if (nm) $('nameInput').value = nm; } catch (e) {}
   showMenu();
+  // Orientation lock usually needs a user gesture, so attempt it on first tap.
+  window.addEventListener('pointerdown', function once() {
+    tryLockLandscape();
+    window.removeEventListener('pointerdown', once);
+  });
   lastFrame = performance.now();
   requestAnimationFrame(loop);
 }
