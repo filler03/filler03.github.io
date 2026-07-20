@@ -69,18 +69,28 @@ class Rooms {
     if (!room) return;
     const role = conn.role;
 
-    if (msg.t === 'start') {
-      if (role === 1 && room.seats[0] && room.seats[1] && !room.match) {
-        room.match = new Match(msg.o, room.seats[0].name, room.seats[1].name, this._sender(room));
-        room.match.start();
-        this.log('match start', code);
-      }
+    // Seat 1 sends its chosen options (on entering the lobby and on any change).
+    // We store them and try to start — the actual start fires from _maybeStart the
+    // moment BOTH seats are filled, so it never depends on a fragile client echo.
+    if (msg.t === 'setup' || msg.t === 'start') {
+      if (role === 1) { if (msg.o) room.options = msg.o; this._maybeStart(room); }
       return;
     }
     if (msg.t === 'leave') { this._leave(conn); return; }
     if (!room.match) return;
     if (msg.t === 'shot') { room.match.applyShot(role, Number(msg.vx), Number(msg.vy)); return; }
     if (msg.t === 'rematch') { room.match.rematch(); return; }
+  }
+
+  // Start the match as soon as both seats are occupied and there isn't one yet.
+  // Works no matter how the seats got filled (fresh joins, reconnects, either
+  // order), so a stale reconnect can't leave a host stuck on "waiting".
+  _maybeStart(room) {
+    if (!room || room.match) return;
+    if (!(room.seats[0] && room.seats[1])) return;
+    room.match = new Match(room.options || {}, room.seats[0].name, room.seats[1].name, this._sender(room));
+    room.match.start();
+    this.log('match start', room.code);
   }
 
   _join(conn, msg) {
@@ -111,6 +121,8 @@ class Rooms {
           room.match.names[idx + 1] = seat.name;
           room.match.onReconnect(idx + 1);
           ctrl(conn, room.match.resyncPayload());
+        } else {
+          this._maybeStart(room);   // both seats present again, no match yet -> begin
         }
         this.log('reconnect', code, 'role', idx + 1);
         return;
@@ -129,6 +141,7 @@ class Rooms {
     const peer = this._peerOf(room, empty);
     if (peer) ctrl(peer.conn, { type: 'peer-joined', name: seat.name });
     this.log('join', code, 'role', empty + 1, seat.name);
+    this._maybeStart(room);   // if that filled both seats, start now (host's echo not required)
   }
 
   _handleClose(conn) {

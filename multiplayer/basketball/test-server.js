@@ -66,6 +66,8 @@ async function run() {
   const aj = await a.waitFor((m) => m.type === 'joined');
   assert(aj.role === 1 && aj.roomCode === 'TEST', 'first joiner is role 1, code normalized');
   const aToken = aj.token;
+  // Host publishes settings up front (as the real client does on entering the lobby).
+  a.send({ t: 'setup', o: { speed: 1.2, shotClock: 10, halfLength: 60, bounce: 0.7 } });
 
   const b = new Client(); await b.open();
   b.send({ type: 'join', code: 'TEST', name: 'Bob' });
@@ -75,12 +77,13 @@ async function run() {
   const apj = await a.waitFor((m) => m.type === 'peer-joined');
   assert(apj.name === 'Bob', 'host told opponent joined');
 
-  console.log('Server-run match:');
-  a.send({ t: 'start', o: { speed: 1.2, shotClock: 10, halfLength: 60, bounce: 0.7 } });
-  const aStart = await a.waitFor((m) => m.t === 'start');
-  const bStart = await b.waitFor((m) => m.t === 'start');
+  console.log('Auto-start (no explicit start needed):');
+  // Neither client sends a "start" — the server begins the match on its own the
+  // moment both seats are filled. This is what prevents a host stuck on "waiting".
+  const aStart = await a.waitFor((m) => m.t === 'start', 3000);
+  const bStart = await b.waitFor((m) => m.t === 'start', 3000);
   assert(aStart.p1 === 'Alice' && aStart.p2 === 'Bob', 'both receive start with names');
-  assert(bStart.o && bStart.o.shotClock === 10, 'options delivered to joiner');
+  assert(bStart.o && bStart.o.shotClock === 10, "host's options were used, not defaults");
   const ball1 = await b.waitFor((m) => m.t === 'ball', 3000);
   assert(typeof ball1.x === 'number' && typeof ball1.y === 'number', 'server streams ball position');
 
@@ -138,11 +141,11 @@ async function run() {
   // Fresh room so we control whose turn it is. After start it is always P1's turn.
   const x = new Client(); await x.open(); x.send({ type: 'join', code: 'HOLD', name: 'X' });
   await x.waitFor((m) => m.type === 'joined');
+  x.send({ t: 'setup', o: { speed: 1, shotClock: 12, halfLength: 90, bounce: 0.7 } });
   const y = new Client(); await y.open(); y.send({ type: 'join', code: 'HOLD', name: 'Y' });
   const yj = await y.waitFor((m) => m.type === 'joined');
   await x.waitFor((m) => m.type === 'peer-joined');
-  x.send({ t: 'start', o: { speed: 1, shotClock: 12, halfLength: 90, bounce: 0.7 } });
-  await y.waitFor((m) => m.t === 'start');
+  await y.waitFor((m) => m.t === 'start', 3000);   // auto-started when both seats filled
   await y.waitFor((m) => m.t === 'state' && m.gr === 1 && m.cp === 1 && m.wn === 0, 10000); // P1's turn, live
   // P1 (x) is the current player. Drop x; y (connected, not current) keeps watching.
   x.close();

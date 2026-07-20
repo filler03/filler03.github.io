@@ -425,12 +425,12 @@ function handleControl(m) {
       net.connecting = false;
       saveSession();
       if (net.reconnecting) { handleReconnected(m); return; }
-      if (m.role === 1) { showWaiting(true); }        // seat 1: waiting room + settings
-      else { showWaiting(false); waitForStart(); }     // seat 2: seat 1 will start it
+      if (m.role === 1) { showWaiting(true); sendSetup(); }   // seat 1: waiting room + push settings
+      else { showWaiting(false); waitForStart(); }     // seat 2: server starts it once both are in
       break;
     case 'peer-joined':
       net.opponent = m.name;
-      if (isHost() && !G) requestStart();              // seat 1 asks the server to start the match
+      if (isHost() && !G) sendSetup();                 // re-publish options; server auto-starts when both present
       break;
     case 'peer-disconnected': onPeerDropped(); break;
     case 'peer-reconnected': onPeerBack(m); break;
@@ -558,6 +558,10 @@ function releaseWakeLock() { try { if (wakeLock) { wakeLock.release(); wakeLock 
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState !== 'visible') return;
   if (inGame()) acquireWakeLock();
+  // A backgrounded tab pauses requestAnimationFrame, so the ball didn't animate
+  // while we were away. Snap it to the server's latest position so it's correct the
+  // instant we're looking again, then normal interpolation takes over.
+  if (G && G.ballTarget) { G.ball.x = G.ballTarget.x; G.ball.y = G.ballTarget.y; G.ball.rot = G.ballTarget.r; G.ball.grounded = !!G.ballTarget.g; }
   if (net.manualClose || !net.token) return;
   if (!(inGame() || inLobby())) return;
   var ws = net.ws, dead = !ws || ws.readyState === 2 || ws.readyState === 3; // CLOSING | CLOSED
@@ -1103,7 +1107,7 @@ function saveSettings() { try { localStorage.setItem('bmp_settings', JSON.string
 function bindSlider(id, valId, key, fmt) {
   var el = $(id), vv = $(valId);
   el.value = setState[key]; vv.textContent = fmt(setState[key]);
-  el.addEventListener('input', function () { setState[key] = parseFloat(el.value); vv.textContent = fmt(setState[key]); saveSettings(); });
+  el.addEventListener('input', function () { setState[key] = parseFloat(el.value); vv.textContent = fmt(setState[key]); saveSettings(); sendSetup(); });
 }
 bindSlider('sSpeed', 'vSpeed', 'speed', function (v) { return v.toFixed(1) + 'x'; });
 bindSlider('sClock', 'vClock', 'shotClock', function (v) { return v + 's'; });
@@ -1130,9 +1134,14 @@ function startPlay() {
 // Seat 1 asks the server to start the match with the chosen settings. The server
 // creates the match and broadcasts 'start' to BOTH clients, so we don't build any
 // game state here — joinerStart (triggered by that 'start') sets it up for everyone.
-function requestStart() {
-  var opts = { speed: setState.speed, shotClock: Math.round(setState.shotClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce };
-  send({ t: 'start', o: opts });
+// The host publishes its chosen settings to the server. The server starts the
+// match automatically once both seats are filled, so we send these on entering the
+// lobby and whenever a slider moves — no reliance on a peer-joined echo to kick off.
+function currentOptions() {
+  return { speed: setState.speed, shotClock: Math.round(setState.shotClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce };
+}
+function sendSetup() {
+  if (net.role === 1 && net.connected && net.ws) { try { send({ t: 'setup', o: currentOptions() }); } catch (e) {} }
 }
 
 $('playBtn').addEventListener('click', startPlay);
