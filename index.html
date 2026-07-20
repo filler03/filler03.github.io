@@ -91,7 +91,7 @@
           <h2>Multiplayer <span class="badge">NEW</span></h2>
           <p class="desc">Play head-to-head online — share a room code with a friend.</p>
           <ul>
-            <li><a class="mp" id="mpLink" href="#" target="_blank" rel="noopener">🏀 Basketball (2-player)</a></li>
+            <li><a class="mp" href="/multiplayer/basketball/">🏀 Basketball (2-player)</a></li>
           </ul>
         </div>
 
@@ -147,11 +147,6 @@
 
       setTimeBasedGradient();
       setInterval(setTimeBasedGradient, 100);
-
-      // Point the Multiplayer link straight at the game's port (no nginx proxy).
-      // If you change the port in ecosystem.config.js, change 3100 here to match.
-      var mpLink = document.getElementById("mpLink");
-      if (mpLink) mpLink.href = "http://" + location.hostname + ":3100/";
     </script>
   </body>
 </html>
