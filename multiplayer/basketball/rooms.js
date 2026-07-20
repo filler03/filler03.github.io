@@ -105,9 +105,13 @@ class Rooms {
           type: 'joined', role: idx + 1, roomCode: code, token: seat.token,
           opponent: this._opponentName(room, idx), reconnect: true, match: !!room.match
         });
-        const peer = this._peerOf(room, idx);
-        if (peer) ctrl(peer.conn, { type: 'peer-reconnected', name: seat.name });
-        if (room.match) { room.match.names[idx + 1] = seat.name; room.match.resume(); }
+        // The opponent was never told this player left, so there's nothing to
+        // un-tell. Mark them present and resync *only* the returning player.
+        if (room.match) {
+          room.match.names[idx + 1] = seat.name;
+          room.match.onReconnect(idx + 1);
+          ctrl(conn, room.match.resyncPayload());
+        }
         this.log('reconnect', code, 'role', idx + 1);
         return;
       }
@@ -134,10 +138,11 @@ class Rooms {
     const seat = room.seats[idx]; if (!seat || seat.conn !== conn) return;
 
     seat.conn = null;
-    if (room.match) room.match.pause();      // freeze the game while they're away
-    const peer = this._peerOf(room, idx);
-    if (peer) ctrl(peer.conn, { type: 'peer-disconnected' });
-    this.log('disconnect', code, 'role', idx + 1, '(grace', this.graceMs + 'ms)');
+    // Keep the match running. If it becomes this player's turn while they're gone,
+    // the clocks hold for them (game.js). The opponent is deliberately NOT notified
+    // — from their side the game just continues.
+    if (room.match) room.match.onDisconnect(idx + 1);
+    this.log('disconnect', code, 'role', idx + 1, '(grace', this.graceMs + 'ms, silent)');
 
     const self = this;
     const timer = setTimeout(function () {

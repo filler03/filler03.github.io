@@ -27,11 +27,14 @@ to both players over WebSocket. There's nothing to `npm install`.
   the server validates (right turn, ball grounded, speed clamped) before applying.
   Both players see the same latency, nobody's phone can drag the other, and a
   player backgrounding their screen no longer freezes the game.
-- **Leave & come back.** The reconnect token is saved in `localStorage`, so a
-  player can close the tab and reopen it within a 2-minute grace window and drop
-  straight back into the live match. A disconnect *pauses* the match (the seat is
-  held); reconnecting *resumes* it and resyncs full state. The **Leave/Exit**
-  buttons deliberately clear the saved session so they don't auto-rejoin.
+- **Leave & come back (seamless).** The reconnect token is saved in `localStorage`,
+  so a player can close the tab and reopen it within a 2-minute grace window and
+  drop straight back in. A drop does **not** pause the match and the opponent is
+  **not** notified — the game just keeps going for them. If it becomes the absent
+  player's turn, the clocks simply hold (it looks like the opponent is taking their
+  time) until they return and resync into the live state. Only if they never come
+  back within the grace window does the match end and the opponent get told. The
+  **Leave/Exit** buttons still quit deliberately (and clear the saved session).
 - **Fixed logical court.** Everything is computed in a 960×540 virtual court and
   then scaled + letterboxed to each device, so a phone and a laptop see the same
   game.

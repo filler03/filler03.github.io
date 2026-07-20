@@ -39,7 +39,7 @@ class Match {
     this.send = send;               // send(msgObject) -> broadcast to both players
     this.options = sanitizeOptions(options);
     this.names = { 1: name1 || 'Player 1', 2: name2 || 'Player 2' };
-    this.paused = false;
+    this.connected = { 1: true, 2: true };   // per-seat; a drop no longer pauses the match
     this.lastBallSent = 0;
     this.lastHeartbeat = 0;
     this._timers = [];
@@ -83,11 +83,19 @@ class Match {
     this.send({ t: 'start', o: this.options, p1: this.names[1], p2: this.names[2] });
     this.sendState(); this.sendBall(true);
   }
-  pause() { this.paused = true; }
-  resume() {
-    this.paused = false;
-    this.lastClock = now(); this.lastGameClock = now(); this.acc = 0;   // no clock jump after a pause
-    this.sendResync();
+  // A player's socket dropped: the match keeps running. If it's *their* turn, the
+  // clocks hold (see updateClocks) so they aren't penalized and the opponent just
+  // sees a normal "their turn" pause. The opponent is never notified.
+  onDisconnect(role) { this.connected[role] = false; }
+  // They came back within the grace window: mark them present and reset the clock
+  // anchors so no time "jumps". The caller sends resyncPayload() to just this player.
+  onReconnect(role) {
+    this.connected[role] = true;
+    this.lastClock = now(); this.lastGameClock = now(); this.acc = 0;
+  }
+  resyncPayload() {
+    var b = this.ball;
+    return { t: 'resync', o: this.options, p1: this.names[1], p2: this.names[2], st: this.stateObj(), ball: { x: Math.round(b.x), y: Math.round(b.y), r: b.rot, g: b.grounded ? 1 : 0 } };
   }
 
   targetHoop(player) {
@@ -120,7 +128,7 @@ class Match {
 
   // Called by the server loop with elapsed milliseconds since the last tick.
   step(dtMs) {
-    if (this.paused || this._destroyed || this.phase !== 'playing') return;
+    if (this._destroyed || this.phase !== 'playing') return;
     this.acc += Math.min(dtMs / 1000, 0.1);
     var guard = 0;
     while (this.acc >= STEP && guard < 8) { this.physics(); this.acc -= STEP; guard++; }
@@ -209,6 +217,10 @@ class Match {
 
   updateClocks() {
     var self = this, t = now();
+    // If it's the disconnected player's turn, freeze the clocks and wait for them.
+    // To the connected opponent this just looks like the other player taking their
+    // time — no turnover, no half ending, no visible interruption.
+    if (!this.connected[this.currentPlayer]) { this.lastClock = t; this.lastGameClock = t; return; }
     if (this.shotClockActive && this.ball.grounded && this.phase === 'playing') {
       var el = (t - this.lastClock) / 1000;
       if (el >= 1) {
@@ -271,10 +283,6 @@ class Match {
   sendState() { this.send(Object.assign({ t: 'state' }, this.stateObj())); }
   sendTurn() { this.send({ t: 'turn', cp: this.currentPlayer, sc: this.shotClock, gt: this.gameTimer }); }
   sendPhase(ph) { this.send({ t: 'phase', ph: ph, cp: this.currentPlayer, gt: this.gameTimer, hf: this.half, sw: this.sidesSwapped ? 1 : 0 }); }
-  sendResync() {
-    var b = this.ball;
-    this.send({ t: 'resync', o: this.options, p1: this.names[1], p2: this.names[2], st: this.stateObj(), ball: { x: Math.round(b.x), y: Math.round(b.y), r: b.rot, g: b.grounded ? 1 : 0 } });
-  }
 }
 
 module.exports = { Match: Match, sanitizeOptions: sanitizeOptions };

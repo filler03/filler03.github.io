@@ -110,18 +110,49 @@ async function run() {
   const err = await d.waitFor((m) => m.type === 'error');
   assert(/code/i.test(err.reason || ''), 'empty code errors'); d.close();
 
-  console.log('Disconnect -> reconnect resumes:');
+  console.log('Disconnect is silent for the opponent:');
+  // Drain A's queue so we can prove nothing new of note arrives.
+  a.queue.length = 0;
   b.close();
-  const drop = await a.waitFor((m) => m.type === 'peer-disconnected', 3000);
-  assert(!!drop, 'host told opponent dropped');
+  // A must NOT be told the opponent dropped...
+  let toldDropped = false;
+  try { await a.waitFor((m) => m.type === 'peer-disconnected', 800); toldDropped = true; } catch (e) {}
+  assert(!toldDropped, 'opponent is NOT notified of the drop');
+  // ...and A's game keeps running (state heartbeats keep arriving).
+  const stillLive = await a.waitFor((m) => m.t === 'state', 2000);
+  assert(!!stillLive, 'match keeps streaming to the remaining player');
+
+  console.log('Silent reconnect resyncs only the returning player:');
   const b2 = new Client(); await b2.open();
+  a.queue.length = 0;
   b2.send({ type: 'join', code: 'TEST', name: 'Bob', token: bToken });
   const b2j = await b2.waitFor((m) => m.type === 'joined');
   assert(b2j.reconnect === true && b2j.role === 2 && b2j.match === true, 'reconnect reclaims seat, match still live');
   const resync = await b2.waitFor((m) => m.t === 'resync', 3000);
-  assert(resync.st && typeof resync.st.s1 === 'number', 'server resyncs full state to the returning player');
-  const aback = await a.waitFor((m) => m.type === 'peer-reconnected', 3000);
-  assert(!!aback, 'host told opponent reconnected');
+  assert(resync.st && typeof resync.st.s1 === 'number', 'returning player gets a full resync');
+  let toldBack = false;
+  try { await a.waitFor((m) => m.type === 'peer-reconnected', 800); toldBack = true; } catch (e) {}
+  assert(!toldBack, 'opponent is NOT notified of the return either');
+
+  console.log('Clocks hold while the CURRENT player is away:');
+  // Fresh room so we control whose turn it is. After start it is always P1's turn.
+  const x = new Client(); await x.open(); x.send({ type: 'join', code: 'HOLD', name: 'X' });
+  await x.waitFor((m) => m.type === 'joined');
+  const y = new Client(); await y.open(); y.send({ type: 'join', code: 'HOLD', name: 'Y' });
+  const yj = await y.waitFor((m) => m.type === 'joined');
+  await x.waitFor((m) => m.type === 'peer-joined');
+  x.send({ t: 'start', o: { speed: 1, shotClock: 12, halfLength: 90, bounce: 0.7 } });
+  await y.waitFor((m) => m.t === 'start');
+  await y.waitFor((m) => m.t === 'state' && m.gr === 1 && m.cp === 1 && m.wn === 0, 10000); // P1's turn, live
+  // P1 (x) is the current player. Drop x; y (connected, not current) keeps watching.
+  x.close();
+  y.queue.length = 0;
+  const s1 = await y.waitFor((m) => m.t === 'state', 2000);
+  await wait(1700);
+  const s2 = await y.waitFor((m) => m.t === 'state', 2000);
+  assert(s2.sc === s1.sc, 'shot clock frozen while current player is away (' + s1.sc + '->' + s2.sc + ')');
+  assert(s2.gt === s1.gt, 'game clock frozen while current player is away (' + s1.gt + '->' + s2.gt + ')');
+  y.close();
 
   console.log('Leave ends the match:');
   a.send({ t: 'leave' });

@@ -536,6 +536,37 @@ function isImmersive() { return !!(document.fullscreenElement || document.webkit
     if (isTouchDevice() && G && G.phase === 'playing' && !isImmersive()) goImmersive();
   }, true);
 })();
+
+// Keep the screen awake during play. The game is turn-based, so the player who's
+// waiting would otherwise let their phone auto-lock — which suspends the tab and
+// drops their socket, making the *other* player see "opponent disconnected". A
+// screen wake lock prevents that. It's auto-released when the tab is hidden, so we
+// re-acquire it whenever we come back to a live game.
+var wakeLock = null;
+function acquireWakeLock() {
+  try {
+    if ('wakeLock' in navigator && navigator.wakeLock && document.visibilityState === 'visible') {
+      navigator.wakeLock.request('screen').then(function (wl) { wakeLock = wl; }).catch(function () {});
+    }
+  } catch (e) { /* unsupported (older iOS/desktop) — harmless */ }
+}
+function releaseWakeLock() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
+
+// When a backgrounded tab comes back, re-lock the screen and, if the socket died
+// while we were away, reconnect immediately instead of waiting for the OS to get
+// around to firing the close event.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible') return;
+  if (inGame()) acquireWakeLock();
+  if (net.manualClose || !net.token) return;
+  if (!(inGame() || inLobby())) return;
+  var ws = net.ws, dead = !ws || ws.readyState === 2 || ws.readyState === 3; // CLOSING | CLOSED
+  if (dead && !net.reconnecting) {
+    net.reconnecting = true;
+    showReconnecting('Reconnecting\u2026');
+    tryReconnect();
+  }
+});
 window.addEventListener('resize', checkOrientation);
 window.addEventListener('orientationchange', checkOrientation);
 function applyWorldTransform() { ctx.setTransform(view.scale * dpr, 0, 0, view.scale * dpr, view.ox * dpr, view.oy * dpr); }
@@ -603,6 +634,7 @@ function joinerStart(m) {
   particles = []; popups = []; turnover.active = false;
   G.ball.grounded = false; G.ball.y = -BALL_R;
   hideOverlays(); showGameUI(); setPill(false);
+  acquireWakeLock();
 }
 function joinerResync(m) {
   if (!G) G = newGame(m.o, m.p1, m.p2);
@@ -610,7 +642,9 @@ function joinerResync(m) {
   applyStateObj(m.st);
   if (m.ball) { G.ball.x = m.ball.x; G.ball.y = m.ball.y; G.ball.rot = m.ball.r; G.ball.grounded = !!m.ball.g; G.ballTarget = { x: m.ball.x, y: m.ball.y, r: m.ball.r, g: m.ball.g }; }
   net.reconnecting = false; net.retries = 0;
+  clearPeerDropTimer();
   restoreScreen();
+  acquireWakeLock();
 }
 function applyStateObj(s) {
   if (!G || !s) return;
@@ -885,6 +919,7 @@ function hideGameUI() { $('hud').style.display = 'none'; }
 function showGameOverlaysReset() { turnover.active = false; }
 
 function showMenu() {
+  clearPeerDropTimer(); releaseWakeLock();
   G = null; net.role = 0; net.opponent = '';
   hideGameUI(); hideOverlays(); resetPlayButton();
   $('menu').classList.remove('hidden');
@@ -950,7 +985,7 @@ function showMsg(title, body, showBtn) {
 function hideMsg() { $('msg').classList.add('hidden'); }
 function showReconnecting(text) { showMsg('Reconnecting', text || 'Trying to reconnect\u2026', false); setPill('warn'); }
 function showEnded(msg) {
-  clearSession();
+  clearSession(); clearPeerDropTimer(); releaseWakeLock();
   net.manualClose = true; net.reconnecting = false; try { if (net.ws) net.ws.close(); } catch (e) {}
   net.ws = null; net.connected = false; G = null;
   hideGameUI(); hideOverlays();
@@ -1024,15 +1059,27 @@ function handleReconnected(m) {
     showWaiting(net.role === 1); setPill(true);
   }
 }
+// A dropped opponent usually comes back within a second (a phone screen blinked
+// off, a tab backgrounded, a brief network hiccup). Rather than flash the overlay
+// every time, we wait a beat: if they're back before the timer fires, the pause is
+// invisible — the ball just hitches for a moment. Only a real, sustained absence
+// surfaces the "waiting for them to return" message.
+var peerDropTimer = null;
+function clearPeerDropTimer() { if (peerDropTimer) { clearTimeout(peerDropTimer); peerDropTimer = null; } }
 function onPeerDropped() {
-  if (inGame()) { showReconnecting('Opponent disconnected \u2014 waiting for them to return\u2026'); setPill('warn'); }
+  if (!inGame() || peerDropTimer) return;
+  peerDropTimer = setTimeout(function () {
+    peerDropTimer = null;
+    if (inGame()) { showReconnecting('Opponent disconnected \u2014 waiting for them to return\u2026'); setPill('warn'); }
+  }, 2500);
 }
 function onPeerBack(m) {
+  clearPeerDropTimer();
   if (m && m.name) net.opponent = m.name;
   // The server resumes + resyncs the match itself; we just restore our view.
   if (inGame()) { restoreScreen(); setPill(false); }
 }
-function onPeerLeftForGood() { clearSession(); showEnded('Your opponent left the game.'); }
+function onPeerLeftForGood() { clearPeerDropTimer(); clearSession(); showEnded('Your opponent left the game.'); }
 
 // Leave the current match: tell the server (which frees our seat and notifies the
 // opponent immediately), forget the saved session so we don't auto-rejoin, and go
