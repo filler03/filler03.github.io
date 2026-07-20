@@ -40,19 +40,20 @@
   /* ---------- overlays ---------- */
   .overlay {
     position: fixed; inset: 0; z-index: 20;
-    display: flex; align-items: center; justify-content: center;
-    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    display: flex; justify-content: center;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
     background: radial-gradient(120% 90% at 50% 0%, rgba(18,38,59,0.75), rgba(6,14,22,0.94));
     backdrop-filter: blur(6px);
   }
   .overlay.hidden { display: none; }
 
   .card {
-    width: 100%; max-width: 380px;
+    width: 100%; max-width: 380px; margin: auto;
     background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
     border: 1px solid var(--glass-line);
     border-radius: 20px;
-    padding: 26px 22px 22px;
+    padding: 22px 22px 20px;
     box-shadow: 0 24px 60px rgba(0,0,0,0.5);
   }
   .eyebrow {
@@ -196,6 +197,8 @@
     z-index: 60;
     background: var(--court);
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
   }
   #rotate .rot-icon {
@@ -241,7 +244,7 @@
     <button class="btn" id="playBtn" type="button">Play</button>
     <div class="err" id="menuErr"></div>
     <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. Swipe on the court to shoot.</p>
-    <p class="how" id="iosHint" style="display:none">On iPhone/iPad, tap <b>Share → Add to Home Screen</b>, then open it from there for true fullscreen.</p>
+    <p class="how" id="iosHint" style="display:none">iPhone browsers can't go fullscreen. For an app-like fullscreen: open this in <b>Safari</b> → Share → <b>Add to Home Screen</b>, then launch it from the home screen.</p>
   </div>
 </div>
 
@@ -499,7 +502,8 @@ function isTouchDevice() {
 }
 function checkOrientation() {
   var portrait = window.innerHeight > window.innerWidth;
-  $('rotate').classList.toggle('hidden', !(portrait && isTouchDevice()));
+  var inPlay = G && (G.phase === 'playing' || G.phase === 'halftime' || G.phase === 'gameover');
+  $('rotate').classList.toggle('hidden', !(portrait && isTouchDevice() && inPlay));
 }
 function tryLockLandscape() {
   try {
@@ -1042,7 +1046,7 @@ function updateHud() {
 }
 
 function hideOverlays() { ['menu', 'waiting', 'msg', 'halftime', 'gameover', 'confirmLeave'].forEach(function (id) { $(id).classList.add('hidden'); }); }
-function showGameUI() { hideOverlays(); $('hud').style.display = 'block'; }
+function showGameUI() { hideOverlays(); $('hud').style.display = 'block'; checkOrientation(); }
 function hideGameUI() { $('hud').style.display = 'none'; }
 function showGameOverlaysReset() { turnover.active = false; }
 
@@ -1051,6 +1055,7 @@ function showMenu() {
   hideGameUI(); hideOverlays(); resetPlayButton();
   $('menu').classList.remove('hidden');
   $('menuErr').textContent = '';
+  checkOrientation();
   setPill(false);
 }
 function showMenuError(msg) {
