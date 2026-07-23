@@ -83,8 +83,9 @@ function sanitizeOptions(o) {
 }
 
 class Match {
-  constructor(options, name1, name2, send) {
+  constructor(options, name1, name2, send, onEnd) {
     this.send = send;                 // send(msgObject) -> broadcast to both players
+    this.onEnd = onEnd || null;       // called once when the match ends (room teardown)
     this.options = sanitizeOptions(options);
     this.names = { 1: name1 || 'Player 1', 2: name2 || 'Player 2' };
     this.connected = { 1: true, 2: true };
@@ -390,7 +391,10 @@ class Match {
 
   gameOver() {
     this.phase = 'gameover';
-    this.sendPhase('gameover');
+    // Carry the final score on the game-over message so the ended screen is always
+    // correct even if a state update was missed, then close the room (onEnd).
+    this.send({ t: 'phase', ph: 'gameover', gt: this.gameTimer, s1: this.players[1].score, s2: this.players[2].score });
+    var self = this; setTimeout(function () { if (self.onEnd) self.onEnd(); }, 0);
   }
 
   // ---- broadcast ----

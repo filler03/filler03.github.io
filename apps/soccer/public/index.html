@@ -169,14 +169,15 @@
   .set-row input[type=range] { flex: 1; accent-color: var(--green); }
   .set-row .val { flex: 0 0 48px; text-align: right; font-family: 'Bebas Neue', sans-serif; font-size: 16px; color: var(--green); }
   .divider { height: 1px; background: var(--line); margin: 8px 0 4px; }
-  .ready-row {
-    display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; padding: 12px 14px;
-    background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 12px;
-    cursor: pointer; user-select: none;
-  }
-  .ready-row input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--green); cursor: pointer; }
-  .ready-row span { font-size: 14px; color: #eafaef; }
   .waiting-dots::after { content: ''; animation: dots 1.5s steps(4, end) infinite; }
+  .ready-block { margin: 16px 0 12px; }
+  .ready-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); margin: 7px 0; }
+  .ready-row.me { outline: 1px solid rgba(255,255,255,0.20); }
+  .ready-row .rr-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.25); flex: none; }
+  .ready-row.on .rr-dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .ready-row .rr-name { flex: 1; font-size: 14px; color: var(--ink); text-align: left; }
+  .ready-row .rr-state { font-size: 12.5px; color: var(--muted); }
+  .ready-row.on .rr-state { color: var(--green); font-weight: 600; }
   @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
 
   .winner { font-family: 'Bebas Neue', sans-serif; font-size: 30px; text-align: center; margin: 6px 0 12px; }
@@ -255,11 +256,12 @@
         <div class="set-row"><span class="name">Ball bounce</span><input type="range" id="sBounce" min="0.4" max="0.85" step="0.05"><span class="val" id="vBounce">0.70</span></div>
         <div class="divider"></div>
       </div>
-      <label class="ready-row" id="readyRow">
-        <input type="checkbox" id="readyBox" />
-        <span>I'm ready to play</span>
-      </label>
       <p class="sub" id="waitStatus"><span class="waiting-dots">Waiting for opponent</span></p>
+      <div class="ready-block" id="readyBlock">
+        <div class="ready-row" id="rRow1"><span class="rr-dot"></span><span class="rr-name" id="rName1">Player 1</span><span class="rr-state" id="rState1"></span></div>
+        <div class="ready-row" id="rRow2"><span class="rr-dot"></span><span class="rr-name" id="rName2">Player 2</span><span class="rr-state" id="rState2"></span></div>
+      </div>
+      <button class="btn" id="readyBtn" type="button">I&rsquo;m ready</button>
       <button class="btn ghost" id="cancelBtn" type="button">Cancel</button>
     </div>
   </div>
@@ -336,23 +338,10 @@ var SWIPE_POWER = 1.4, UP_RATIO = 0.22, MIN_KICK = 6, MAX_KICK_CLIENT = 34;
 // ---- connection state ----
 var net = {
   ws: null, role: 0, code: '', token: '', name: '', opponent: '',
-  connected: false, connecting: false, reconnecting: false, retries: 0, manualClose: false
+  connected: false, connecting: false, reconnecting: false, retries: 0, manualClose: false, ended: false
 };
 function isHost() { return net.role === 1; }
-
-// ---- ready-check state (both players must check ready before a match starts) ----
-var readyState = { p1: false, p2: false };
-function myReady() { return net.role === 1 ? readyState.p1 : readyState.p2; }
-function oppReady() { return net.role === 1 ? readyState.p2 : readyState.p1; }
-function sendReady(v) { if (net.connected && net.ws) { try { send({ t: 'ready', v: !!v }); } catch (e) {} } }
-function updateWaitStatus() {
-  var el = $('waitStatus');
-  if (!net.opponent) { el.innerHTML = '<span class="waiting-dots">Waiting for opponent to join</span>'; return; }
-  if (myReady() && oppReady()) { el.textContent = 'Both ready — starting…'; return; }
-  if (myReady()) { el.innerHTML = 'Waiting for ' + escapeHtml(net.opponent) + ' to get ready<span class="waiting-dots"></span>'; return; }
-  if (oppReady()) { el.textContent = net.opponent + ' is ready — check the box when you are.'; return; }
-  el.textContent = "Check the box below when you're ready to play.";
-}
+var lobby = { p1: null, p2: null, r1: false, r2: false };   // pre-match ready state
 
 // ---- game (render) state; null until a match starts ----
 var G = null;
@@ -401,13 +390,8 @@ function handleControl(m) {
     case 'peer-joined':
       net.opponent = m.name;
       if (isHost() && !G) sendSetup();
-      updateWaitStatus();
       break;
-    case 'ready-state':
-      readyState.p1 = !!m.p1; readyState.p2 = !!m.p2;
-      $('readyBox').checked = myReady();
-      updateWaitStatus();
-      break;
+    case 'lobby': lobby = m; updateReadyUI(); break;
     case 'peer-left': onPeerLeftForGood(); break;
     case 'room-full': showMenuError('That room already has two players. Try another code.'); closeSocket(); break;
     case 'error': showMenuError(m.reason || 'Could not join. Try again.'); closeSocket(); break;
@@ -777,7 +761,7 @@ function applyEvt(m) {
 }
 function applyPhase(m) {
   if (!G) return;
-  if (m.ph === 'gameover') { G.phase = 'gameover'; showGameOver(); }
+  if (m.ph === 'gameover') { if (m.s1 != null) { G.players[1].score = m.s1; G.players[2].score = m.s2; } G.phase = 'gameover'; showGameOver(); }
 }
 
 // ---- goal celebration ----
@@ -913,13 +897,40 @@ function resetPlayButton() { var b = $('playBtn'); b.textContent = 'Play'; b.dis
 
 function showWaiting(hostFlag) {
   hideOverlays(); hideGameUI(); $('waiting').classList.remove('hidden');
+  lobby = { p1: null, p2: null, r1: false, r2: false };   // server sends the real state right after
   $('waitCode').textContent = net.code;
   $('hostSettings').style.display = hostFlag ? 'block' : 'none';
   $('waitEyebrow').textContent = hostFlag ? 'Hosting' : 'Joining';
-  $('waitTitle').textContent = hostFlag ? 'Share this code' : 'Joining…';
-  $('waitSub').textContent = hostFlag ? 'Your friend enters this exact code to join you.' : 'Waiting for the host to start.';
-  updateWaitStatus();
+  $('waitTitle').textContent = hostFlag ? 'Share this code' : 'Getting you in';
+  $('waitSub').textContent = hostFlag ? 'Set the rules, then ready up when your friend joins.' : 'The host sets the rules \u2014 ready up when you\u2019re set.';
+  updateReadyUI();
   setPill(true);
+}
+// Pre-match lobby: both players must tap Ready before the server starts the match.
+function updateReadyUI() {
+  var bothHere = !!(lobby.p1 && lobby.p2);
+  var myReady = net.role === 2 ? lobby.r2 : lobby.r1;
+  var oppReady = net.role === 2 ? lobby.r1 : lobby.r2;
+  var setRow = function (rowId, nameId, stateId, present, name, ready, isMe) {
+    $(rowId).classList.toggle('on', !!ready);
+    $(rowId).classList.toggle('me', !!isMe);
+    $(nameId).textContent = (name || (present ? '' : 'Waiting to join\u2026')) + (isMe ? ' (you)' : '');
+    $(stateId).textContent = present ? (ready ? 'Ready' : 'Not ready') : '';
+  };
+  setRow('rRow1', 'rName1', 'rState1', !!lobby.p1, lobby.p1, lobby.r1, net.role === 1);
+  setRow('rRow2', 'rName2', 'rState2', !!lobby.p2, lobby.p2, lobby.r2, net.role === 2);
+  var rb = $('readyBtn');
+  if (myReady) { rb.textContent = 'Cancel ready'; rb.classList.add('ghost'); }
+  else { rb.textContent = 'I\u2019m ready'; rb.classList.remove('ghost'); }
+  var st = $('waitStatus');
+  if (!bothHere) st.innerHTML = '<span class="waiting-dots">Waiting for your opponent to join</span>';
+  else if (myReady && oppReady) st.innerHTML = '<span class="waiting-dots">Starting the match</span>';
+  else if (myReady && !oppReady) st.innerHTML = '<span class="waiting-dots">Waiting for your opponent to ready up</span>';
+  else st.textContent = 'Tap Ready when you\u2019re set \u2014 the match starts once you both are.';
+}
+function toggleReady() {
+  var myReady = net.role === 2 ? lobby.r2 : lobby.r1;
+  send({ t: 'ready', v: !myReady });   // server echoes a 'lobby' update that refreshes the UI
 }
 function rowHtml(pl) {
   return '<div class="score-row"><span class="nm" style="color:' + COLORS[pl] + '">' + escapeHtml(G.names[pl]) + '</span><span class="sc">' + G.players[pl].score + '</span></div>';
@@ -931,7 +942,10 @@ function showGameOver() {
   if (s1 > s2) { w.style.color = COLORS[1]; w.textContent = '🏆 ' + G.names[1] + ' wins'; }
   else if (s2 > s1) { w.style.color = COLORS[2]; w.textContent = '🏆 ' + G.names[2] + ' wins'; }
   else { w.style.color = 'var(--amber)'; w.textContent = "It's a draw"; }
-  $('gameoverStatus').textContent = ''; $('rematchBtn').textContent = 'Rematch';
+    $('gameoverStatus').textContent = ''; $('rematchBtn').textContent = 'Rematch';
+  // Room is closed server-side at game over: forget the session so the socket won't
+  // reconnect into a dead room and re-entering the code starts a fresh game.
+  net.ended = true; clearSession();
 }
 
 function showMsg(title, body, showBtn) { $('msg').classList.remove('hidden'); $('msgTitle').textContent = title; $('msgBody').textContent = body; $('msgBtn').style.display = showBtn ? 'block' : 'none'; }
@@ -963,6 +977,7 @@ function restoreScreen() {
 }
 function onClose() {
   if (net.manualClose) return;
+  if (net.ended) return;   // game over, room closed — nothing to reconnect to
   if (net.connecting && !net.reconnecting) { net.connecting = false; showMenuError('Could not reach the server. Try again.'); return; }
   if (inGame() || inLobby()) { net.reconnecting = true; showReconnecting('Connection lost — reconnecting…'); tryReconnect(); }
   else { setPill('bad'); }
@@ -1018,8 +1033,7 @@ function startPlay() {
   if (!code) { showMenuError('Enter a room code first.'); return; }
   goImmersive();
   net.name = name || 'Player'; net.code = code; net.token = '';
-  net.reconnecting = false; net.manualClose = false; net.connecting = true; net.retries = 0;
-  readyState.p1 = false; readyState.p2 = false; $('readyBox').checked = false;
+  net.reconnecting = false; net.manualClose = false; net.connecting = true; net.retries = 0; net.ended = false;
   $('menuErr').textContent = '';
   try { localStorage.setItem('smp_name', net.name); } catch (e) {}
   var b = $('playBtn'); b.textContent = 'Connecting…'; b.disabled = true;
@@ -1028,14 +1042,21 @@ function startPlay() {
 
 $('playBtn').addEventListener('click', startPlay);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
-$('readyBox').addEventListener('change', function () { sendReady(this.checked); });
 $('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
+$('readyBtn').addEventListener('click', toggleReady);
 $('exitBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
 $('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });
 $('confirmLeaveNo').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); });
 $('confirmLeaveYes').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); leaveGame(); });
 $('msgBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
-$('rematchBtn').addEventListener('click', function () { send({ t: 'rematch' }); $('gameoverStatus').textContent = 'Restarting…'; });
+$('rematchBtn').addEventListener('click', function () {
+  // Finished room is gone; a rematch is a fresh game under the SAME code (both ready up again).
+  $('gameoverStatus').textContent = 'Restarting\u2026';
+  net.token = ''; net.ended = false; net.reconnecting = false; net.manualClose = false; net.retries = 0;
+  clearSession(); G = null;
+  var join = function () { send({ type: 'join', code: net.code, name: net.name }); };
+  if (net.ws && net.connected) join(); else connect(join);
+});
 $('codeInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') startPlay(); });
 $('nameInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('codeInput').focus(); });
 

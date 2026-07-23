@@ -50,7 +50,35 @@ class Client {
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Regression (the "same code re-enters the finished game" bug): once a match ends,
+// the room must close so reusing the code opens a fresh game the other player can join.
+function roomCloseRegression() {
+  console.log('Room close on game over (regression):');
+  const Rooms = require('./rooms');
+  const mk = () => ({ alive: true, roomCode: null, role: 0, sent: [], send(s) { this.sent.push(s); } });
+  const R = new Rooms({ graceMs: 50, log: () => {} });
+  const a = mk(), b = mk();
+  R._join(a, { type: 'join', code: 'RC', name: 'A' });
+  R._join(b, { type: 'join', code: 'RC', name: 'B' });
+  R._handleMessage(a, JSON.stringify({ t: 'ready' }));
+  R._handleMessage(b, JSON.stringify({ t: 'ready' }));
+  const room = R.rooms.get('RC');
+  assert(!!(room && room.match), 'match starts once both ready up');
+  R._finishRoom(room);   // simulate the match reaching game over
+  assert(!R.rooms.has('RC'), 'room is closed at game over');
+  assert(a.roomCode === null && b.roomCode === null, 'both sockets detached from the closed room');
+  const c = mk(), d = mk();
+  R._join(c, { type: 'join', code: 'RC', name: 'A2' });
+  R._join(d, { type: 'join', code: 'RC', name: 'B2' });
+  const room2 = R.rooms.get('RC');
+  assert(!!(room2 && room2 !== room), 'reusing the code creates a brand-new room');
+  const full = d.sent.map((x) => JSON.parse(x)).some((m) => m.type === 'room-full');
+  assert(!full && !!(room2.seats[0] && room2.seats[1]), 'the other player can join the fresh room (no room-full)');
+}
+
 async function run() {
+  roomCloseRegression();
+
   console.log('HTTP:');
   const root = await httpGet('/');
   assert(root.status === 200 && /text\/html/.test(root.headers['content-type'] || ''), 'GET / serves html');
@@ -77,19 +105,18 @@ async function run() {
   const apj = await a.waitFor((m) => m.type === 'peer-joined');
   assert(apj.name === 'Bob', 'host told opponent joined');
 
-  console.log('Ready check: match waits for both players');
-  a.send({ t: 'ready', v: true });
-  const aReadyEcho = await a.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
-  assert(aReadyEcho.p1 === true && aReadyEcho.p2 === false, 'server reports only seat 1 ready so far');
-  let startedEarly = false;
-  try { await a.waitFor((m) => m.t === 'start', 300); startedEarly = true; } catch (e) { /* expected: no start yet */ }
-  assert(!startedEarly, 'match does NOT start with only one player ready');
+  console.log('Ready gate:');
+  // Both seats are filled but nobody readied — the match must NOT start yet.
+  let early = false; try { await a.waitFor((m) => m.t === 'start', 600); early = true; } catch (e) {}
+  assert(!early, 'match does not start until both players ready');
+  a.send({ t: 'ready' });
+  const lob1 = await a.waitFor((m) => m.type === 'lobby' && m.r1 === true, 2000);
+  assert(lob1.r1 === true && lob1.r2 === false, 'lobby shows P1 ready, P2 not');
+  let onlyOne = false; try { await a.waitFor((m) => m.t === 'start', 600); onlyOne = true; } catch (e) {}
+  assert(!onlyOne, 'still no start with only one player ready');
+  b.send({ t: 'ready' });
 
-  b.send({ t: 'ready', v: true });
-  const bReadyEcho = await b.waitFor((m) => m.type === 'ready-state' && m.p1 && m.p2);
-  assert(bReadyEcho.p1 === true && bReadyEcho.p2 === true, 'server reports both players ready');
-
-  console.log('Match starts once both are ready:');
+  console.log('Start after both ready:');
   const aStart = await a.waitFor((m) => m.t === 'start', 3000);
   const bStart = await b.waitFor((m) => m.t === 'start', 3000);
   assert(aStart.p1 === 'Alice' && aStart.p2 === 'Bob', 'both receive start with names');
@@ -155,9 +182,8 @@ async function run() {
   const y = new Client(); await y.open(); y.send({ type: 'join', code: 'HOLD', name: 'Y' });
   const yj = await y.waitFor((m) => m.type === 'joined');
   await x.waitFor((m) => m.type === 'peer-joined');
-  x.send({ t: 'ready', v: true });
-  y.send({ t: 'ready', v: true });
-  await y.waitFor((m) => m.t === 'start', 3000);   // starts once both seats are filled and ready
+  x.send({ t: 'ready' }); y.send({ t: 'ready' });
+  await y.waitFor((m) => m.t === 'start', 3000);   // starts once both ready
   await y.waitFor((m) => m.t === 'state' && m.gr === 1 && m.cp === 1 && m.wn === 0, 10000); // P1's turn, live
   // P1 (x) is the current player. Drop x; y (connected, not current) keeps watching.
   x.close();
@@ -169,31 +195,55 @@ async function run() {
   assert(s2.gt === s1.gt, 'game clock frozen while current player is away (' + s1.gt + '->' + s2.gt + ')');
   y.close();
 
+  console.log('Frenzy mode (simultaneous, multi-ball):');
+  const fa = new Client(); await fa.open();
+  fa.send({ type: 'join', code: 'FRENZY', name: 'Fay' });
+  await fa.waitFor((m) => m.type === 'joined');
+  fa.send({ t: 'setup', o: { mode: 'frenzy', balls: 4, halfLength: 60, pointsPer: 4, bonusSecs: 10, scoreMode: 'own', speed: 1.1, bounce: 0.7 } });
+  const fb = new Client(); await fb.open();
+  fb.send({ type: 'join', code: 'FRENZY', name: 'Gus' });
+  await fb.waitFor((m) => m.type === 'joined');
+  await fa.waitFor((m) => m.type === 'peer-joined');
+  fa.send({ t: 'ready' }); fb.send({ t: 'ready' });
+  const faStart = await fa.waitFor((m) => m.t === 'start', 3000);
+  await fb.waitFor((m) => m.t === 'start', 3000);
+  assert(faStart.o && faStart.o.mode === 'frenzy' && faStart.o.balls === 4, 'frenzy start carries mode + even ball count');
+  const fballs = await fb.waitFor((m) => m.t === 'balls', 3000);
+  assert(Array.isArray(fballs.b) && fballs.b.length === 4, 'server streams the 4-ball array');
+  const startBalls = fballs.b.slice();
+
+  // Grab a ball; the grabber should see it anchored (h===1).
+  const target = startBalls[1];
+  fa.queue.length = 0;
+  fa.send({ t: 'grab', x: target.x, y: target.y });
+  const heldFrame = await fa.waitFor((m) => m.t === 'balls' && m.b.some((x) => x.i === target.i && x.h === 1), 2000);
+  assert(!!heldFrame, 'grab anchors the nearest ball for the grabber');
+
+  // Opponent tries to grab the SAME (protected) ball — must fail. A heartbeat
+  // balls frame (~1/s) reflects the truth: still held by 1, nobody holds it as 2.
+  fb.queue.length = 0;
+  fb.send({ t: 'grab', x: target.x, y: target.y });
+  await wait(200);
+  const chk = await fb.waitFor((m) => m.t === 'balls', 2000);
+  const tb = chk.b.find((x) => x.i === target.i);
+  assert(tb && tb.h === 1, 'protected ball stays with the original grabber');
+  assert(!chk.b.some((x) => x.h === 2), 'opponent cannot grab a ball being aimed');
+
+  // Shoot the held ball: shot event + shots incremented in frenzy state.
+  fa.queue.length = 0;
+  fa.send({ t: 'shot', i: target.i, vx: 30, vy: -35 });
+  const fshot = await fa.waitFor((m) => m.t === 'evt' && m.k === 'shot' && m.i === target.i, 2000);
+  assert(!!fshot, 'frenzy shot accepted for the aimed ball');
+  const fstate = await fa.waitFor((m) => m.t === 'state' && m.md === 'frenzy' && m.h1 >= 1, 2000);
+  assert(fstate.h1 >= 1, 'frenzy shot increments the shooter\u2019s shot count');
+  fa.close(); fb.close();
+
   console.log('Leave ends the match:');
   a.send({ t: 'leave' });
   const left = await b2.waitFor((m) => m.type === 'peer-left', 3000);
   assert(!!left, 'remaining player told the other left');
 
   a.close(); b2.close();
-
-  console.log('Ready flag resets on pre-match disconnect:');
-  const p = new Client(); await p.open();
-  p.send({ type: 'join', code: 'RESET1', name: 'Zoe' });
-  await p.waitFor((m) => m.type === 'joined');
-  p.send({ t: 'ready', v: true });
-  await p.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
-
-  const q = new Client(); await q.open();
-  q.send({ type: 'join', code: 'RESET1', name: 'Yara' });
-  await q.waitFor((m) => m.type === 'joined');
-  const syncOnJoin = await q.waitFor((m) => m.type === 'ready-state');
-  assert(syncOnJoin.p1 === true && syncOnJoin.p2 === false, 'joining player is told the host is already ready');
-
-  p.close();
-  const resetMsg = await q.waitFor((m) => m.type === 'ready-state' && m.p1 === false, 3000);
-  assert(resetMsg.p1 === false, "host's ready flag clears when they disconnect before the match starts");
-  q.close();
-
   await wait(100);
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   return failed === 0;

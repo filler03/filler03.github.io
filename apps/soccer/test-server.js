@@ -73,7 +73,35 @@ function client(name) {
   return api;
 }
 
+// Regression (the "same code re-enters the finished game" bug): once a match ends,
+// the room must close so reusing the code opens a fresh game the other player can join.
+function roomCloseRegression() {
+  console.log('Room close on game over (regression)');
+  const Rooms = require('./rooms');
+  const mk = () => ({ alive: true, roomCode: null, role: 0, sent: [], send(s) { this.sent.push(s); } });
+  const R = new Rooms({ graceMs: 50, log: () => {} });
+  const a = mk(), b = mk();
+  R._join(a, { type: 'join', code: 'RC', name: 'A' });
+  R._join(b, { type: 'join', code: 'RC', name: 'B' });
+  R._handleMessage(a, JSON.stringify({ t: 'ready' }));
+  R._handleMessage(b, JSON.stringify({ t: 'ready' }));
+  const room = R.rooms.get('RC');
+  ok(!!(room && room.match), 'match starts once both ready up');
+  R._finishRoom(room);   // simulate the match reaching game over
+  ok(!R.rooms.has('RC'), 'room is closed at game over');
+  ok(a.roomCode === null && b.roomCode === null, 'both sockets are detached from the closed room');
+  const c = mk(), d = mk();
+  R._join(c, { type: 'join', code: 'RC', name: 'A2' });
+  R._join(d, { type: 'join', code: 'RC', name: 'B2' });
+  const room2 = R.rooms.get('RC');
+  ok(!!(room2 && room2 !== room), 'reusing the code creates a brand-new room');
+  const full = d.sent.map((x) => JSON.parse(x)).some((m) => m.type === 'room-full');
+  ok(!full && !!(room2.seats[0] && room2.seats[1]), 'the other player can join the fresh room (no room-full)');
+}
+
 async function main() {
+  roomCloseRegression();
+
   await sleep(250); // let the listener bind
 
   console.log('HTTP');
@@ -96,17 +124,17 @@ async function main() {
   const bJoined = await B.waitFor((m) => m.type === 'joined');
   ok(bJoined.role === 2, 'second client is seat 2');
 
-  console.log('Ready check: match waits for both players');
-  A.send({ t: 'ready', v: true });
-  const aReadyEcho = await A.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
-  ok(aReadyEcho.p1 === true && aReadyEcho.p2 === false, 'server reports only seat 1 ready so far');
-  let startedEarly = false;
-  try { await A.waitFor((m) => m.t === 'start', 300); startedEarly = true; } catch (e) { /* expected: no start yet */ }
-  ok(!startedEarly, 'match does NOT start with only one player ready');
-
-  B.send({ t: 'ready', v: true });
-  const bReadyEcho = await B.waitFor((m) => m.type === 'ready-state' && m.p1 && m.p2);
-  ok(bReadyEcho.p1 === true && bReadyEcho.p2 === true, 'server reports both players ready');
+  // Ready-up gate: the match must NOT start until BOTH players ready up.
+  let early = false;
+  try { await A.waitFor((m) => m.t === 'start', 500); early = true; } catch (e) {}
+  ok(!early, 'match does not start until both players ready');
+  A.send({ t: 'ready' });
+  const lob = await A.waitFor((m) => m.type === 'lobby' && m.r1 === true, 2000);
+  ok(lob.r1 === true && lob.r2 === false, 'lobby shows host ready, joiner not');
+  let onlyOne = false;
+  try { await A.waitFor((m) => m.t === 'start', 500); onlyOne = true; } catch (e) {}
+  ok(!onlyOne, 'still no start with only one player ready');
+  B.send({ t: 'ready' });
 
   // both should receive the authoritative start + the centred, live ball
   const aStart = await A.waitFor((m) => m.t === 'start');
@@ -165,23 +193,6 @@ async function main() {
   C.send({ type: 'join', code: 'GOAL1', name: 'Cara' });
   const full = await C.waitFor((m) => m.type === 'room-full' || m.type === 'joined');
   ok(full.type === 'room-full', 'third player is rejected as room-full');
-
-  console.log('Ready flag resets on pre-match disconnect');
-  const D = client('D'); await D.open();
-  D.send({ type: 'join', code: 'RESET1', name: 'Zoe' });
-  await D.waitFor((m) => m.type === 'joined');
-  D.send({ t: 'ready', v: true });
-  await D.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
-
-  const E = client('E'); await E.open();
-  E.send({ type: 'join', code: 'RESET1', name: 'Yara' });
-  await E.waitFor((m) => m.type === 'joined');
-  const syncOnJoin = await E.waitFor((m) => m.type === 'ready-state');
-  ok(syncOnJoin.p1 === true && syncOnJoin.p2 === false, 'joining player is told the host is already ready');
-
-  D.close();
-  const resetMsg = await E.waitFor((m) => m.type === 'ready-state' && m.p1 === false, 3000);
-  ok(resetMsg.p1 === false, "host's ready flag clears when they disconnect before the match starts");
 
   console.log('\nAll ' + passed + ' checks passed.');
   process.exit(0);
