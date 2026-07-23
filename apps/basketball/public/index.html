@@ -123,6 +123,13 @@
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
   input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: none; border-radius: 50%; background: var(--amber); cursor: pointer; }
   .divider { height: 1px; background: var(--glass-line); margin: 16px 0; }
+  .ready-row {
+    display: flex; align-items: center; gap: 12px; margin: 2px 0 16px; padding: 12px 14px;
+    background: var(--glass); border: 1px solid var(--glass-line); border-radius: 12px;
+    cursor: pointer; user-select: none;
+  }
+  .ready-row input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--amber); cursor: pointer; }
+  .ready-row span { font-size: 14px; color: var(--ink); }
 
   /* ---------- in-game HUD ---------- */
   #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
@@ -265,6 +272,10 @@
       <div class="set-row"><span class="name">Ball bounce</span><input type="range" id="sBounce" min="0.4" max="0.85" step="0.05"><span class="val" id="vBounce">0.70</span></div>
       <div class="divider"></div>
     </div>
+    <label class="ready-row" id="readyRow">
+      <input type="checkbox" id="readyBox" />
+      <span>I'm ready to play</span>
+    </label>
     <p class="sub" id="waitStatus"><span class="waiting-dots">Waiting for opponent</span></p>
     <button class="btn ghost" id="cancelBtn" type="button">Cancel</button>
   </div>
@@ -351,6 +362,20 @@ var net = {
 };
 function isHost() { return net.role === 1; }
 
+// ---- ready-check state (both players must check ready before a match starts) ----
+var readyState = { p1: false, p2: false };
+function myReady() { return net.role === 1 ? readyState.p1 : readyState.p2; }
+function oppReady() { return net.role === 1 ? readyState.p2 : readyState.p1; }
+function sendReady(v) { if (net.connected && net.ws) { try { send({ t: 'ready', v: !!v }); } catch (e) {} } }
+function updateWaitStatus() {
+  var el = $('waitStatus');
+  if (!net.opponent) { el.innerHTML = '<span class="waiting-dots">Waiting for opponent to join</span>'; return; }
+  if (myReady() && oppReady()) { el.textContent = 'Both ready — starting…'; return; }
+  if (myReady()) { el.innerHTML = 'Waiting for ' + escapeHtml(net.opponent) + ' to get ready<span class="waiting-dots"></span>'; return; }
+  if (oppReady()) { el.textContent = net.opponent + ' is ready — check the box when you are.'; return; }
+  el.textContent = "Check the box below when you're ready to play.";
+}
+
 // ---- game state (null until a match starts) ----
 var G = null;
 var particles = [], popups = [];
@@ -433,7 +458,13 @@ function handleControl(m) {
       break;
     case 'peer-joined':
       net.opponent = m.name;
-      if (isHost() && !G) sendSetup();                 // re-publish options; server auto-starts when both present
+      if (isHost() && !G) sendSetup();                 // re-publish options; server auto-starts when both present and ready
+      updateWaitStatus();
+      break;
+    case 'ready-state':
+      readyState.p1 = !!m.p1; readyState.p2 = !!m.p2;
+      $('readyBox').checked = myReady();
+      updateWaitStatus();
       break;
     case 'peer-disconnected': onPeerDropped(); break;
     case 'peer-reconnected': onPeerBack(m); break;
@@ -957,13 +988,12 @@ function showWaiting(hostFlag) {
     $('waitEyebrow').textContent = "You're hosting";
     $('waitTitle').textContent = 'Share this code';
     $('waitSub').textContent = 'Set the rules, then your friend joins with this code.';
-    $('waitStatus').innerHTML = '<span class="waiting-dots">Waiting for opponent</span>';
   } else {
     $('waitEyebrow').textContent = 'Joining';
     $('waitTitle').textContent = 'Getting you in';
-    $('waitSub').textContent = 'Connected to the room \u2014 starting the match.';
-    $('waitStatus').innerHTML = '<span class="waiting-dots">Waiting for host</span>';
+    $('waitSub').textContent = 'Check ready below once you\u2019re set \u2014 the match starts when you both are.';
   }
+  updateWaitStatus();
   setPill(true);
 }
 function waitForStart() { /* joiner waits for the host's start message */ }
@@ -1135,6 +1165,7 @@ function startPlay() {
   goImmersive();   // this tap is a user gesture, so fullscreen + landscape lock are allowed here
   net.name = name || 'Player'; net.code = code; net.token = '';
   net.reconnecting = false; net.manualClose = false; net.connecting = true; net.retries = 0;
+  readyState.p1 = false; readyState.p2 = false; $('readyBox').checked = false;
   $('menuErr').textContent = '';
   try { localStorage.setItem('bmp_name', net.name); } catch (e) {}
   var b = $('playBtn'); b.textContent = 'Connecting\u2026'; b.disabled = true;
@@ -1144,8 +1175,9 @@ function startPlay() {
 // creates the match and broadcasts 'start' to BOTH clients, so we don't build any
 // game state here — joinerStart (triggered by that 'start') sets it up for everyone.
 // The host publishes its chosen settings to the server. The server starts the
-// match automatically once both seats are filled, so we send these on entering the
-// lobby and whenever a slider moves — no reliance on a peer-joined echo to kick off.
+// match automatically once both seats are filled AND both players have checked
+// ready, so we send these on entering the lobby and whenever a slider moves —
+// no reliance on a peer-joined echo to kick off.
 function currentOptions() {
   return { speed: setState.speed, shotClock: Math.round(setState.shotClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce };
 }
@@ -1155,6 +1187,7 @@ function sendSetup() {
 
 $('playBtn').addEventListener('click', startPlay);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
+$('readyBox').addEventListener('change', function () { sendReady(this.checked); });
 $('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
 $('exitBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
 $('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });

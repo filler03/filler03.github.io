@@ -169,6 +169,13 @@
   .set-row input[type=range] { flex: 1; accent-color: var(--green); }
   .set-row .val { flex: 0 0 48px; text-align: right; font-family: 'Bebas Neue', sans-serif; font-size: 16px; color: var(--green); }
   .divider { height: 1px; background: var(--line); margin: 8px 0 4px; }
+  .ready-row {
+    display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; padding: 12px 14px;
+    background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 12px;
+    cursor: pointer; user-select: none;
+  }
+  .ready-row input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--green); cursor: pointer; }
+  .ready-row span { font-size: 14px; color: #eafaef; }
   .waiting-dots::after { content: ''; animation: dots 1.5s steps(4, end) infinite; }
   @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
 
@@ -248,6 +255,10 @@
         <div class="set-row"><span class="name">Ball bounce</span><input type="range" id="sBounce" min="0.4" max="0.85" step="0.05"><span class="val" id="vBounce">0.70</span></div>
         <div class="divider"></div>
       </div>
+      <label class="ready-row" id="readyRow">
+        <input type="checkbox" id="readyBox" />
+        <span>I'm ready to play</span>
+      </label>
       <p class="sub" id="waitStatus"><span class="waiting-dots">Waiting for opponent</span></p>
       <button class="btn ghost" id="cancelBtn" type="button">Cancel</button>
     </div>
@@ -329,6 +340,20 @@ var net = {
 };
 function isHost() { return net.role === 1; }
 
+// ---- ready-check state (both players must check ready before a match starts) ----
+var readyState = { p1: false, p2: false };
+function myReady() { return net.role === 1 ? readyState.p1 : readyState.p2; }
+function oppReady() { return net.role === 1 ? readyState.p2 : readyState.p1; }
+function sendReady(v) { if (net.connected && net.ws) { try { send({ t: 'ready', v: !!v }); } catch (e) {} } }
+function updateWaitStatus() {
+  var el = $('waitStatus');
+  if (!net.opponent) { el.innerHTML = '<span class="waiting-dots">Waiting for opponent to join</span>'; return; }
+  if (myReady() && oppReady()) { el.textContent = 'Both ready — starting…'; return; }
+  if (myReady()) { el.innerHTML = 'Waiting for ' + escapeHtml(net.opponent) + ' to get ready<span class="waiting-dots"></span>'; return; }
+  if (oppReady()) { el.textContent = net.opponent + ' is ready — check the box when you are.'; return; }
+  el.textContent = "Check the box below when you're ready to play.";
+}
+
 // ---- game (render) state; null until a match starts ----
 var G = null;
 function newGame(options, p1, p2) {
@@ -376,6 +401,12 @@ function handleControl(m) {
     case 'peer-joined':
       net.opponent = m.name;
       if (isHost() && !G) sendSetup();
+      updateWaitStatus();
+      break;
+    case 'ready-state':
+      readyState.p1 = !!m.p1; readyState.p2 = !!m.p2;
+      $('readyBox').checked = myReady();
+      updateWaitStatus();
       break;
     case 'peer-left': onPeerLeftForGood(); break;
     case 'room-full': showMenuError('That room already has two players. Try another code.'); closeSocket(); break;
@@ -887,6 +918,7 @@ function showWaiting(hostFlag) {
   $('waitEyebrow').textContent = hostFlag ? 'Hosting' : 'Joining';
   $('waitTitle').textContent = hostFlag ? 'Share this code' : 'Joining…';
   $('waitSub').textContent = hostFlag ? 'Your friend enters this exact code to join you.' : 'Waiting for the host to start.';
+  updateWaitStatus();
   setPill(true);
 }
 function rowHtml(pl) {
@@ -987,6 +1019,7 @@ function startPlay() {
   goImmersive();
   net.name = name || 'Player'; net.code = code; net.token = '';
   net.reconnecting = false; net.manualClose = false; net.connecting = true; net.retries = 0;
+  readyState.p1 = false; readyState.p2 = false; $('readyBox').checked = false;
   $('menuErr').textContent = '';
   try { localStorage.setItem('smp_name', net.name); } catch (e) {}
   var b = $('playBtn'); b.textContent = 'Connecting…'; b.disabled = true;
@@ -995,6 +1028,7 @@ function startPlay() {
 
 $('playBtn').addEventListener('click', startPlay);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
+$('readyBox').addEventListener('change', function () { sendReady(this.checked); });
 $('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
 $('exitBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
 $('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });

@@ -96,6 +96,18 @@ async function main() {
   const bJoined = await B.waitFor((m) => m.type === 'joined');
   ok(bJoined.role === 2, 'second client is seat 2');
 
+  console.log('Ready check: match waits for both players');
+  A.send({ t: 'ready', v: true });
+  const aReadyEcho = await A.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
+  ok(aReadyEcho.p1 === true && aReadyEcho.p2 === false, 'server reports only seat 1 ready so far');
+  let startedEarly = false;
+  try { await A.waitFor((m) => m.t === 'start', 300); startedEarly = true; } catch (e) { /* expected: no start yet */ }
+  ok(!startedEarly, 'match does NOT start with only one player ready');
+
+  B.send({ t: 'ready', v: true });
+  const bReadyEcho = await B.waitFor((m) => m.type === 'ready-state' && m.p1 && m.p2);
+  ok(bReadyEcho.p1 === true && bReadyEcho.p2 === true, 'server reports both players ready');
+
   // both should receive the authoritative start + the centred, live ball
   const aStart = await A.waitFor((m) => m.t === 'start');
   ok(aStart.p1 === 'Ann' && aStart.p2 === 'Bob', 'start carries both names');
@@ -153,6 +165,23 @@ async function main() {
   C.send({ type: 'join', code: 'GOAL1', name: 'Cara' });
   const full = await C.waitFor((m) => m.type === 'room-full' || m.type === 'joined');
   ok(full.type === 'room-full', 'third player is rejected as room-full');
+
+  console.log('Ready flag resets on pre-match disconnect');
+  const D = client('D'); await D.open();
+  D.send({ type: 'join', code: 'RESET1', name: 'Zoe' });
+  await D.waitFor((m) => m.type === 'joined');
+  D.send({ t: 'ready', v: true });
+  await D.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
+
+  const E = client('E'); await E.open();
+  E.send({ type: 'join', code: 'RESET1', name: 'Yara' });
+  await E.waitFor((m) => m.type === 'joined');
+  const syncOnJoin = await E.waitFor((m) => m.type === 'ready-state');
+  ok(syncOnJoin.p1 === true && syncOnJoin.p2 === false, 'joining player is told the host is already ready');
+
+  D.close();
+  const resetMsg = await E.waitFor((m) => m.type === 'ready-state' && m.p1 === false, 3000);
+  ok(resetMsg.p1 === false, "host's ready flag clears when they disconnect before the match starts");
 
   console.log('\nAll ' + passed + ' checks passed.');
   process.exit(0);

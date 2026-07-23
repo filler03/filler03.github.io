@@ -4,8 +4,10 @@
 //
 // Clients send  { type: 'join', code, name, token? }  to enter a room. Once both
 // seats are filled the server creates a Match (game.js) that runs the physics and
-// streams ball/state/events to BOTH players. Seat 1 pushes the game options; the
-// match starts automatically the moment both seats are present.
+// streams ball/state/events to BOTH players. Seat 1 pushes the game options; each
+// seat also sends { t: 'ready', v: bool } to toggle its own ready state, and the
+// match starts automatically the moment both seats are present AND both have
+// marked themselves ready.
 //
 // Disconnects PAUSE nothing visible: the match keeps running and the seat is held
 // for a grace window, so a player can close the tab and reopen (with their saved
@@ -59,6 +61,13 @@ class Rooms {
   _clearGrace(room, idx) { const t = room.graceTimers.get(idx); if (t) { clearTimeout(t); room.graceTimers.delete(idx); } }
   _broadcast(room, raw) { for (const s of room.seats) if (s && s.conn) s.conn.send(raw); }
   _sender(room) { const self = this; return function (msg) { self._broadcast(room, JSON.stringify(msg)); }; }
+  _syncReady(room) {
+    this._broadcast(room, JSON.stringify({
+      type: 'ready-state',
+      p1: !!(room.seats[0] && room.seats[0].ready),
+      p2: !!(room.seats[1] && room.seats[1].ready)
+    }));
+  }
 
   _handleMessage(conn, raw) {
     let msg; try { msg = JSON.parse(raw); } catch (e) { return; }
@@ -77,6 +86,11 @@ class Rooms {
       if (role === 1) { if (msg.o) room.options = msg.o; this._maybeStart(room); }
       return;
     }
+    if (msg.t === 'ready') {
+      const seat = room.seats[(role || 0) - 1];
+      if (seat) { seat.ready = !!msg.v; this._syncReady(room); this._maybeStart(room); }
+      return;
+    }
     if (msg.t === 'leave') { this._leave(conn); return; }
     if (!room.match) return;
     if (msg.t === 'kick') { room.match.applyKick(role, Number(msg.vx), Number(msg.vy), Number(msg.vz)); return; }
@@ -86,6 +100,7 @@ class Rooms {
   _maybeStart(room) {
     if (!room || room.match) return;
     if (!(room.seats[0] && room.seats[1])) return;
+    if (!(room.seats[0].ready && room.seats[1].ready)) return;
     room.match = new Match(room.options || {}, room.seats[0].name, room.seats[1].name, this._sender(room));
     room.match.start();
     this.log('match start', room.code);
@@ -118,6 +133,7 @@ class Rooms {
           room.match.onReconnect(idx + 1);
           ctrl(conn, room.match.resyncPayload());
         } else {
+          this._syncReady(room);
           this._maybeStart(room);
         }
         this.log('reconnect', code, 'role', idx + 1);
@@ -130,13 +146,14 @@ class Rooms {
     if (empty < 0) { ctrl(conn, { type: 'room-full' }); return; }
 
     const token = randomToken();
-    const seat = { conn, role: empty + 1, name: normName(msg.name) || ('Player ' + (empty + 1)), token };
+    const seat = { conn, role: empty + 1, name: normName(msg.name) || ('Player ' + (empty + 1)), token, ready: false };
     room.seats[empty] = seat;
     conn.roomCode = code; conn.role = empty + 1;
     ctrl(conn, { type: 'joined', role: empty + 1, roomCode: code, token, opponent: this._opponentName(room, empty), reconnect: false, match: !!room.match });
     const peer = this._peerOf(room, empty);
     if (peer) ctrl(peer.conn, { type: 'peer-joined', name: seat.name });
     this.log('join', code, 'role', empty + 1, seat.name);
+    this._syncReady(room);
     this._maybeStart(room);
   }
 
@@ -147,7 +164,13 @@ class Rooms {
     const seat = room.seats[idx]; if (!seat || seat.conn !== conn) return;
 
     seat.conn = null;
-    if (room.match) room.match.onDisconnect(idx + 1);
+    if (room.match) {
+      room.match.onDisconnect(idx + 1);
+    } else if (seat.ready) {
+      // Still in the lobby: don't leave the peer thinking a vanished player is ready.
+      seat.ready = false;
+      this._syncReady(room);
+    }
     this.log('disconnect', code, 'role', idx + 1, '(grace', this.graceMs + 'ms, silent)');
 
     const self = this;

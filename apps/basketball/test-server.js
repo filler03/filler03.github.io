@@ -77,9 +77,19 @@ async function run() {
   const apj = await a.waitFor((m) => m.type === 'peer-joined');
   assert(apj.name === 'Bob', 'host told opponent joined');
 
-  console.log('Auto-start (no explicit start needed):');
-  // Neither client sends a "start" — the server begins the match on its own the
-  // moment both seats are filled. This is what prevents a host stuck on "waiting".
+  console.log('Ready check: match waits for both players');
+  a.send({ t: 'ready', v: true });
+  const aReadyEcho = await a.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
+  assert(aReadyEcho.p1 === true && aReadyEcho.p2 === false, 'server reports only seat 1 ready so far');
+  let startedEarly = false;
+  try { await a.waitFor((m) => m.t === 'start', 300); startedEarly = true; } catch (e) { /* expected: no start yet */ }
+  assert(!startedEarly, 'match does NOT start with only one player ready');
+
+  b.send({ t: 'ready', v: true });
+  const bReadyEcho = await b.waitFor((m) => m.type === 'ready-state' && m.p1 && m.p2);
+  assert(bReadyEcho.p1 === true && bReadyEcho.p2 === true, 'server reports both players ready');
+
+  console.log('Match starts once both are ready:');
   const aStart = await a.waitFor((m) => m.t === 'start', 3000);
   const bStart = await b.waitFor((m) => m.t === 'start', 3000);
   assert(aStart.p1 === 'Alice' && aStart.p2 === 'Bob', 'both receive start with names');
@@ -145,7 +155,9 @@ async function run() {
   const y = new Client(); await y.open(); y.send({ type: 'join', code: 'HOLD', name: 'Y' });
   const yj = await y.waitFor((m) => m.type === 'joined');
   await x.waitFor((m) => m.type === 'peer-joined');
-  await y.waitFor((m) => m.t === 'start', 3000);   // auto-started when both seats filled
+  x.send({ t: 'ready', v: true });
+  y.send({ t: 'ready', v: true });
+  await y.waitFor((m) => m.t === 'start', 3000);   // starts once both seats are filled and ready
   await y.waitFor((m) => m.t === 'state' && m.gr === 1 && m.cp === 1 && m.wn === 0, 10000); // P1's turn, live
   // P1 (x) is the current player. Drop x; y (connected, not current) keeps watching.
   x.close();
@@ -163,6 +175,25 @@ async function run() {
   assert(!!left, 'remaining player told the other left');
 
   a.close(); b2.close();
+
+  console.log('Ready flag resets on pre-match disconnect:');
+  const p = new Client(); await p.open();
+  p.send({ type: 'join', code: 'RESET1', name: 'Zoe' });
+  await p.waitFor((m) => m.type === 'joined');
+  p.send({ t: 'ready', v: true });
+  await p.waitFor((m) => m.type === 'ready-state' && m.p1 === true);
+
+  const q = new Client(); await q.open();
+  q.send({ type: 'join', code: 'RESET1', name: 'Yara' });
+  await q.waitFor((m) => m.type === 'joined');
+  const syncOnJoin = await q.waitFor((m) => m.type === 'ready-state');
+  assert(syncOnJoin.p1 === true && syncOnJoin.p2 === false, 'joining player is told the host is already ready');
+
+  p.close();
+  const resetMsg = await q.waitFor((m) => m.type === 'ready-state' && m.p1 === false, 3000);
+  assert(resetMsg.p1 === false, "host's ready flag clears when they disconnect before the match starts");
+  q.close();
+
   await wait(100);
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   return failed === 0;
