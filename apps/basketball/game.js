@@ -2,35 +2,22 @@
 
 // Server-authoritative basketball match. One Match instance per room; it runs the
 // physics for BOTH players. Clients only send shots and render what they receive.
-// The simulation is ported verbatim from the old browser-side host code so the
-// gameplay feel is unchanged — the only difference is *where* it runs.
 
 var WORLD_W = 960, WORLD_H = 540;
 var FLOOR_Y = WORLD_H - 90;
 var BALL_R = 18, HOOP_W = 60, RIM_R = 5;
 var GRAVITY = 0.55, AIR = 0.997, FRICTION = 0.98;
-var STEP = 1 / 60;                 // fixed physics timestep
-var MAX_SHOT_SPEED = 60;           // clamp against bad/malicious input
-// How often the server streams the ball position while it's moving, in ms.
-// Lower = smoother on the client (more updates), at a tiny bandwidth cost.
-// ~16ms ≈ 60/sec (one per physics tick); 33ms ≈ 30/sec. Tune to taste.
+var STEP = 1 / 60;
+var MAX_SHOT_SPEED = 60;
 var BALL_SEND_MS = 16;
 var COLORS = { 1: '#ff6b6b', 2: '#4a9eff' };
 var DEFAULTS = { speed: 1.1, shotClock: 10, halfLength: 60, bounce: 0.7 };
 
-// ---- "Frenzy" mode: simultaneous, multi-ball free-for-all --------------------
-// Both players play at once. There is a shared pool of balls (an even count,
-// 2..10) spread evenly across the floor. Either player can grab any resting,
-// un-held ball, aim it, and shoot -- while a ball is being aimed it is anchored
-// and immovable (the other player can't grab it and balls that hit it just bounce
-// off). Balls collide with one another at rest and in the air, so you can knock a
-// rival's shot off course. There are no turns, no shot clock, and no halftime; the
-// match clock counts down but every `pointsPer` combined points add `bonusSecs`.
 var FRENZY_DEFAULTS = { speed: 1.1, halfLength: 60, bounce: 0.7, balls: 6, pointsPer: 5, bonusSecs: 10, scoreMode: 'own' };
-var GRAB_R = 70;          // how close a tap must be (world units) to grab a ball
-var MAX_HOLD_MS = 8000;   // safety: auto-release a ball held longer than this
-var BALL_REST = 0.9;      // restitution for ball-to-ball collisions
-var BALLS_SEND_MS = 33;   // multi-ball stream cadence (~30/sec)
+var GRAB_R = 70;
+var MAX_HOLD_MS = 8000;
+var BALL_REST = 0.9;
+var BALLS_SEND_MS = 33;
 
 var hoopLeft = { x: 15, y: WORLD_H * 0.4, side: 'left' };
 var hoopRight = { x: WORLD_W - 15, y: WORLD_H * 0.4, side: 'right' };
@@ -46,7 +33,7 @@ function sanitizeOptions(o) {
   o = o || {};
   if (o.mode === 'frenzy') {
     var n = Math.round(num(o.balls, 2, 10, FRENZY_DEFAULTS.balls));
-    if (n % 2 !== 0) n += (n < 10 ? 1 : -1);   // must be even
+    if (n % 2 !== 0) n += (n < 10 ? 1 : -1);
     return {
       mode: 'frenzy',
       speed: num(o.speed, 0.6, 1.8, FRENZY_DEFAULTS.speed),
@@ -69,12 +56,12 @@ function sanitizeOptions(o) {
 
 class Match {
   constructor(options, name1, name2, send, onEnd) {
-    this.send = send;               // send(msgObject) -> broadcast to both players
-    this.onEnd = onEnd || null;     // called once when the match ends (room teardown)
+    this.send = send;
+    this.onEnd = onEnd || null;
     this.options = sanitizeOptions(options);
-    this.mode = this.options.mode;  // 'duel' (turn-based) or 'frenzy' (simultaneous multi-ball)
+    this.mode = this.options.mode;
     this.names = { 1: name1 || 'Player 1', 2: name2 || 'Player 2' };
-    this.connected = { 1: true, 2: true };   // per-seat; a drop no longer pauses the match
+    this.connected = { 1: true, 2: true };
     this.lastBallSent = 0;
     this.lastHeartbeat = 0;
     this._timers = [];
@@ -121,12 +108,7 @@ class Match {
     this.send({ t: 'start', o: this.options, p1: this.names[1], p2: this.names[2] });
     this.sendState(); this.sendBall(true);
   }
-  // A player's socket dropped: the match keeps running. If it's *their* turn, the
-  // clocks hold (see updateClocks) so they aren't penalized and the opponent just
-  // sees a normal "their turn" pause. The opponent is never notified.
   onDisconnect(role) { this.connected[role] = false; }
-  // They came back within the grace window: mark them present and reset the clock
-  // anchors so no time "jumps". The caller sends resyncPayload() to just this player.
   onReconnect(role) {
     this.connected[role] = true;
     this.lastClock = now(); this.lastGameClock = now(); this.acc = 0;
@@ -139,11 +121,7 @@ class Match {
     return { t: 'resync', o: this.options, p1: this.names[1], p2: this.names[2], st: this.stateObj(), ball: { x: Math.round(b.x), y: Math.round(b.y), r: b.rot, g: b.grounded ? 1 : 0 } };
   }
 
-  // Each player attacks their OWN colour's hoop, always the same side (red/P1 →
-  // right, blue/P2 → left). Sides never swap, so the rule stays intuitive.
-  targetHoop(player) {
-    return player === 1 ? 'right' : 'left';
-  }
+  targetHoop(player) { return player === 1 ? 'right' : 'left'; }
   isThree(x, side) {
     var tpr = WORLD_W / 3;
     if (side === 'left') return x > (hoopLeft.x + HOOP_W / 2) + tpr;
@@ -169,7 +147,6 @@ class Match {
     this.sendState();
   }
 
-  // Called by the server loop with elapsed milliseconds since the last tick.
   step(dtMs) {
     if (this.mode === 'frenzy') return this.stepFrenzy(dtMs);
     if (this._destroyed || this.phase !== 'playing') return;
@@ -261,9 +238,6 @@ class Match {
 
   updateClocks() {
     var self = this, t = now();
-    // If it's the disconnected player's turn, freeze the clocks and wait for them.
-    // To the connected opponent this just looks like the other player taking their
-    // time — no turnover, no half ending, no visible interruption.
     if (!this.connected[this.currentPlayer]) { this.lastClock = t; this.lastGameClock = t; return; }
     if (this.shotClockActive && this.ball.grounded && this.phase === 'playing') {
       var el = (t - this.lastClock) / 1000;
@@ -294,7 +268,7 @@ class Match {
     this._timeout(function () { self.secondHalf(); }, 4500);
   }
   secondHalf() {
-    this.half = 2; this.phase = 'playing'; this.sidesSwapped = false;   // sides stay put
+    this.half = 2; this.phase = 'playing'; this.sidesSwapped = false;
     this.gameTimer = this.options.halfLength; this.currentPlayer = 2;
     this.initialDrop = true; this.waitingForNextTurn = false; this.shotClockActive = false;
     this.dropBall();
@@ -302,23 +276,31 @@ class Match {
   }
   gameOver() {
     this.phase = 'gameover'; this.shotClockActive = false;
-    // Carry the final score on the game-over message so the ended screen is always
-    // correct even if a state update was missed, then close the room (onEnd).
-    this.send({ t: 'phase', ph: 'gameover', gt: this.gameTimer, s1: this.players[1].score, s2: this.players[2].score });
+    var s1 = this.players[1].score, s2 = this.players[2].score;
+    // Server-authoritative final result on the game-over message so the ended
+    // screen is always correct even if a state update was missed.
+    // winner: 0 = draw, otherwise the seat number (1 or 2).
+    var winner = (s1 === s2) ? 0 : (s1 > s2 ? 1 : 2);
+    var winnerName = winner === 0 ? null : this.names[winner];
+    this.send({
+      t: 'phase', ph: 'gameover',
+      gt: this.gameTimer,
+      s1: s1, s2: s2,
+      p1: this.names[1], p2: this.names[2],
+      winner: winner, winnerName: winnerName
+    });
     var self = this; setTimeout(function () { if (self.onEnd) self.onEnd(); }, 0);
   }
 
-  // ======================================================================
-  //  FRENZY MODE — simultaneous, shared pool of balls, ball-to-ball physics
-  // ======================================================================
+  // ---- Frenzy mode ----
   resetFrenzy() {
     this.phase = 'playing';
     this.players = { 1: { score: 0, shots: 0, made: 0, turnovers: 0 }, 2: { score: 0, shots: 0, made: 0, turnovers: 0 } };
     this.gameTimer = this.options.halfLength;
     this.started = false;
-    this.held = { 1: -1, 2: -1 };     // index of the ball each player is aiming (-1 = none)
+    this.held = { 1: -1, 2: -1 };
     this.heldSince = { 1: 0, 2: 0 };
-    this.bonusCount = 0;              // how many pointsPer thresholds have paid out
+    this.bonusCount = 0;
     this.acc = 0; this.lastGameClock = 0;
     this._lastBallsStr = '';
     this.initBalls();
@@ -327,24 +309,21 @@ class Match {
     this.balls = [];
     var n = this.options.balls;
     for (var i = 0; i < n; i++) {
-      var x = WORLD_W * (i + 0.5) / n;   // evenly spread across the floor, symmetric about centre
+      var x = WORLD_W * (i + 0.5) / n;
       this.balls.push({ i: i, x: x, y: FLOOR_Y - BALL_R, vx: 0, vy: 0, rot: 0, av: 0, grounded: true, shooter: 0, target: null, scored: false, _below: false, _prevY: 0, _originX: x });
     }
   }
   startFrenzy() {
-    this.reset();                      // -> resetFrenzy (mode dispatch)
+    this.reset();
     this.started = true; this.lastGameClock = now();
     this.send({ t: 'start', o: this.options, p1: this.names[1], p2: this.names[2] });
     this.sendState(); this.sendBalls(true);
   }
 
   heldByOf(i) { return this.held[1] === i ? 1 : (this.held[2] === i ? 2 : 0); }
-  // Fixed sides in frenzy (no halftime/swap): player 1 shoots the RIGHT hoop, 2 the LEFT.
   targetHoopFrenzy(player) { return player === 1 ? 'right' : 'left'; }
-  // A ball can be grabbed only if it's free (nobody's aiming it) and at rest.
   grabbable(b) { return this.heldByOf(b.i) === 0 && b.grounded; }
 
-  // Claim the nearest resting, un-held ball to (x,y) and anchor it for aiming.
   grab(player, x, y) {
     if (this.mode !== 'frenzy' || this._destroyed || this.phase !== 'playing') return;
     if (!this.connected[player] || this.held[player] >= 0) return;
@@ -359,18 +338,17 @@ class Match {
     if (best < 0) return;
     this.held[player] = best; this.heldSince[player] = now();
     var hb = this.balls[best];
-    hb.vx = 0; hb.vy = 0; hb.av = 0; hb.grounded = false;   // anchored: frozen & immovable, not "resting"
+    hb.vx = 0; hb.vy = 0; hb.av = 0; hb.grounded = false;
     hb.shooter = 0; hb.target = null; hb.scored = false; hb._below = false;
     this.send({ t: 'evt', k: 'grab', by: player, i: best });
     this.sendBalls(true);
   }
 
-  // Let a held ball go without shooting (a tap / cancelled aim).
   release(player, i) {
     if (this.mode !== 'frenzy') return;
     var held = this.held[player];
     if (held < 0) return;
-    if (i != null && Number(i) !== held) return;   // only release the ball you actually hold
+    if (i != null && Number(i) !== held) return;
     this.held[player] = -1;
     var b = this.balls[held];
     if (b) { b.vx = 0; b.vy = 0; b.av = 0; b.grounded = (b.y >= FLOOR_Y - BALL_R - 1); }
@@ -381,7 +359,7 @@ class Match {
   applyShotFrenzy(player, i, vx, vy) {
     if (this._destroyed || this.phase !== 'playing') return;
     i = Number(i);
-    if (this.held[player] !== i) return;      // you can only shoot the ball you're aiming
+    if (this.held[player] !== i) return;
     var c = clampSpeed(vx, vy); vx = c[0]; vy = c[1];
     if (!isFinite(vx) || !isFinite(vy)) return;
     var b = this.balls[i]; if (!b) return;
@@ -398,7 +376,6 @@ class Match {
   stepFrenzy(dtMs) {
     if (this._destroyed || this.phase !== 'playing') return;
     var t = now();
-    // Safety: a ball can't be locked forever. Auto-release anything held too long.
     for (var pl = 1; pl <= 2; pl++) {
       if (this.held[pl] >= 0 && t - this.heldSince[pl] > MAX_HOLD_MS) this.release(pl, this.held[pl]);
     }
@@ -415,8 +392,8 @@ class Match {
     var sp = this.options.speed, bnc = this.options.bounce, balls = this.balls;
     for (var k = 0; k < balls.length; k++) {
       var b = balls[k];
-      if (this.heldByOf(b.i)) continue;    // anchored while being aimed
-      if (b.grounded) continue;            // resting (still collides, handled below)
+      if (this.heldByOf(b.i)) continue;
+      if (b.grounded) continue;
       b.vy += GRAVITY * sp;
       b.vx *= Math.pow(AIR, sp); b.vy *= Math.pow(AIR, sp);
       b._prevY = b.y;
@@ -427,21 +404,18 @@ class Match {
         b.y = FLOOR_Y - BALL_R; b.vy *= -bnc; b.vx *= FRICTION; b.av = b.vx * 0.03;
         if (Math.abs(b.vy) < 1 && Math.abs(b.vx) < 0.5) {
           b.vx = 0; b.vy = 0; b.grounded = true;
-          b.shooter = 0; b.target = null; b.scored = false; b._below = false;   // shot is over
+          b.shooter = 0; b.target = null; b.scored = false; b._below = false;
         }
       }
       if (b.x - BALL_R < 0) { b.x = BALL_R; b.vx *= -bnc; }
       if (b.x + BALL_R > WORLD_W) { b.x = WORLD_W - BALL_R; b.vx *= -bnc; }
     }
     this.ballBallCollisions();
-    // Keep resting balls glued to the floor after any collision nudged them.
     for (var j = 0; j < balls.length; j++) { if (balls[j].grounded) balls[j].y = FLOOR_Y - BALL_R; }
   }
 
   wakeBall(b) { if (b.grounded && (Math.abs(b.vx) > 0.5 || Math.abs(b.vy) > 0.5)) b.grounded = false; }
 
-  // Elastic-ish equal-mass collisions between every pair of balls. A ball being
-  // aimed (held) is treated as immovable: others bounce off it but it doesn't move.
   ballBallCollisions() {
     var balls = this.balls, n = balls.length, D = BALL_R * 2, contact = false;
     for (var a = 0; a < n; a++) {
@@ -515,7 +489,6 @@ class Match {
     }
   }
 
-  // Every `pointsPer` COMBINED points, add `bonusSecs` to the clock.
   onScoreFrenzy() {
     var total = this.players[1].score + this.players[2].score;
     var reached = Math.floor(total / this.options.pointsPer);
@@ -530,7 +503,6 @@ class Match {
   updateClocksFrenzy() {
     if (this.phase !== 'playing') return;
     var t = now();
-    // Hold the clock before tip-off and whenever either player is away.
     if (!this.started || !this.connected[1] || !this.connected[2]) { this.lastGameClock = t; return; }
     var el = (t - this.lastGameClock) / 1000;
     if (el >= 1) {
@@ -558,7 +530,6 @@ class Match {
     this.send({ t: 'balls', b: arr });
   }
 
-  // ---- broadcast ----
   sendBall(force, contact) {
     var t = now();
     if (!force && t - this.lastBallSent < BALL_SEND_MS) return;

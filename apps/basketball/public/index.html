@@ -36,7 +36,6 @@
     -webkit-user-select: none; user-select: none;
   }
   #game { position: fixed; inset: 0; display: block; touch-action: none; }
-
   /* ---------- overlays ---------- */
   .overlay {
     position: fixed; inset: 0; z-index: 20;
@@ -47,7 +46,6 @@
     backdrop-filter: blur(6px);
   }
   .overlay.hidden { display: none; }
-
   .card {
     width: 100%; max-width: 380px; margin: auto;
     background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
@@ -65,7 +63,6 @@
   }
   h1.title .ball { filter: drop-shadow(0 3px 8px rgba(255,140,50,0.4)); }
   .sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
-
   label.field { display: block; margin: 0 0 14px; }
   label.field .lab { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; display: block; }
   input.txt {
@@ -74,7 +71,6 @@
     outline: none; font-family: inherit;
   }
   input.txt:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(255,204,51,0.16); }
-
   .code-row { display: flex; gap: 10px; align-items: stretch; }
   input.code {
     flex: 1; text-transform: uppercase; letter-spacing: 0.42em; text-align: center;
@@ -88,7 +84,6 @@
     font-size: 13px; font-weight: 600;
   }
   .mini-btn:active { transform: scale(0.97); }
-
   .btn {
     width: 100%; padding: 15px; margin-top: 8px; border: none; border-radius: 14px; cursor: pointer;
     font-size: 17px; font-weight: 800; letter-spacing: 0.02em; font-family: inherit;
@@ -98,13 +93,10 @@
   .btn:active { transform: translateY(1px); }
   .btn.ghost { background: transparent; color: var(--muted); box-shadow: none; border: 1px solid var(--glass-line); }
   .btn.secondary { background: linear-gradient(135deg, #4a9eff, #2a7ed8); color: #04121f; box-shadow: 0 10px 24px rgba(42,126,216,0.3); }
-
   .err { color: var(--danger); font-size: 13px; min-height: 18px; margin: 10px 2px 0; text-align: center; }
   .how { margin: 18px 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; text-align: center; }
   .back-link { display: inline-block; margin-top: 16px; color: var(--muted); font-size: 12.5px; letter-spacing: .04em; text-decoration: none; border-bottom: 1px solid transparent; transition: color .2s ease, border-color .2s ease; }
   .back-link:hover { color: var(--amber); border-bottom-color: var(--line); }
-
-  /* scoreboard-style code shown while waiting */
   .code-badge {
     margin: 4px auto 18px; text-align: center;
     font-family: "SFMono-Regular", ui-monospace, "Courier New", monospace;
@@ -113,8 +105,6 @@
   }
   .waiting-dots::after { content: ""; animation: dots 1.4s steps(4, end) infinite; }
   @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
-
-  /* settings (host) */
   .settings { margin: 6px 0 4px; }
   .set-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 12px 0; }
   .set-row .name { font-size: 13.5px; color: var(--ink); }
@@ -135,7 +125,6 @@
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
   input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: none; border-radius: 50%; background: var(--amber); cursor: pointer; }
   .divider { height: 1px; background: var(--glass-line); margin: 16px 0; }
-
   /* ---------- in-game HUD ---------- */
   #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
   #topbar {
@@ -154,7 +143,6 @@
   #p1card { color: var(--p1); }
   #p2card { color: var(--p2); }
   #p1card .pscore, #p2card .pscore { color: var(--ink); }
-
   #center {
     flex: 0 0 auto; min-width: 96px; background: var(--glass); border: 1px solid var(--glass-line);
     border-radius: 14px; padding: 6px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
@@ -163,15 +151,12 @@
   #half { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
   #shotclock { font-size: 13px; font-weight: 800; color: var(--amber); font-variant-numeric: tabular-nums; min-height: 16px; }
   #shotclock.warn { color: var(--danger); }
-
   #turnhint {
     position: absolute; left: 0; right: 0; bottom: max(18px, env(safe-area-inset-bottom));
     text-align: center; font-size: 14px; font-weight: 700; color: var(--ink); pointer-events: none;
     text-shadow: 0 2px 8px rgba(0,0,0,0.6);
   }
   #turnhint .swipe { color: var(--muted); font-weight: 500; }
-
-  /* connection pill */
   #pill {
     position: fixed; z-index: 30; top: max(8px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
     padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
@@ -183,13 +168,15 @@
   #pill.warn .dot { background: var(--amber); animation: blink 1s infinite; }
   #pill.bad .dot { background: var(--danger); }
   @keyframes blink { 50% { opacity: 0.25; } }
-
   .result-row { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 4px; border-bottom: 1px solid var(--glass-line); }
   .result-row .rn { font-weight: 700; font-size: 16px; }
   .result-row .rs { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .result-row .rd { font-size: 12px; color: var(--muted); }
   .winner { text-align: center; font-size: 22px; font-weight: 800; margin: 16px 0 6px; }
-
+  .final-score {
+    text-align: center; font-size: 46px; font-weight: 800; font-variant-numeric: tabular-nums;
+    letter-spacing: 0.06em; margin: 4px 0 14px; color: var(--ink); line-height: 1;
+  }
   @media (prefers-reduced-motion: reduce) {
     .waiting-dots::after, #pill.warn .dot { animation: none; }
   }
@@ -228,8 +215,6 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-
-<!-- in-game HUD -->
 <div id="hud">
   <div id="topbar">
     <div class="pcard p1" id="p1card"><span class="pname" id="p1name">Player 1</span><span class="pscore" id="p1score">0</span></div>
@@ -239,10 +224,7 @@
   <div id="turnhint"></div>
   <button id="leaveBtn" type="button">Leave</button>
 </div>
-
 <div id="pill"><span class="dot"></span><span id="pilltext">Connected</span></div>
-
-<!-- menu / lobby -->
 <div class="overlay" id="menu">
   <div class="card">
     <p class="eyebrow">Multiplayer</p>
@@ -262,8 +244,6 @@
     <div style="text-align:center"><a class="back-link" href="/">← Back to site</a></div>
   </div>
 </div>
-
-<!-- waiting room -->
 <div class="overlay hidden" id="waiting">
   <div class="card">
     <p class="eyebrow" id="waitEyebrow">Waiting</p>
@@ -301,8 +281,6 @@
     <button class="btn ghost" id="cancelBtn" type="button">Cancel</button>
   </div>
 </div>
-
-<!-- generic message overlay (disconnect / ended) -->
 <div class="overlay hidden" id="msg">
   <div class="card" style="text-align:center">
     <h1 class="title" style="font-size:26px" id="msgTitle">Reconnecting</h1>
@@ -310,8 +288,6 @@
     <button class="btn ghost" id="msgBtn" type="button" style="display:none">Back to menu</button>
   </div>
 </div>
-
-<!-- halftime -->
 <div class="overlay hidden" id="halftime">
   <div class="card" style="text-align:center">
     <p class="eyebrow" style="color:var(--amber)">Halftime</p>
@@ -320,20 +296,17 @@
     <p class="sub" id="htCount">Second half starting…</p>
   </div>
 </div>
-
-<!-- game over -->
 <div class="overlay hidden" id="gameover">
   <div class="card">
     <p class="eyebrow" style="text-align:center">Final</p>
     <div class="winner" id="winner"></div>
+    <div class="final-score" id="finalScoreLine"></div>
     <div id="finalScores"></div>
     <button class="btn secondary" id="rematchBtn" type="button" style="margin-top:16px">Rematch</button>
     <button class="btn ghost" id="exitBtn" type="button">Back to menu</button>
     <div class="err" id="gameoverStatus" style="color:var(--muted)"></div>
   </div>
 </div>
-
-<!-- confirm leaving mid-game -->
 <div class="overlay hidden" id="confirmLeave">
   <div class="card" style="text-align:center">
     <h1 class="title" style="font-size:24px">Leave the game?</h1>
@@ -342,63 +315,44 @@
     <button class="btn ghost" id="confirmLeaveNo" type="button">Keep playing</button>
   </div>
 </div>
-
-<!-- shown on phones held in portrait -->
 <div class="overlay hidden" id="rotate">
   <div class="rot-icon">📱</div>
   <h1 class="title" style="font-size:24px">Rotate your device</h1>
   <p class="sub">This game plays in landscape — turn your phone sideways.</p>
 </div>
-
 <script>
 "use strict";
 // ============================================================
 //  Basketball · Multiplayer  (client)
-//  Host (role 1) is the authority: it runs the one physics sim
-//  for BOTH players' shots and streams the ball + events to the
-//  joiner (role 2), who renders and sends only its swipe.
-//  Everything is drawn in a fixed logical court (WORLD_W x WORLD_H)
-//  scaled + letterboxed to each device, so both screens agree.
 // ============================================================
-
 var $ = function (id) { return document.getElementById(id); };
-
-// ---- fixed logical court + physics (ported from the single-player game) ----
-var WORLD_W = 960, WORLD_H = 540;   // fixed logical court, landscape 16:9 (everyone renders this, letterboxed)
+var WORLD_W = 960, WORLD_H = 540;
 var FLOOR_Y = WORLD_H - 90;
 var BALL_R = 18, HOOP_W = 60, RIM_R = 5, NET_H = 30;
 var GRAVITY = 0.55, AIR = 0.997, FRICTION = 0.98;
-var STEP = 1 / 60;              // fixed physics timestep (host)
-var MAX_SHOT_SPEED = 60;        // clamp, guards against bad input
+var STEP = 1 / 60;
+var MAX_SHOT_SPEED = 60;
 var COLORS = { 1: '#ff6b6b', 2: '#4a9eff' };
 var DEFAULTS = { speed: 1.1, shotClock: 10, halfLength: 60, bounce: 0.7 };
-// Frenzy mode (simultaneous, multi-ball). Defaults mirror the server's.
 var FRENZY_DEFAULTS = { balls: 6, pointsPer: 5, bonusSecs: 10, scoreMode: 'own' };
-var GRAB_R = 70;   // tap-to-grab radius in world units (must match game.js)
-
+var GRAB_R = 70;
 var hoopLeft = { x: 15, y: WORLD_H * 0.4, side: 'left' };
 var hoopRight = { x: WORLD_W - 15, y: WORLD_H * 0.4, side: 'right' };
-
-// ---- connection state ----
 var net = {
   ws: null, role: 0, code: '', token: '', name: '', opponent: '',
   connected: false, reconnecting: false, retries: 0, manualClose: false, ended: false
 };
-var lobby = { p1: null, p2: null, r1: false, r2: false };   // pre-match ready state
+var lobby = { p1: null, p2: null, r1: false, r2: false };
 function isHost() { return net.role === 1; }
-
-// ---- game state (null until a match starts) ----
 var G = null;
 var particles = [], popups = [];
 var turnover = { active: false, start: 0, player: 1 };
 var hostAcc = 0;
 var lastBallSent = 0;
 var lastHeartbeat = 0;
-
 function now() { return Date.now(); }
 function formatTime(s) { s = Math.max(0, Math.floor(s)); var m = Math.floor(s / 60); var r = s % 60; return m + ':' + (r < 10 ? '0' : '') + r; }
 function clampSpeed(vx, vy) { var sp = Math.hypot(vx, vy); if (sp > MAX_SHOT_SPEED) { vx = vx * MAX_SHOT_SPEED / sp; vy = vy * MAX_SHOT_SPEED / sp; } return [vx, vy]; }
-
 function newGame(options, p1, p2) {
   var mode = (options && options.mode === 'frenzy') ? 'frenzy' : 'duel';
   var g = {
@@ -409,10 +363,12 @@ function newGame(options, p1, p2) {
     players: { 1: { score: 0, shots: 0, made: 0, turnovers: 0 }, 2: { score: 0, shots: 0, made: 0, turnovers: 0 } },
     gameTimer: options.halfLength,
     pausedByPeer: false,
-    lastClock: 0, lastGameClock: 0
+    lastClock: 0, lastGameClock: 0,
+    // Server-authoritative game-over fields, filled by applyPhase('gameover').
+    _winner: null, _winnerName: null
   };
   if (mode === 'frenzy') {
-    g.balls = [];            // render list, indexed by ball id: {i,x,y,rot,tx,ty,tr,h,g,s}
+    g.balls = [];
     g.pointsPer = options.pointsPer;
     g._gotBalls = false;
   } else {
@@ -421,13 +377,11 @@ function newGame(options, p1, p2) {
     g.initialDrop = true; g.waitingForNextTurn = false; g.shotClockActive = false;
     g.scoredThisShot = false; g.wentThroughBelow = false; g.shotOriginX = WORLD_W / 2; g.lastBallY = 0;
     g.ball = { x: WORLD_W / 2, y: -BALL_R, vx: 0, vy: 0, rot: 0, angularVel: 0, grounded: false };
-    g.ballTarget = null;     // joiner render target
+    g.ballTarget = null;
   }
   return g;
 }
-function targetHoop(player) {
-  return player === 1 ? 'right' : 'left';
-}
+function targetHoop(player) { return player === 1 ? 'right' : 'left'; }
 function isThree(x, side) {
   var tpr = WORLD_W / 3;
   if (side === 'left') return x > (hoopLeft.x + HOOP_W / 2) + tpr;
@@ -438,17 +392,12 @@ function dropBall() {
   b.x = WORLD_W / 2; b.y = WORLD_H * 0.25; b.vx = 0; b.vy = 5 * G.options.speed;
   b.angularVel = 0; b.rot = 0; b.grounded = false;
 }
-
-// ============================================================
-//  Networking
-// ============================================================
 function wsUrl() {
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var dir = location.pathname.replace(/[^/]*$/, ''); // directory of this page
+  var dir = location.pathname.replace(/[^/]*$/, '');
   return proto + '//' + location.host + dir + 'ws';
 }
 function send(o) { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(o)); }
-
 function connect(onOpen) {
   var ws;
   try { ws = new WebSocket(wsUrl()); }
@@ -457,14 +406,12 @@ function connect(onOpen) {
   ws.onopen = function () { net.connected = true; if (onOpen) onOpen(); };
   ws.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (e) { return; } onMessage(m); };
   ws.onclose = function () { net.connected = false; onClose(); };
-  ws.onerror = function () { /* onclose will follow */ };
+  ws.onerror = function () { };
 }
-
 function onMessage(m) {
-  if (m && m.type) { handleControl(m); return; }   // server control messages
-  if (m && m.t) { handleGame(m); return; }          // relayed peer messages
+  if (m && m.type) { handleControl(m); return; }
+  if (m && m.t) { handleGame(m); return; }
 }
-
 function handleControl(m) {
   switch (m.type) {
     case 'joined':
@@ -473,12 +420,12 @@ function handleControl(m) {
       net.connecting = false;
       saveSession();
       if (net.reconnecting) { handleReconnected(m); return; }
-      if (m.role === 1) { showWaiting(true); sendSetup(); }   // seat 1: waiting room + push settings
-      else { showWaiting(false); waitForStart(); }     // seat 2: server starts it once both are in
+      if (m.role === 1) { showWaiting(true); sendSetup(); }
+      else { showWaiting(false); waitForStart(); }
       break;
     case 'peer-joined':
       net.opponent = m.name;
-      if (isHost() && !G) sendSetup();                 // re-publish options; server auto-starts when both present
+      if (isHost() && !G) sendSetup();
       break;
     case 'peer-disconnected': onPeerDropped(); break;
     case 'peer-reconnected': onPeerBack(m); break;
@@ -492,10 +439,13 @@ function handleControl(m) {
       showMenuError(m.reason || 'Could not join. Try again.');
       closeSocket();
       break;
+    // The server has closed the room after the match ended. Detach this socket
+    // from that (now dead) room and forget the saved reconnect token so
+    // re-entering the same code starts a truly fresh session for both players
+    // instead of drifting back into a phantom old-room state.
+    case 'session-ended': onSessionEnded(); break;
   }
 }
-
-// The server runs the game; every client just renders what it sends.
 function handleGame(m) {
   switch (m.t) {
     case 'start': joinerStart(m); break;
@@ -508,21 +458,29 @@ function handleGame(m) {
     case 'phase': applyPhase(m); break;
   }
 }
-
 function closeSocket() {
   net.manualClose = true;
   try { if (net.ws) net.ws.close(); } catch (e) {}
   net.ws = null; net.connected = false;
 }
-
-// ============================================================
-//  Canvas + world->screen transform
-// ============================================================
+// The room was closed server-side at game over. Wipe the saved reconnect token,
+// close the orphaned socket so nothing can accidentally send `join` down it, and
+// keep the game-over overlay locked. The user's next Rematch/Back click will
+// open a NEW socket -- the only safe way to guarantee a fresh session.
+function onSessionEnded() {
+  net.ended = true;
+  net.token = '';
+  clearSession();
+  net.manualClose = true;
+  try { if (net.ws) net.ws.close(); } catch (e) {}
+  net.ws = null;
+  net.connected = false;
+  setPill(false);
+}
 var canvas = $('game');
 var ctx = canvas.getContext('2d');
 var dpr = 1;
 var view = { scale: 1, ox: 0, oy: 0, cw: 0, ch: 0 };
-
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   var cw = window.innerWidth, ch = window.innerHeight;
@@ -535,12 +493,6 @@ function resize() {
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
 }
 window.addEventListener('resize', resize);
-
-// --- landscape enforcement ---
-// A real orientation lock only works on some browsers (Android/Chrome in
-// fullscreen; iOS Safari not at all), so the reliable path is a "rotate your
-// device" overlay on phones held in portrait. The manifest handles the hard
-// lock when the game is installed to the home screen.
 function isTouchDevice() {
   return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || ('ontouchstart' in window);
 }
@@ -554,12 +506,8 @@ function tryLockLandscape() {
     if (screen.orientation && screen.orientation.lock) {
       screen.orientation.lock('landscape').catch(function () {});
     }
-  } catch (e) { /* not supported here; the overlay covers it */ }
+  } catch (e) {}
 }
-// Take over the screen on phones: go fullscreen (hides the browser chrome), then
-// lock landscape (the lock only "sticks" once we're fullscreen). No-op on desktop
-// and on iOS Safari, which has no in-browser fullscreen — there the home-screen
-// install (web manifest) is the path, hinted in the menu.
 function goImmersive() {
   if (!isTouchDevice()) return;
   try {
@@ -569,53 +517,34 @@ function goImmersive() {
     var p = fn.call(el);
     if (p && p.then) p.then(function () { tryLockLandscape(); }).catch(function () {});
     else tryLockLandscape();
-  } catch (e) { /* best-effort */ }
+  } catch (e) {}
 }
 function isImmersive() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
-// Fullscreen can only be entered from a user gesture, so we can't silently force it
-// on reopen. Instead, since the game is touch-driven, the next touch during play
-// re-enters fullscreen + relocks landscape whenever we've dropped out of it (page
-// reopened via the saved session, Esc pressed, returned from halftime, etc.). It
-// runs in the capture phase and never calls preventDefault, so that same touch
-// still aims and shoots — the restore is invisible to the player.
 (function () {
   var de = document.documentElement;
   var canFullscreen = !!(de.requestFullscreen || de.webkitRequestFullscreen || de.msRequestFullscreen);
-  if (!canFullscreen) return;   // e.g. iOS Safari — home-screen install is its path (hinted in the menu)
+  if (!canFullscreen) return;
   document.addEventListener('pointerdown', function () {
     if (isTouchDevice() && G && G.phase === 'playing' && !isImmersive()) goImmersive();
   }, true);
 })();
-
-// Keep the screen awake during play. The game is turn-based, so the player who's
-// waiting would otherwise let their phone auto-lock — which suspends the tab and
-// drops their socket, making the *other* player see "opponent disconnected". A
-// screen wake lock prevents that. It's auto-released when the tab is hidden, so we
-// re-acquire it whenever we come back to a live game.
 var wakeLock = null;
 function acquireWakeLock() {
   try {
     if ('wakeLock' in navigator && navigator.wakeLock && document.visibilityState === 'visible') {
       navigator.wakeLock.request('screen').then(function (wl) { wakeLock = wl; }).catch(function () {});
     }
-  } catch (e) { /* unsupported (older iOS/desktop) — harmless */ }
+  } catch (e) {}
 }
 function releaseWakeLock() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
-
-// When a backgrounded tab comes back, re-lock the screen and, if the socket died
-// while we were away, reconnect immediately instead of waiting for the OS to get
-// around to firing the close event.
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState !== 'visible') return;
   if (inGame()) acquireWakeLock();
-  // A backgrounded tab pauses requestAnimationFrame, so the ball didn't animate
-  // while we were away. Snap it to the server's latest position so it's correct the
-  // instant we're looking again, then normal interpolation takes over.
   if (G && G.mode === 'frenzy' && G.balls) { for (var bi = 0; bi < G.balls.length; bi++) { var bb = G.balls[bi]; if (bb) { bb.x = bb.tx; bb.y = bb.ty; bb.rot = bb.tr; } } }
   else if (G && G.ballTarget) { G.ball.x = G.ballTarget.x; G.ball.y = G.ballTarget.y; G.ball.rot = G.ballTarget.r; G.ball.grounded = !!G.ballTarget.g; }
   if (net.manualClose || !net.token) return;
   if (!(inGame() || inLobby())) return;
-  var ws = net.ws, dead = !ws || ws.readyState === 2 || ws.readyState === 3; // CLOSING | CLOSED
+  var ws = net.ws, dead = !ws || ws.readyState === 2 || ws.readyState === 3;
   if (dead && !net.reconnecting) {
     net.reconnecting = true;
     showReconnecting('Reconnecting\u2026');
@@ -629,22 +558,16 @@ function screenToWorld(cx, cy) {
   var r = canvas.getBoundingClientRect();
   return { x: (cx - r.left - view.ox) / view.scale, y: (cy - r.top - view.oy) / view.scale };
 }
-
-// ============================================================
-//  Input (swipe to shoot)
-// ============================================================
 var drag = { active: false, sx: 0, sy: 0, cx: 0, cy: 0, i: -1 };
 function pointer(e) {
   if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
   if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
   return { x: e.clientX, y: e.clientY };
 }
-// Duel: you shoot on your turn once the single ball is at rest.
 function canShoot() {
   return G && G.mode !== 'frenzy' && G.phase === 'playing' && !G.pausedByPeer && net.connected &&
     G.currentPlayer === net.role && G.ball.grounded && !G.waitingForNextTurn && !turnover.active;
 }
-// Frenzy helpers: a shared pool of balls, either player can grab a free, resting one.
 function frenzyActive() { return G && G.mode === 'frenzy' && G.phase === 'playing' && !G.pausedByPeer && net.connected; }
 function iAmHolding() { if (!G || !G.balls) return -1; for (var i = 0; i < G.balls.length; i++) { if (G.balls[i] && G.balls[i].h === net.role) return i; } return -1; }
 function nearestGrabbable(wx, wy) {
@@ -656,10 +579,10 @@ function nearestGrabbable(wx, wy) {
 function onDown(e) {
   var p = pointer(e);
   if (frenzyActive()) {
-    if (iAmHolding() >= 0) return;                 // already aiming a ball
+    if (iAmHolding() >= 0) return;
     var w = screenToWorld(p.x, p.y);
     var idx = nearestGrabbable(w.x, w.y);
-    if (idx < 0) return;                            // tapped empty floor — nothing to grab
+    if (idx < 0) return;
     e.preventDefault();
     drag.active = true; drag.i = idx; drag.sx = p.x; drag.sy = p.y; drag.cx = p.x; drag.cy = p.y;
     send({ t: 'grab', x: w.x, y: w.y });
@@ -677,7 +600,7 @@ function onDrag(e) {
 function onUp(e) {
   if (!drag.active) return;
   drag.active = false;
-  var end = pointer(e);            // the actual release point, not just the last move event
+  var end = pointer(e);
   if (end) { drag.cx = end.x; drag.cy = end.y; }
   var s = screenToWorld(drag.sx, drag.sy);
   var c = screenToWorld(drag.cx, drag.cy);
@@ -685,7 +608,7 @@ function onUp(e) {
   if (G && G.mode === 'frenzy') {
     var i = iAmHolding(); if (i < 0) i = drag.i;
     if (i < 0) return;
-    if (dist < 10) { send({ t: 'release', i: i }); return; }   // a tap lets the ball go
+    if (dist < 10) { send({ t: 'release', i: i }); return; }
     var powerF = Math.min(dist / 200, 1), speedF = powerF * 55;
     send({ t: 'shot', i: i, vx: dx / dist * speedF, vy: dy / dist * speedF });
     return;
@@ -705,16 +628,6 @@ canvas.addEventListener('touchstart', onDown, { passive: false });
 canvas.addEventListener('touchmove', onDrag, { passive: false });
 canvas.addEventListener('touchend', onUp, { passive: false });
 canvas.addEventListener('touchcancel', cancelDrag);
-
-
-// ============================================================
-//  Physics now runs on the SERVER (see game.js). This client only renders what
-//  the server streams and forwards the player's swipe as { t:'shot' }.
-// ============================================================
-
-// ============================================================
-//  Joiner: apply authoritative updates
-// ============================================================
 function joinerStart(m) {
   G = newGame(m.o, m.p1, m.p2);
   particles = []; popups = []; turnover.active = false;
@@ -748,7 +661,6 @@ function applyStateObj(s) {
   G.currentPlayer = s.cp; G.shotClock = s.sc; G.half = s.hf;
   G.sidesSwapped = !!s.sw; G.ball.grounded = !!s.gr; G.waitingForNextTurn = !!s.wn;
 }
-// Frenzy: merge the streamed ball array into the render list.
 function setBalls(m) {
   if (!G || !m.b) return;
   for (var k = 0; k < m.b.length; k++) {
@@ -761,8 +673,6 @@ function setBalls(m) {
 function applyState(m) {
   applyStateObj(m);
   if (!G) return;
-  // Self-correct if a phase message was missed: keep the visible screen in sync
-  // with the authoritative phase carried by every state heartbeat.
   if (G.phase === 'playing') {
     if (!$('halftime').classList.contains('hidden') || !$('gameover').classList.contains('hidden')) {
       $('halftime').classList.add('hidden'); $('gameover').classList.add('hidden'); $('hud').style.display = 'block';
@@ -778,8 +688,6 @@ function setBallTarget(m) {
   if (!G) return;
   G.ballTarget = { x: m.x, y: m.y, r: m.r, g: m.g };
   if (!G._gotBall) { G._gotBall = true; G.ball.x = m.x; G.ball.y = m.y; }
-  // A flagged contact point is the exact spot the ball touched a surface; snap to
-  // it so the bounce lands on the floor/wall instead of interpolating short of it.
   if (m.f) { G.ball.x = m.x; G.ball.y = m.y; }
   G.ball.grounded = !!m.g;
 }
@@ -789,7 +697,6 @@ function applyEvt(m) {
   else if (m.k === 'shot') spawnShotFx(m.x, m.y, m.c);
   else if (m.k === 'turnover') showTurnover(m.p);
   else if (m.k === 'bonus') spawnBonusFx(m.add);
-  // 'grab' / 'release' / 'clack' are reflected in the streamed ball state; no FX needed.
 }
 function spawnBonusFx(add) {
   popups.push({ x: WORLD_W / 2, y: 74, text: '+' + add + 's', life: 1.4, scale: 1.1, color: '#ffd700' });
@@ -805,17 +712,24 @@ function applyPhase(m) {
   else if (m.ph === 'second') {
     G.half = m.hf; G.currentPlayer = m.cp; G.gameTimer = m.gt; G.sidesSwapped = !!m.sw;
     G.phase = 'playing'; particles = []; popups = []; G._gotBall = false; hideHalftime(); showGameUI();
-  } else if (m.ph === 'gameover') { if (m.s1 != null) { G.players[1].score = m.s1; G.players[2].score = m.s2; } G.phase = 'gameover'; showGameOver(); }
+  } else if (m.ph === 'gameover') {
+    // Prefer the authoritative fields on the game-over payload (server sends the
+    // definitive final score, names, and winner). Fall back to whatever local
+    // state we happen to hold.
+    if (m.s1 != null) { G.players[1].score = m.s1; G.players[2].score = m.s2; }
+    if (m.p1) G.names[1] = m.p1;
+    if (m.p2) G.names[2] = m.p2;
+    if (m.winner != null) G._winner = m.winner;
+    if (m.winnerName != null) G._winnerName = m.winnerName;
+    G.phase = 'gameover';
+    showGameOver();
+  }
 }
-// How tightly the rendered ball tracks the server's latest position, per 60fps
-// frame (0..1). Higher = snappier/more responsive but shows jitter more; lower =
-// smoother but laggier. Made frame-rate independent below so it feels the same
-// whether the device runs at 30, 60, or 120 fps.
 var BALL_SMOOTH = 0.5;
 function lerpBall(dt) {
   if (!G || !G.ballTarget) return;
   var b = G.ball, tg = G.ballTarget;
-  var k = 1 - Math.pow(1 - BALL_SMOOTH, Math.max(0, dt) * 60);   // dt-normalized to 60fps
+  var k = 1 - Math.pow(1 - BALL_SMOOTH, Math.max(0, dt) * 60);
   b.x += (tg.x - b.x) * k; b.y += (tg.y - b.y) * k; b.rot = tg.r;
   if (tg.g && Math.abs(tg.x - b.x) < 0.6 && Math.abs(tg.y - b.y) < 0.6) { b.x = tg.x; b.y = tg.y; }
 }
@@ -828,10 +742,6 @@ function lerpBalls(dt) {
     if (Math.abs(b.tx - b.x) < 0.6 && Math.abs(b.ty - b.y) < 0.6) { b.x = b.tx; b.y = b.ty; }
   }
 }
-
-// ============================================================
-//  Effects (spawned locally on both sides)
-// ============================================================
 function spawnShotFx(x, y, color) {
   for (var i = 0; i < 5; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3 - 1, life: 1, decay: 0.03, size: Math.random() * 8 + 4, color: color });
 }
@@ -850,9 +760,6 @@ function showTurnover(player) { turnover.active = true; turnover.start = now(); 
 function hideTurnover() { turnover.active = false; }
 function updateFx(dt) {
   var f = Math.min(dt * 60, 3);
-  // The turnover banner is cosmetic and must clear itself on BOTH players. The host
-  // also clears it via switchTurn, but the joiner only ever received the event, so
-  // without this it would stay "active" forever and block the joiner from shooting.
   if (turnover.active && now() - turnover.start > 1000) turnover.active = false;
   var np = [];
   for (var i = 0; i < particles.length; i++) {
@@ -868,33 +775,23 @@ function updateFx(dt) {
   }
   popups = ns;
 }
-
-// ============================================================
-//  Rendering (fixed world coordinates)
-// ============================================================
 function drawCourt() {
   var g = ctx.createLinearGradient(0, 0, 0, WORLD_H);
   g.addColorStop(0, '#0f2135'); g.addColorStop(0.7, '#0b1622'); g.addColorStop(1, '#0a1017');
   ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-
   ctx.fillStyle = '#8B4513'; ctx.fillRect(0, FLOOR_Y, WORLD_W, WORLD_H - FLOOR_Y);
   ctx.strokeStyle = '#a0522d'; ctx.lineWidth = 2;
   for (var x = 0; x < WORLD_W; x += 80) { ctx.beginPath(); ctx.moveTo(x, FLOOR_Y); ctx.lineTo(x, WORLD_H); ctx.stroke(); }
-
   ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 3;
   ctx.setLineDash([10, 10]);
   ctx.beginPath(); ctx.moveTo(WORLD_W / 2, 0); ctx.lineTo(WORLD_W / 2, FLOOR_Y); ctx.stroke();
   ctx.setLineDash([]);
-
   ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 3;
   var tpr = WORLD_W / 3;
   ctx.beginPath(); ctx.arc(hoopLeft.x + HOOP_W / 2, FLOOR_Y, tpr, Math.PI, 0); ctx.stroke();
   ctx.beginPath(); ctx.arc(hoopRight.x - HOOP_W / 2, FLOOR_Y, tpr, Math.PI, 0); ctx.stroke();
 }
-function hoopColorFor(hoop) {
-  // Fixed, colour-coded hoops in both modes: left = blue (P2), right = red (P1).
-  return hoop.side === 'left' ? COLORS[2] : COLORS[1];
-}
+function hoopColorFor(hoop) { return hoop.side === 'left' ? COLORS[2] : COLORS[1]; }
 function drawBackboard(hoop) {
   var isLeft = hoop.side === 'left';
   var boardX = isLeft ? 0 : WORLD_W - 10;
@@ -934,7 +831,7 @@ function drawBall() {
   if (b.y + BALL_R < 0) return;
   ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
   ctx.font = (BALL_R * 2) + 'px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('🏀', 0, 0); ctx.restore();
+  ctx.fillText('\ud83c\udfc0', 0, 0); ctx.restore();
 }
 function drawOffscreen() {
   var b = G.ball;
@@ -945,7 +842,6 @@ function drawOffscreen() {
   ctx.fillStyle = 'white'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
   ctx.fillText(Math.abs(Math.round(b.y)) + '', ix, 62);
 }
-// Shared aim arrow, drawn from an origin (bx,by) in the swipe direction.
 function drawAimArrow(bx, by, dx, dy, dist) {
   var len = Math.min(dist * 1.5, 200), ang = Math.atan2(dy, dx);
   var ex = bx + Math.cos(ang) * len, ey = by + Math.sin(ang) * len;
@@ -973,23 +869,22 @@ function drawAim() {
   if (dist < 10) return;
   drawAimArrow(G.ball.x, G.ball.y, dx, dy, dist);
 }
-// ---- frenzy rendering ----
 function drawBallsFrenzy() {
   if (!G.balls) return;
   for (var i = 0; i < G.balls.length; i++) {
     var b = G.balls[i]; if (!b) continue;
-    if (b.s) {                         // in flight: glow ring in the shooter's colour
+    if (b.s) {
       ctx.save(); ctx.globalAlpha = 0.55; ctx.strokeStyle = COLORS[b.s]; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R + 5, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
-    if (b.h) {                         // being aimed: protected — dashed ring in holder's colour
+    if (b.h) {
       ctx.save(); ctx.strokeStyle = COLORS[b.h]; ctx.globalAlpha = 0.95; ctx.lineWidth = 3;
       ctx.setLineDash([7, 6]); ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R + 9, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]); ctx.restore();
     }
     ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
     ctx.font = (BALL_R * 2) + 'px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('🏀', 0, 0); ctx.restore();
+    ctx.fillText('\ud83c\udfc0', 0, 0); ctx.restore();
   }
 }
 function drawAimFrenzy() {
@@ -1018,10 +913,9 @@ function drawTurnover() {
   ctx.fillStyle = '#ff4444'; ctx.font = 'bold 46px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText('TURNOVER', WORLD_W / 2, WORLD_H / 2 - 6);
   ctx.fillStyle = COLORS[turnover.player]; ctx.font = '16px Arial';
-  ctx.fillText((G ? G.names[turnover.player] : '') + ' · shot clock', WORLD_W / 2, WORLD_H / 2 + 28);
+  ctx.fillText((G ? G.names[turnover.player] : '') + ' \u00b7 shot clock', WORLD_W / 2, WORLD_H / 2 + 28);
   ctx.restore();
 }
-
 function render() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1041,13 +935,8 @@ function drawIdleCourt() {
   g.addColorStop(0, '#0f2135'); g.addColorStop(1, '#0a1017');
   ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 }
-
-// ============================================================
-//  HUD + overlay UI
-// ============================================================
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function resetPlayButton() { var b = $('playBtn'); b.textContent = 'Play'; b.disabled = false; }
-
 function updateHud() {
   $('p1name').textContent = G.names[1];
   $('p2name').textContent = G.names[2];
@@ -1059,12 +948,11 @@ function updateHud() {
   if (G.mode === 'frenzy') {
     $('half').textContent = 'FRENZY';
     var scF = $('shotclock'); scF.textContent = ''; scF.classList.remove('warn');
-    // Both players are always live in frenzy — light both cards.
     $('p1card').classList.toggle('active', G.phase === 'playing');
     $('p2card').classList.toggle('active', G.phase === 'playing');
     var thF = $('turnhint');
     thF.innerHTML = (G.phase === 'playing')
-      ? 'Grab a ball&nbsp;&nbsp;<span class="swipe">— swipe to shoot, both at once</span>'
+      ? 'Grab a ball&nbsp;&nbsp;<span class="swipe">\u2014 swipe to shoot, both at once</span>'
       : '';
     return;
   }
@@ -1079,17 +967,14 @@ function updateHud() {
   var th = $('turnhint');
   if (G.phase === 'playing') {
     if (G.currentPlayer === net.role) {
-      if (G.ball.grounded && !G.waitingForNextTurn && !turnover.active) th.innerHTML = 'Your shot&nbsp;&nbsp;<span class="swipe">— swipe to shoot</span>';
+      if (G.ball.grounded && !G.waitingForNextTurn && !turnover.active) th.innerHTML = 'Your shot&nbsp;&nbsp;<span class="swipe">\u2014 swipe to shoot</span>';
       else th.textContent = 'Your ball';
-    } else { th.textContent = G.names[G.currentPlayer] + "\u2019s shot"; }
+    } else { th.textContent = G.names[G.currentPlayer] + '\u2019s shot'; }
   } else { th.textContent = ''; }
 }
-
 function hideOverlays() { ['menu', 'waiting', 'msg', 'halftime', 'gameover', 'confirmLeave'].forEach(function (id) { $(id).classList.add('hidden'); }); }
 function showGameUI() { hideOverlays(); $('hud').style.display = 'block'; checkOrientation(); }
 function hideGameUI() { $('hud').style.display = 'none'; }
-function showGameOverlaysReset() { turnover.active = false; }
-
 function showMenu() {
   clearPeerDropTimer(); releaseWakeLock();
   G = null; net.role = 0; net.opponent = '';
@@ -1109,7 +994,7 @@ function showMenuError(msg) {
 }
 function showWaiting(hostFlag) {
   resetPlayButton(); hideGameUI(); hideOverlays();
-  lobby = { p1: null, p2: null, r1: false, r2: false };   // server sends the real state right after
+  lobby = { p1: null, p2: null, r1: false, r2: false };
   $('waiting').classList.remove('hidden');
   $('waitCode').textContent = net.code;
   $('hostSettings').style.display = hostFlag ? 'block' : 'none';
@@ -1125,7 +1010,6 @@ function showWaiting(hostFlag) {
   updateReadyUI();
   setPill(true);
 }
-// Pre-match lobby: both players must tap Ready before the server starts the match.
 function updateReadyUI() {
   var bothHere = !!(lobby.p1 && lobby.p2);
   var myReady = net.role === 2 ? lobby.r2 : lobby.r1;
@@ -1149,10 +1033,9 @@ function updateReadyUI() {
 }
 function toggleReady() {
   var myReady = net.role === 2 ? lobby.r2 : lobby.r1;
-  send({ t: 'ready', v: !myReady });   // server echoes a 'lobby' update that refreshes the UI
+  send({ t: 'ready', v: !myReady });
 }
-function waitForStart() { /* joiner waits for the host's start message */ }
-
+function waitForStart() { }
 function rowHtml(pl) {
   var p = G.players[pl];
   var pct = p.shots ? Math.round(p.made / p.shots * 100) : 0;
@@ -1161,23 +1044,35 @@ function rowHtml(pl) {
     '<div class="rs">' + p.score + '</div></div>';
 }
 function scoreRows() { return rowHtml(1) + rowHtml(2); }
-
 function showHalftime() { hideGameUI(); $('halftime').classList.remove('hidden'); $('htScores').innerHTML = scoreRows(); }
 function hideHalftime() { $('halftime').classList.add('hidden'); }
 function showGameOver() {
   hideGameUI(); $('gameover').classList.remove('hidden');
   $('finalScores').innerHTML = scoreRows();
-  var s1 = G.players[1].score, s2 = G.players[2].score, w = $('winner');
-  if (s1 > s2) { w.style.color = COLORS[1]; w.textContent = '\ud83c\udfc6 ' + G.names[1] + ' wins'; }
-  else if (s2 > s1) { w.style.color = COLORS[2]; w.textContent = '\ud83c\udfc6 ' + G.names[2] + ' wins'; }
-  else { w.style.color = 'var(--amber)'; w.textContent = "It\u2019s a tie"; }
+  var s1 = G.players[1].score, s2 = G.players[2].score, w = $('winner'), fs = $('finalScoreLine');
+  // Prefer the server's authoritative winner; fall back to computing from the
+  // score if we somehow didn't get a phase message (e.g. joined right at the end
+  // and only saw a state).
+  var winner = (G._winner != null) ? G._winner : (s1 === s2 ? 0 : (s1 > s2 ? 1 : 2));
+  var winnerName = G._winnerName || (winner ? G.names[winner] : null);
+  var hi = Math.max(s1, s2), lo = Math.min(s1, s2);
+  if (winner === 1) {
+    w.style.color = COLORS[1]; w.textContent = '\ud83c\udfc6 ' + winnerName + ' wins';
+    fs.style.color = COLORS[1]; fs.textContent = hi + ' \u2013 ' + lo;
+  } else if (winner === 2) {
+    w.style.color = COLORS[2]; w.textContent = '\ud83c\udfc6 ' + winnerName + ' wins';
+    fs.style.color = COLORS[2]; fs.textContent = hi + ' \u2013 ' + lo;
+  } else {
+    w.style.color = 'var(--amber)'; w.textContent = 'It\u2019s a tie';
+    fs.style.color = 'var(--ink)'; fs.textContent = s1 + ' \u2013 ' + s2;
+  }
   $('gameoverStatus').textContent = '';
   $('rematchBtn').textContent = 'Rematch';
-  // The room is closed server-side at game over. Forget the session so the socket
-  // won't try to reconnect into a dead room, and so re-entering the code is a fresh game.
+  // Room is closed server-side at game over: forget the saved session so any
+  // reconnect can't drag us back into a phantom old room. The 'session-ended'
+  // control message from the server also closes the orphaned socket.
   net.ended = true; clearSession();
 }
-
 function showMsg(title, body, showBtn) {
   $('msg').classList.remove('hidden');
   $('msgTitle').textContent = title; $('msgBody').textContent = body;
@@ -1192,7 +1087,6 @@ function showEnded(msg) {
   hideGameUI(); hideOverlays();
   showMsg('Game ended', msg, true); setPill(false);
 }
-
 function setPill(state) {
   var pill = $('pill'), txt = $('pilltext');
   pill.classList.remove('ok', 'warn', 'bad');
@@ -1201,26 +1095,18 @@ function setPill(state) {
   else if (state === 'bad') { pill.style.display = 'flex'; pill.classList.add('bad'); txt.textContent = 'Disconnected'; }
   else { pill.style.display = 'none'; }
 }
-
-// ============================================================
-//  Reconnect handling (page stays alive; in-memory state survives)
-// ============================================================
 function inGame() { return G && (G.phase === 'playing' || G.phase === 'halftime' || G.phase === 'gameover'); }
 function inLobby() { return !$('waiting').classList.contains('hidden'); }
-function resumeClocks() { if (G) { G.lastClock = now(); G.lastGameClock = now(); } }
 function restoreScreen() {
-  // Show the screen that matches the current phase (used after a reconnect/resync,
-  // so we don't drop someone from the game-over or halftime screen into a frozen game).
   hideOverlays();
   if (!G) { $('menu').classList.remove('hidden'); return; }
   if (G.phase === 'gameover') showGameOver();
   else if (G.phase === 'halftime') showHalftime();
   else showGameUI();
 }
-
 function onClose() {
   if (net.manualClose) return;
-  if (net.ended) return;   // game's over and the room is closed — nothing to reconnect to
+  if (net.ended) return;
   if (net.connecting && !net.reconnecting) { net.connecting = false; showMenuError('Could not reach the server. Try again.'); return; }
   if (inGame() || inLobby()) {
     net.reconnecting = true;
@@ -1241,8 +1127,6 @@ function tryReconnect() {
 function handleReconnected(m) {
   net.reconnecting = false; net.retries = 0; net.connecting = false;
   if (!m.reconnect) {
-    // Our seat expired (grace ran out). The server just handed us a fresh, empty
-    // seat we didn't ask for — release it and go back to a clean menu.
     clearSession();
     try { send({ t: 'leave' }); } catch (e) {}
     if (inGame()) { showEnded('Too much time passed \u2014 that game has ended. Start a new one.'); }
@@ -1253,19 +1137,11 @@ function handleReconnected(m) {
   if (m.opponent) net.opponent = m.opponent;
   saveSession();
   if (m.match) {
-    // A game is live; the server sends a resync right after this, which rebuilds
-    // our state and calls restoreScreen(). Show a brief "rejoining" state.
     showReconnecting('Rejoining game\u2026'); setPill('warn');
   } else {
-    // Reconnected while still in the lobby (match hadn't started).
     showWaiting(net.role === 1); setPill(true);
   }
 }
-// A dropped opponent usually comes back within a second (a phone screen blinked
-// off, a tab backgrounded, a brief network hiccup). Rather than flash the overlay
-// every time, we wait a beat: if they're back before the timer fires, the pause is
-// invisible — the ball just hitches for a moment. Only a real, sustained absence
-// surfaces the "waiting for them to return" message.
 var peerDropTimer = null;
 function clearPeerDropTimer() { if (peerDropTimer) { clearTimeout(peerDropTimer); peerDropTimer = null; } }
 function onPeerDropped() {
@@ -1278,24 +1154,15 @@ function onPeerDropped() {
 function onPeerBack(m) {
   clearPeerDropTimer();
   if (m && m.name) net.opponent = m.name;
-  // The server resumes + resyncs the match itself; we just restore our view.
   if (inGame()) { restoreScreen(); setPill(false); }
 }
 function onPeerLeftForGood() { clearPeerDropTimer(); clearSession(); showEnded('Your opponent left the game.'); }
-
-// Leave the current match: tell the server (which frees our seat and notifies the
-// opponent immediately), forget the saved session so we don't auto-rejoin, and go
-// back to the menu without triggering our own reconnect.
 function leaveGame() {
   try { send({ t: 'leave' }); } catch (e) {}
   clearSession();
   closeSocket();
   showMenu();
 }
-
-// ============================================================
-//  Settings (host) + lobby wiring
-// ============================================================
 var setState = (function () {
   var d = Object.assign({ mode: 'duel' }, DEFAULTS, FRENZY_DEFAULTS);
   try { var s = JSON.parse(localStorage.getItem('bmp_settings') || 'null'); if (s) d = Object.assign(d, s); } catch (e) {}
@@ -1315,8 +1182,6 @@ bindSlider('sBounce', 'vBounce', 'bounce', function (v) { return v.toFixed(2); }
 bindSlider('sBalls', 'vBalls', 'balls', function (v) { return String(v); });
 bindSlider('sPoints', 'vPoints', 'pointsPer', function (v) { return v + ' pts'; });
 bindSlider('sBonus', 'vBonus', 'bonusSecs', function (v) { return '+' + v + 's'; });
-
-// Mode + score-in are segmented toggles (bindSlider only handles numeric ranges).
 function updateSettingsVisibility() {
   var frenzy = setState.mode === 'frenzy';
   $('rowClock').style.display = frenzy ? 'none' : 'flex';
@@ -1341,7 +1206,6 @@ $('segScore').addEventListener('click', function (e) {
   setState.scoreMode = t.getAttribute('data-score'); saveSettings(); updateSettingsVisibility(); sendSetup();
 });
 updateSettingsVisibility();
-
 function randomCode() {
   var chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', s = '';
   for (var i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
@@ -1351,7 +1215,7 @@ function startPlay() {
   var name = ($('nameInput').value || '').trim().slice(0, 20);
   var code = ($('codeInput').value || '').trim().toUpperCase();
   if (!code) { showMenuError('Enter a room code first.'); return; }
-  goImmersive();   // this tap is a user gesture, so fullscreen + landscape lock are allowed here
+  goImmersive();
   net.name = name || 'Player'; net.code = code; net.token = '';
   net.reconnecting = false; net.manualClose = false; net.connecting = true; net.retries = 0; net.ended = false;
   $('menuErr').textContent = '';
@@ -1359,12 +1223,6 @@ function startPlay() {
   var b = $('playBtn'); b.textContent = 'Connecting\u2026'; b.disabled = true;
   connect(function () { send({ type: 'join', code: net.code, name: net.name }); });
 }
-// Seat 1 asks the server to start the match with the chosen settings. The server
-// creates the match and broadcasts 'start' to BOTH clients, so we don't build any
-// game state here — joinerStart (triggered by that 'start') sets it up for everyone.
-// The host publishes its chosen settings to the server. The server starts the
-// match automatically once both seats are filled, so we send these on entering the
-// lobby and whenever a slider moves — no reliance on a peer-joined echo to kick off.
 function currentOptions() {
   if (setState.mode === 'frenzy') {
     return {
@@ -1377,50 +1235,52 @@ function currentOptions() {
 function sendSetup() {
   if (net.role === 1 && net.connected && net.ws) { try { send({ t: 'setup', o: currentOptions() }); } catch (e) {} }
 }
-
 $('playBtn').addEventListener('click', startPlay);
 $('readyBtn').addEventListener('click', toggleReady);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
 $('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
-$('exitBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
+$('exitBtn').addEventListener('click', function () {
+  // Room's already closed at game over; the 'session-ended' control message
+  // closed the socket. Just wipe local state and go back to menu.
+  try { send({ t: 'leave' }); } catch (e) {}
+  clearSession(); closeSocket(); showMenu();
+});
 $('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });
 $('confirmLeaveNo').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); });
 $('confirmLeaveYes').addEventListener('click', function () { $('confirmLeave').classList.add('hidden'); leaveGame(); });
 $('msgBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
 $('rematchBtn').addEventListener('click', function () {
-  // The finished room is gone, so a rematch is a fresh game under the SAME code.
-  // Both players tapping Rematch reunite in a new lobby and ready up again.
+  // The finished room is gone server-side, and its socket was closed on the
+  // 'session-ended' control message. A rematch is a truly fresh game under the
+  // same code, so we ALWAYS open a NEW WebSocket rather than reusing the old
+  // one -- reusing it could drop us into whatever room the other player has
+  // already spun up.
   $('gameoverStatus').textContent = 'Restarting\u2026';
-  net.token = ''; net.ended = false; net.reconnecting = false; net.manualClose = false; net.retries = 0;
+  var code = net.code, name = net.name;
+  try { if (net.ws) net.ws.close(); } catch (e) {}
+  net.ws = null; net.connected = false;
+  net.token = ''; net.ended = false; net.reconnecting = false;
+  net.manualClose = false; net.connecting = true; net.retries = 0;
   clearSession(); G = null;
-  var join = function () { send({ type: 'join', code: net.code, name: net.name }); };
-  if (net.ws && net.connected) join(); else connect(join);
+  connect(function () {
+    net.connecting = false;
+    send({ type: 'join', code: code, name: name });
+  });
 });
 $('codeInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') startPlay(); });
 $('nameInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('codeInput').focus(); });
-
-// ============================================================
-//  Main loop
-// ============================================================
 var lastFrame = performance.now();
 function loop(t) {
   var dt = (t - lastFrame) / 1000; lastFrame = t;
   if (G && G.mode === 'frenzy') lerpBalls(dt);
-  else if (G) lerpBall(dt);   // smooth toward the server's latest ball position
+  else if (G) lerpBall(dt);
   updateFx(dt);
   render();
   if (G) updateHud();
   requestAnimationFrame(loop);
 }
-
-// ============================================================
-//  Session persistence (leave & come back)
-// ============================================================
-// We remember the room code + reconnect token in localStorage. If the page is
-// closed and reopened within the server's grace window, we auto-rejoin the live
-// match. The "Leave"/"Exit"/"Back" buttons clear this so they DON'T auto-rejoin.
 var SESSION_KEY = 'bmp_session';
-var SESSION_TTL = 130000;   // a touch longer than the server's 120s grace
+var SESSION_TTL = 130000;
 function saveSession() {
   if (!net.token || !net.code) return;
   try { localStorage.setItem(SESSION_KEY, JSON.stringify({ code: net.code, name: net.name, token: net.token, role: net.role, ts: now() })); } catch (e) {}
@@ -1433,14 +1293,10 @@ function loadSession() {
   return null;
 }
 function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
-// Keep the timestamp fresh while we're in a session, so reopening soon after
-// closing still lands inside the grace window.
 setInterval(function () { if (net.token && net.code && !net.manualClose) saveSession(); }, 10000);
-
 function init() {
   resize();
   checkOrientation();
-  // iOS Safari can't go fullscreen from JS; point those users to Add to Home Screen.
   try {
     var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1449,10 +1305,8 @@ function init() {
     if (isIOS && !standalone) $('iosHint').style.display = 'block';
   } catch (e) {}
   try { var nm = localStorage.getItem('bmp_name'); if (nm) $('nameInput').value = nm; } catch (e) {}
-
   var sess = loadSession();
   if (sess) {
-    // We were in a game recently — try to drop back in.
     net.name = sess.name || 'Player'; net.code = sess.code; net.token = sess.token; net.role = sess.role || 0;
     net.reconnecting = true; net.manualClose = false; net.retries = 0;
     showReconnecting('Rejoining game\u2026'); setPill('warn');
@@ -1460,8 +1314,6 @@ function init() {
   } else {
     showMenu();
   }
-
-  // Orientation lock usually needs a user gesture, so attempt it on first tap.
   window.addEventListener('pointerdown', function once() {
     tryLockLandscape();
     window.removeEventListener('pointerdown', once);

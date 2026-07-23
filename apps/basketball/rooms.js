@@ -1,14 +1,6 @@
 'use strict';
 
 // Matchmaking + match lifecycle for the server-authoritative version.
-//
-// Clients send  { type: 'join', code, name, token? }  to enter a room. Once both
-// seats are filled, seat 1 sends { t:'start', o } and the server creates a Match
-// (game.js) that runs the physics and streams ball/state/events to BOTH players.
-//
-// Disconnects PAUSE the match and hold the seat for a grace window, so a player
-// can close the tab and reopen (with their saved token) and drop back into the
-// live game. When the grace expires the seat is freed and the match ends.
 
 const crypto = require('crypto');
 const { Match } = require('./game');
@@ -22,15 +14,14 @@ class Rooms {
   constructor(opts) {
     opts = opts || {};
     this.max = 2;
-    this.graceMs = opts.graceMs == null ? 120000 : opts.graceMs; // 2 min: room to close & reopen
+    this.graceMs = opts.graceMs == null ? 120000 : opts.graceMs;
     this.log = opts.log || function () {};
-    this.rooms = new Map();   // code -> room
-    this.conns = new Set();   // live connections (heartbeat)
+    this.rooms = new Map();
+    this.conns = new Set();
   }
 
   count() { return this.rooms.size; }
 
-  // Active matches, for the server's physics tick.
   matches() {
     const out = [];
     for (const room of this.rooms.values()) if (room.match) out.push(room.match);
@@ -58,7 +49,6 @@ class Rooms {
   _clearGrace(room, idx) { const t = room.graceTimers.get(idx); if (t) { clearTimeout(t); room.graceTimers.delete(idx); } }
   _broadcast(room, raw) { for (const s of room.seats) if (s && s.conn) s.conn.send(raw); }
   _sender(room) { const self = this; return function (msg) { self._broadcast(room, JSON.stringify(msg)); }; }
-  // Tell both seats who's here and who has readied up (drives the pre-match lobby).
   _sendLobby(room) {
     const s0 = room.seats[0], s1 = room.seats[1];
     this._broadcast(room, JSON.stringify({
@@ -78,14 +68,10 @@ class Rooms {
     if (!room) return;
     const role = conn.role;
 
-    // Seat 1 sends its chosen options (on entering the lobby and on any change).
-    // We store them and try to start — the actual start fires from _maybeStart the
-    // moment BOTH seats are filled, so it never depends on a fragile client echo.
     if (msg.t === 'setup' || msg.t === 'start') {
       if (role === 1) { if (msg.o) room.options = msg.o; this._maybeStart(room); }
       return;
     }
-    // Both players must ready up before the match begins.
     if (msg.t === 'ready') {
       const seat = room.seats[role - 1];
       if (seat) seat.ready = (msg.v === false) ? false : true;
@@ -96,18 +82,15 @@ class Rooms {
     if (msg.t === 'leave') { this._leave(conn); return; }
     if (!room.match) return;
     if (msg.t === 'shot') { room.match.applyShot(role, Number(msg.vx), Number(msg.vy), msg.i); return; }
-    if (msg.t === 'grab') { room.match.grab(role, Number(msg.x), Number(msg.y)); return; }   // frenzy: claim/aim a ball
-    if (msg.t === 'release') { room.match.release(role, msg.i); return; }                    // frenzy: cancel aim
+    if (msg.t === 'grab') { room.match.grab(role, Number(msg.x), Number(msg.y)); return; }
+    if (msg.t === 'release') { room.match.release(role, msg.i); return; }
     if (msg.t === 'rematch') { room.match.rematch(); return; }
   }
 
-  // Start the match as soon as both seats are occupied and there isn't one yet.
-  // Works no matter how the seats got filled (fresh joins, reconnects, either
-  // order), so a stale reconnect can't leave a host stuck on "waiting".
   _maybeStart(room) {
     if (!room || room.match) return;
     if (!(room.seats[0] && room.seats[1])) return;
-    if (!(room.seats[0].ready && room.seats[1].ready)) return;   // both must ready up first
+    if (!(room.seats[0].ready && room.seats[1].ready)) return;
     const self = this;
     room.match = new Match(room.options || {}, room.seats[0].name, room.seats[1].name, this._sender(room), function () { self._finishRoom(room); });
     room.match.start();
@@ -120,10 +103,9 @@ class Rooms {
     if (code.length > 12) { ctrl(conn, { type: 'error', reason: 'Room codes are 12 characters or fewer.' }); return; }
 
     let room = this.rooms.get(code);
-    if (room && room.finished) { this.rooms.delete(code); room = null; }   // previous game ended -> reuse the code as a NEW room
+    if (room && room.finished) { this.rooms.delete(code); room = null; }
     if (!room) { room = this._newRoom(code); this.rooms.set(code, room); }
 
-    // Reconnect: a matching token reclaims its seat and resumes the match.
     if (msg.token) {
       const idx = room.seats.findIndex((s) => s && s.token === msg.token);
       if (idx >= 0) {
@@ -137,20 +119,17 @@ class Rooms {
           type: 'joined', role: idx + 1, roomCode: code, token: seat.token,
           opponent: this._opponentName(room, idx), reconnect: true, match: !!room.match
         });
-        // The opponent was never told this player left, so there's nothing to
-        // un-tell. Mark them present and resync *only* the returning player.
         if (room.match) {
           room.match.names[idx + 1] = seat.name;
           room.match.onReconnect(idx + 1);
           ctrl(conn, room.match.resyncPayload());
         } else {
-          this._sendLobby(room);    // back in the lobby: refresh ready state for both
-          this._maybeStart(room);   // both seats present again, no match yet -> begin if ready
+          this._sendLobby(room);
+          this._maybeStart(room);
         }
         this.log('reconnect', code, 'role', idx + 1);
         return;
       }
-      // token no longer valid (seat expired) -> fall through to a fresh join
     }
 
     const empty = room.seats.findIndex((s) => s === null);
@@ -163,9 +142,9 @@ class Rooms {
     ctrl(conn, { type: 'joined', role: empty + 1, roomCode: code, token, opponent: this._opponentName(room, empty), reconnect: false, match: !!room.match });
     const peer = this._peerOf(room, empty);
     if (peer) ctrl(peer.conn, { type: 'peer-joined', name: seat.name });
-    this._sendLobby(room);    // show both seats the current lobby / ready state
+    this._sendLobby(room);
     this.log('join', code, 'role', empty + 1, seat.name);
-    this._maybeStart(room);   // starts only once both seats are filled AND both are ready
+    this._maybeStart(room);
   }
 
   _handleClose(conn) {
@@ -175,9 +154,6 @@ class Rooms {
     const seat = room.seats[idx]; if (!seat || seat.conn !== conn) return;
 
     seat.conn = null;
-    // Keep the match running. If it becomes this player's turn while they're gone,
-    // the clocks hold for them (game.js). The opponent is deliberately NOT notified
-    // — from their side the game just continues.
     if (room.match) room.match.onDisconnect(idx + 1);
     this.log('disconnect', code, 'role', idx + 1, '(grace', this.graceMs + 'ms, silent)');
 
@@ -209,18 +185,25 @@ class Rooms {
   }
 
   _endMatch(room) {
-    // If anyone is gone for good, stop simulating.
     if (room.match && room.seats.some((s) => s === null)) {
       room.match.destroy(); room.match = null;
     }
   }
-  // The match is over: close the room so the SAME code opens a brand-new game next
-  // time (and a lingering finished room can never block the other player rejoining).
-  // Sockets are kept open on the game-over screen but detached from the room.
+  // The match is over: close the room so the SAME code opens a brand-new game
+  // next time. Sockets stay OPEN on the game-over screen so clients can keep
+  // rendering the final state, but they are detached from the room AND each
+  // client is explicitly told the session has ended so it can invalidate its
+  // saved reconnect token and treat any new "join" as a fresh session.
   _finishRoom(room) {
     if (!room || room.finished) return;
     room.finished = true;
-    for (const s of room.seats) if (s && s.conn) { s.conn.roomCode = null; s.conn.role = 0; }
+    for (const s of room.seats) {
+      if (s && s.conn) {
+        s.conn.roomCode = null;
+        s.conn.role = 0;
+        try { s.conn.send(JSON.stringify({ type: 'session-ended' })); } catch (e) {}
+      }
+    }
     if (room.match) { room.match.destroy(); room.match = null; }
     for (const t of room.graceTimers.values()) clearTimeout(t);
     room.graceTimers.clear();
