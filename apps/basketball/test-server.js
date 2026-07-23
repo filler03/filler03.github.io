@@ -157,48 +157,6 @@ async function run() {
   assert(s2.gt === s1.gt, 'game clock frozen while current player is away (' + s1.gt + '->' + s2.gt + ')');
   y.close();
 
-  console.log('Frenzy mode (simultaneous, multi-ball):');
-  const fa = new Client(); await fa.open();
-  fa.send({ type: 'join', code: 'FRENZY', name: 'Fay' });
-  await fa.waitFor((m) => m.type === 'joined');
-  fa.send({ t: 'setup', o: { mode: 'frenzy', balls: 4, halfLength: 60, pointsPer: 4, bonusSecs: 10, scoreMode: 'own', speed: 1.1, bounce: 0.7 } });
-  const fb = new Client(); await fb.open();
-  fb.send({ type: 'join', code: 'FRENZY', name: 'Gus' });
-  await fb.waitFor((m) => m.type === 'joined');
-  await fa.waitFor((m) => m.type === 'peer-joined');
-  const faStart = await fa.waitFor((m) => m.t === 'start', 3000);
-  await fb.waitFor((m) => m.t === 'start', 3000);
-  assert(faStart.o && faStart.o.mode === 'frenzy' && faStart.o.balls === 4, 'frenzy start carries mode + even ball count');
-  const fballs = await fb.waitFor((m) => m.t === 'balls', 3000);
-  assert(Array.isArray(fballs.b) && fballs.b.length === 4, 'server streams the 4-ball array');
-  const startBalls = fballs.b.slice();
-
-  // Grab a ball; the grabber should see it anchored (h===1).
-  const target = startBalls[1];
-  fa.queue.length = 0;
-  fa.send({ t: 'grab', x: target.x, y: target.y });
-  const heldFrame = await fa.waitFor((m) => m.t === 'balls' && m.b.some((x) => x.i === target.i && x.h === 1), 2000);
-  assert(!!heldFrame, 'grab anchors the nearest ball for the grabber');
-
-  // Opponent tries to grab the SAME (protected) ball — must fail. A heartbeat
-  // balls frame (~1/s) reflects the truth: still held by 1, nobody holds it as 2.
-  fb.queue.length = 0;
-  fb.send({ t: 'grab', x: target.x, y: target.y });
-  await wait(200);
-  const chk = await fb.waitFor((m) => m.t === 'balls', 2000);
-  const tb = chk.b.find((x) => x.i === target.i);
-  assert(tb && tb.h === 1, 'protected ball stays with the original grabber');
-  assert(!chk.b.some((x) => x.h === 2), 'opponent cannot grab a ball being aimed');
-
-  // Shoot the held ball: shot event + shots incremented in frenzy state.
-  fa.queue.length = 0;
-  fa.send({ t: 'shot', i: target.i, vx: 30, vy: -35 });
-  const fshot = await fa.waitFor((m) => m.t === 'evt' && m.k === 'shot' && m.i === target.i, 2000);
-  assert(!!fshot, 'frenzy shot accepted for the aimed ball');
-  const fstate = await fa.waitFor((m) => m.t === 'state' && m.md === 'frenzy' && m.h1 >= 1, 2000);
-  assert(fstate.h1 >= 1, 'frenzy shot increments the shooter\u2019s shot count');
-  fa.close(); fb.close();
-
   console.log('Leave ends the match:');
   a.send({ t: 'leave' });
   const left = await b2.waitFor((m) => m.type === 'peer-left', 3000);

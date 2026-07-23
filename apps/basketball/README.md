@@ -1,18 +1,9 @@
 # Basketball · Multiplayer
 
 Two-player online basketball. Pick a room code, share it with a friend, and when
-you both enter the same code the match starts. Same swipe-to-shoot feel and
-scoring (1/2/3) in two modes:
-
-- **Duel** — the classic turn-based game: players alternate, with a shot clock and
-  timed halves that swap sides at halftime.
-- **Frenzy** — both players shoot at the *same time* over a shared pool of balls
-  (an even 2–10, spread across the floor). Grab any resting ball, aim, and shoot;
-  while you're aiming, that ball is anchored and protected (the other player can't
-  take it and stray balls bounce off it). Balls collide with each other in the air
-  and at rest, so you can knock a rival's shot off course. The clock counts *down*,
-  but every N combined points adds bonus time. Each player's scoring hoop (their
-  own, or either) is a host setting.
+you both enter the same code the match starts. It's a networked port of the
+single-player basketball game — same swipe-to-shoot feel, scoring (1/2/3),
+shot clock, timed halves with a side swap at halftime, and a winner.
 
 It's a single self-contained Node app with **zero runtime dependencies**: one
 process serves the game's static files, runs the game simulation, and streams it
@@ -21,15 +12,11 @@ to both players over WebSocket. There's nothing to `npm install`.
 ## How it plays
 
 - One person taps **Play** first — they become the host (Player 1, red) and get
-  the settings: a **Mode** toggle (Duel / Frenzy) plus sliders. Duel exposes shot
-  clock + half length; Frenzy exposes ball count (even, 2–10), the points-per-bonus
-  threshold, the bonus seconds, and a Score-in toggle (own hoop vs. either). Game
-  speed and ball bounce apply to both.
+  sliders to set game speed, shot clock, half length, and ball bounce.
 - The other enters the same code and joins as Player 2 (blue).
-- Swipe to aim and shoot; the longer the swipe, the more power. In **Duel** players
-  alternate and the ball stays where it lands. In **Frenzy** you both play at once:
-  tap-and-drag a resting ball to grab and aim it, release to shoot (a tap lets it
-  go), and there are no turns — just the ticking, bonus-extended clock.
+- Players alternate turns. Swipe on the court to aim and shoot; the longer the
+  swipe, the more power. The ball stays where it lands, so your next shot starts
+  from wherever it came to rest — same as the original.
 
 ## Architecture (short version)
 
