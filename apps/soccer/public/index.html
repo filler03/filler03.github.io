@@ -63,11 +63,6 @@
   #center { display: flex; flex-direction: column; align-items: center; gap: 2px; }
   #gtimer { font-family: 'Bebas Neue', sans-serif; font-size: 30px; line-height: 1; letter-spacing: .04em; }
   #half { font-size: 11px; letter-spacing: .14em; color: var(--muted); }
-  #kickclock {
-    margin-top: 3px; min-width: 30px; text-align: center; font-family: 'Bebas Neue', sans-serif;
-    font-size: 18px; color: var(--amber); padding: 1px 8px; border: 1px solid rgba(255,183,77,0.35);
-    border-radius: 20px; background: rgba(255,183,77,0.08); display: none;
-  }
   #turnhint {
     position: absolute; bottom: 84px; left: 50%; transform: translateX(-50%);
     background: var(--panel); border: 1px solid var(--line); color: #eafaef;
@@ -160,6 +155,8 @@
   .err { color: #ff8a8a; font-size: 13px; min-height: 18px; margin-top: 8px; text-align: center; }
   .how { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 12px; }
   .how b { color: #d7ecda; }
+  .back-link { display: inline-block; margin-top: 16px; color: var(--muted); font-size: 12.5px; letter-spacing: .04em; text-decoration: none; border-bottom: 1px solid transparent; transition: color .2s ease, border-color .2s ease; }
+  .back-link:hover { color: var(--green); border-bottom-color: var(--line); }
 
   .code-badge {
     font-family: 'Bebas Neue', sans-serif; font-size: 46px; letter-spacing: .35em; text-align: center;
@@ -192,7 +189,7 @@
   <div id="hud">
     <div id="topbar">
       <div class="pcard p1" id="p1card"><span class="pname" id="p1name">Player 1</span><span class="pscore" id="p1score">0</span></div>
-      <div id="center"><div id="gtimer">1:30</div><div id="half">1ST HALF</div><div id="kickclock"></div></div>
+      <div id="center"><div id="gtimer">1:30</div><div id="half">FREE PLAY</div></div>
       <div class="pcard p2" id="p2card"><span class="pname" id="p2name">Player 2</span><span class="pscore" id="p2score">0</span></div>
     </div>
     <div id="turnhint"></div>
@@ -222,7 +219,7 @@
     <div class="card">
       <p class="eyebrow">Multiplayer</p>
       <h1 class="title"><span class="ball">⚽</span> Soccer</h1>
-      <p class="sub">Pick a code, share it with a friend. When you both enter the same code, the match kicks off — a goal at each end, take turns shooting from midfield.</p>
+      <p class="sub">Pick a code, share it with a friend. When you both enter the same code, the match kicks off — one shared ball, a goal at each end, and both of you can kick at any time.</p>
       <label class="field"><span class="lab">Your name</span><input class="txt" id="nameInput" maxlength="20" placeholder="e.g. Cara" autocomplete="off" /></label>
       <label class="field"><span class="lab">Room code</span>
         <div class="code-row">
@@ -232,8 +229,9 @@
       </label>
       <button class="btn" id="playBtn" type="button">Play</button>
       <div class="err" id="menuErr"></div>
-      <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. On your turn, swipe up through the ball toward the goal — longer, faster swipes hit harder.</p>
+      <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. Swipe up through the ball toward your goal to kick — longer, faster swipes hit harder. There are no turns: whoever gets to the ball can kick it.</p>
       <p class="how" id="iosHint" style="display:none">iPhone browsers can't go fullscreen. For an app-like experience: open in <b>Safari</b> → Share → <b>Add to Home Screen</b>, then launch from the home screen.</p>
+      <a class="back-link" href="/">← Back to site</a>
     </div>
   </div>
 
@@ -246,8 +244,7 @@
       <div class="code-badge" id="waitCode">----</div>
       <div class="settings" id="hostSettings">
         <div class="set-row"><span class="name">Kick power</span><input type="range" id="sSpeed" min="0.6" max="1.8" step="0.1"><span class="val" id="vSpeed">1.0x</span></div>
-        <div class="set-row"><span class="name">Kick clock</span><input type="range" id="sClock" min="5" max="20" step="1"><span class="val" id="vClock">10s</span></div>
-        <div class="set-row"><span class="name">Half length</span><input type="range" id="sHalf" min="30" max="180" step="15"><span class="val" id="vHalf">1:30</span></div>
+        <div class="set-row"><span class="name">Match length</span><input type="range" id="sHalf" min="30" max="180" step="15"><span class="val" id="vHalf">1:30</span></div>
         <div class="set-row"><span class="name">Ball bounce</span><input type="range" id="sBounce" min="0.4" max="0.85" step="0.05"><span class="val" id="vBounce">0.70</span></div>
         <div class="divider"></div>
       </div>
@@ -262,16 +259,6 @@
       <h1 class="title" style="font-size:26px" id="msgTitle">Reconnecting</h1>
       <p class="sub" id="msgBody" style="margin-bottom:18px"></p>
       <button class="btn ghost" id="msgBtn" type="button" style="display:none">Back to menu</button>
-    </div>
-  </div>
-
-  <!-- halftime -->
-  <div class="overlay hidden" id="halftime">
-    <div class="card" style="text-align:center">
-      <p class="eyebrow" style="color:var(--amber)">Halftime</p>
-      <h1 class="title" style="font-size:30px">Ends switch</h1>
-      <div id="htScores" style="margin:14px 0"></div>
-      <p class="sub" id="htCount">Second half starting…</p>
     </div>
   </div>
 
@@ -313,9 +300,11 @@
 //  players (see game.js). This client is a pure renderer: it
 //  draws the ball/state the server streams and forwards only the
 //  player's kick vector ({t:'kick'}), which the server validates
-//  (right turn, ball at rest, speed clamped) before applying.
-//  Everything is in a fixed world (meters) that matches the
-//  server exactly, so both screens agree.
+//  (speed clamped, small anti-spam cooldown) before applying.
+//  Free play: one shared, always-live ball; either player can kick
+//  it at any time; it only resets to centre after a goal. Everything
+//  is in a fixed world (meters) matching the server, so both screens
+//  agree.
 // ============================================================
 
 var $ = function (id) { return document.getElementById(id); };
@@ -328,7 +317,7 @@ var GOAL_W = 7.32, GOAL_H = 2.44, GOAL_DEPTH = 2.0, GOAL_LINE = 27, POST_R = 0.0
 var BACK_POST_H = GOAL_H * 0.5;
 var COLORS = { 1: '#ff5b5b', 2: '#4a9eff' };
 var COLNUM = { 1: 0xff5b5b, 2: 0x4a9eff };
-var DEFAULTS = { speed: 1.0, kickClock: 10, halfLength: 90, bounce: 0.7 };
+var DEFAULTS = { speed: 1.0, halfLength: 90, bounce: 0.7 };
 
 // ---- kick feel (client maps swipe -> velocity; server clamps magnitude) ----
 var SWIPE_POWER = 1.4, UP_RATIO = 0.22, MIN_KICK = 6, MAX_KICK_CLIENT = 34;
@@ -346,9 +335,8 @@ function newGame(options, p1, p2) {
   return {
     phase: 'playing', options: options, names: { 1: p1 || 'Player 1', 2: p2 || 'Player 2' },
     players: { 1: { score: 0, kicks: 0 }, 2: { score: 0, kicks: 0 } },
-    currentPlayer: 1, half: 1, sidesSwapped: false,
-    kickClock: options.kickClock, gameTimer: options.halfLength,
-    grounded: true, waiting: false, kickInFlight: false,
+    gameTimer: options.halfLength,
+    grounded: true, goalPause: false,
     ballTarget: { x: 0, y: BALL_R, z: 0, rx: 0, ry: 0, rz: 0, g: 1 }, gotBall: false
   };
 }
@@ -400,7 +388,6 @@ function handleGame(m) {
     case 'resync': joinerResync(m); break;
     case 'ball': applyBall(m); break;
     case 'state': applyState(m); break;
-    case 'turn': applyTurn(m); break;
     case 'evt': applyEvt(m); break;
     case 'phase': applyPhase(m); break;
   }
@@ -584,10 +571,9 @@ var panOffset = new THREE.Vector3(0, 0, 0);
 var camPivot = new THREE.Vector3(0, 0, 0);
 
 function attackSign() {
-  // which +/- x direction the LOCAL player attacks right now
+  // which +/- x direction the LOCAL player attacks (fixed: p1 -> +x, p2 -> -x)
   if (!G || !net.role) return 1;
-  var base = (net.role === 1) ? 1 : -1;
-  return G.sidesSwapped ? -base : base;
+  return (net.role === 1) ? 1 : -1;
 }
 function setDefaultView() {
   // sit behind the local player, looking toward their goal
@@ -630,7 +616,9 @@ function groundAt(p) {
   return out;
 }
 function canKick() {
-  return !!G && G.phase === 'playing' && net.connected && G.currentPlayer === net.role && G.grounded && !G.waiting && !G.kickInFlight;
+  // Free play: either player may kick whenever the ball is live. The only lockout
+  // is the brief pause after a goal while the ball resets to the centre spot.
+  return !!G && G.phase === 'playing' && net.connected && !G.goalPause;
 }
 function fireKick(dir, swipeSpeed) {
   if (!canKick()) return;
@@ -735,21 +723,16 @@ function joinerResync(m) {
 function applyStateObj(s) {
   if (!G || !s) return;
   G.players[1].score = s.s1; G.players[2].score = s.s2; G.players[1].kicks = s.k1; G.players[2].kicks = s.k2;
-  G.currentPlayer = s.cp; G.kickClock = s.kc; G.gameTimer = s.gt; G.half = s.hf;
-  G.sidesSwapped = !!s.sw; G.grounded = !!s.gr; G.waiting = !!s.wn; G.kickInFlight = !!s.ki;
+  G.gameTimer = s.gt; G.goalPause = !!s.gp; G.grounded = !!s.gr;
   if (s.ph) G.phase = s.ph;
 }
 function applyState(m) {
   applyStateObj(m);
   if (!G) return;
   if (G.phase === 'playing') {
-    if (!$('halftime').classList.contains('hidden') || !$('gameover').classList.contains('hidden')) {
-      $('halftime').classList.add('hidden'); $('gameover').classList.add('hidden'); showGameUI();
-    }
+    if (!$('gameover').classList.contains('hidden')) { $('gameover').classList.add('hidden'); showGameUI(); }
   } else if (G.phase === 'gameover' && $('gameover').classList.contains('hidden')) { showGameOver(); }
-  else if (G.phase === 'halftime' && $('halftime').classList.contains('hidden')) { showHalftime(); }
 }
-function applyTurn(m) { if (!G) return; G.currentPlayer = m.cp; G.kickClock = m.kc; G.gameTimer = m.gt; G.sidesSwapped = !!m.sw; G.waiting = false; G.kickInFlight = false; }
 function applyBall(m) {
   if (!G) return;
   G.ballTarget = { x: m.x, y: m.y, z: m.z, rx: m.rx, ry: m.ry, rz: m.rz, g: m.g };
@@ -763,9 +746,7 @@ function applyEvt(m) {
 }
 function applyPhase(m) {
   if (!G) return;
-  if (m.ph === 'halftime') { G.phase = 'halftime'; showHalftime(); }
-  else if (m.ph === 'second') { G.half = m.hf; G.currentPlayer = m.cp; G.gameTimer = m.gt; G.sidesSwapped = !!m.sw; G.phase = 'playing'; G.gotBall = false; setDefaultView(); hideHalftime(); showGameUI(); }
-  else if (m.ph === 'gameover') { G.phase = 'gameover'; showGameOver(); }
+  if (m.ph === 'gameover') { G.phase = 'gameover'; showGameOver(); }
 }
 
 // ---- goal celebration ----
@@ -842,7 +823,7 @@ function updateBanners() {
   var attackL = (attackSignForPlayer(1) === -1) ? 1 : 2; // owner of left goal
   setBanner(goalRight, attackR); setBanner(goalLeft, attackL);
 }
-function attackSignForPlayer(player) { var base = (player === 1) ? 1 : -1; return (G && G.sidesSwapped) ? -base : base; }
+function attackSignForPlayer(player) { return (player === 1) ? 1 : -1; }
 function setBanner(goal, player) {
   var b = goal.userData.banner; if (!b) return;
   var col = new THREE.Color(COLNUM[player]);
@@ -880,28 +861,18 @@ function updateHud() {
   $('p1name').textContent = G.names[1]; $('p2name').textContent = G.names[2];
   $('p1score').textContent = G.players[1].score; $('p2score').textContent = G.players[2].score;
   $('gtimer').textContent = formatTime(G.gameTimer);
-  $('half').textContent = (G.half === 1 ? '1ST HALF' : '2ND HALF') + (G.sidesSwapped ? ' ·⇄' : '');
   $('p1card').classList.toggle('you', net.role === 1);
   $('p2card').classList.toggle('you', net.role === 2);
 
-  var kc = $('kickclock');
-  if (G.phase === 'playing' && G.grounded && !G.kickInFlight && !G.waiting) { kc.style.display = 'block'; kc.textContent = G.kickClock; }
-  else kc.style.display = 'none';
-
   var hint = $('turnhint');
-  if (G.phase !== 'playing') { hint.style.display = 'none'; }
-  else if (G.currentPlayer === net.role) {
+  if (G.phase !== 'playing' || G.goalPause) { hint.style.display = 'none'; }
+  else {
     hint.style.display = 'block';
-    if (G.kickInFlight) hint.innerHTML = 'Your shot is live…';
-    else if (G.waiting) hint.innerHTML = 'Next up…';
-    else hint.innerHTML = '<b>Your turn</b> — swipe up through the ball toward the goal';
-  } else {
-    hint.style.display = 'block';
-    hint.innerHTML = escapeHtml(G.names[G.currentPlayer] || 'Opponent') + ' is taking their shot…';
+    hint.innerHTML = 'Swipe up through the ball to shoot — both players can kick anytime';
   }
 }
 
-function hideOverlays() { ['menu', 'waiting', 'msg', 'halftime', 'gameover', 'confirmLeave'].forEach(function (id) { $(id).classList.add('hidden'); }); }
+function hideOverlays() { ['menu', 'waiting', 'msg', 'gameover', 'confirmLeave'].forEach(function (id) { $(id).classList.add('hidden'); }); }
 function showGameUI() { hideOverlays(); $('hud').style.display = 'block'; $('modeToggle').classList.add('show'); $('leaveBtn').classList.add('show'); checkOrientation(); }
 function hideGameUI() { $('hud').style.display = 'none'; $('modeToggle').classList.remove('show'); $('leaveBtn').classList.remove('show'); }
 
@@ -922,8 +893,6 @@ function rowHtml(pl) {
   return '<div class="score-row"><span class="nm" style="color:' + COLORS[pl] + '">' + escapeHtml(G.names[pl]) + '</span><span class="sc">' + G.players[pl].score + '</span></div>';
 }
 function scoreRows() { return rowHtml(1) + rowHtml(2); }
-function showHalftime() { hideGameUI(); $('halftime').classList.remove('hidden'); $('htScores').innerHTML = scoreRows(); }
-function hideHalftime() { $('halftime').classList.add('hidden'); }
 function showGameOver() {
   hideGameUI(); $('gameover').classList.remove('hidden'); $('finalScores').innerHTML = scoreRows();
   var s1 = G.players[1].score, s2 = G.players[2].score, w = $('winner');
@@ -953,12 +922,12 @@ function setPill(state) {
 // ============================================================
 //  Reconnect (page stays alive; in-memory state survives)
 // ============================================================
-function inGame() { return G && (G.phase === 'playing' || G.phase === 'halftime' || G.phase === 'gameover'); }
+function inGame() { return G && (G.phase === 'playing' || G.phase === 'gameover'); }
 function inLobby() { return !$('waiting').classList.contains('hidden'); }
 function restoreScreen() {
   hideOverlays();
   if (!G) { $('menu').classList.remove('hidden'); return; }
-  if (G.phase === 'gameover') showGameOver(); else if (G.phase === 'halftime') showHalftime(); else showGameUI();
+  if (G.phase === 'gameover') showGameOver(); else showGameUI();
 }
 function onClose() {
   if (net.manualClose) return;
@@ -1004,12 +973,11 @@ function bindSlider(id, valId, key, fmt) {
   e.addEventListener('input', function () { setState[key] = parseFloat(e.value); v.textContent = fmt(setState[key]); saveSettings(); sendSetup(); });
 }
 bindSlider('sSpeed', 'vSpeed', 'speed', function (v) { return v.toFixed(1) + 'x'; });
-bindSlider('sClock', 'vClock', 'kickClock', function (v) { return v + 's'; });
 bindSlider('sHalf', 'vHalf', 'halfLength', function (v) { return formatTime(v); });
 bindSlider('sBounce', 'vBounce', 'bounce', function (v) { return v.toFixed(2); });
 
 function randomCode() { var chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', s = ''; for (var i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)]; return s; }
-function currentOptions() { return { speed: setState.speed, kickClock: Math.round(setState.kickClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce }; }
+function currentOptions() { return { speed: setState.speed, halfLength: Math.round(setState.halfLength), bounce: setState.bounce }; }
 function sendSetup() { if (net.role === 1 && net.connected && net.ws) { try { send({ t: 'setup', o: currentOptions() }); } catch (e) {} } }
 
 function startPlay() {

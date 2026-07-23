@@ -3,8 +3,9 @@
 Two-player online soccer with **a goal at each end**. Pick a room code, share it
 with a friend, and when you both enter the same code the match kicks off. It's a
 networked, server-authoritative port of the single-player 3D soccer game — same
-swipe-to-kick feel, now competitive: take turns shooting from midfield at your
-goal, with timed halves, a side swap at halftime, a kick clock, and a winner.
+swipe-to-kick feel, now competitive: one shared, always-live ball that either
+player can kick at any time, a goal at each end, a running match clock, and a
+winner. The ball only resets to the centre spot after a goal.
 
 It's a single self-contained Node app with **zero runtime dependencies**: one
 process serves the game's static files, runs the match simulation, and streams it
@@ -13,17 +14,20 @@ to both players over WebSocket. There's nothing to `npm install`.
 ## How it plays
 
 - One person taps **Play** first — they become the host (Player 1, red) and get
-  sliders for kick power, kick clock, half length, and ball bounce.
+  sliders for kick power, match length, and ball bounce.
 - The other enters the same code and joins as Player 2 (blue).
-- Players **alternate turns**. On your turn the ball sits at midfield; swipe up
-  through it toward the goal in front of you — longer, faster swipes hit harder.
-  Loft it and place it inside the 7.3 m goal ~27 m away. That distance + a narrow
-  target is the skill, just like shooting hoops from the court.
+- **No turns.** There's one shared ball, live the whole match, and *either*
+  player can kick it at any moment: swipe up through the ball toward the goal
+  you're attacking — longer, faster swipes hit harder. Loft it and place it
+  inside the 7.3 m goal ~27 m away.
 - Whichever goal the ball crosses into scores for whoever is attacking that goal,
-  so a wild shot into your own net hands the point to your opponent.
-- At halftime the ends switch (the banner behind each goal is coloured for the
-  player attacking it, so you always know which way you're shooting). Most goals
-  at full time wins.
+  so knocking it into your own net hands the point to your opponent.
+- The ball is **not** recentred between kicks — it keeps rolling wherever it
+  lies. It only resets after a goal: the screen flashes **GOAL**, the ball is
+  held for a beat, then it returns to the centre spot and play continues.
+- The banner behind each goal is coloured for the player attacking it, so you
+  always know which way you're shooting (Player 1 attacks the right goal, Player
+  2 the left). Most goals when the match clock runs out wins.
 
 ## Architecture (short version)
 
@@ -33,8 +37,8 @@ This is the same design as the basketball multiplayer app, applied to soccer.
   match (`game.js`) on the server's tick and streams the ball position + game
   events to *both* players. Each client is a pure renderer: it draws what the
   server sends and forwards only the player's kick vector (`{t:'kick',vx,vy,vz}`),
-  which the server validates (right turn, ball at rest, speed clamped) before
-  applying. Both players see the same latency, nobody's phone can drag the other,
+  which the server validates (speed clamped, plus a light per-player anti-spam
+  cooldown) before applying. Both players see the same latency, nobody's phone can drag the other,
   and a player backgrounding their screen doesn't freeze the game.
 - **Two goals, one physics engine.** The pitch plays down its long (x) axis with a
   goal at each end facing inward. Posts, crossbar, nets, wall bounces, and
@@ -43,8 +47,8 @@ This is the same design as the basketball multiplayer app, applied to soccer.
 - **Leave & come back (seamless).** The reconnect token is saved in `localStorage`,
   so a player can close the tab and reopen it within a 2-minute grace window and
   drop straight back into the live match. A drop does **not** pause the match and
-  the opponent is **not** notified — if it becomes the absent player's turn, the
-  clocks simply hold until they return and resync. Only if they never come back
+  the opponent is **not** notified — the game clock simply holds while a player is
+  away, then resumes once they return and resync. Only if they never come back
   within the grace window does the match end. **Leave/Exit** quit deliberately.
 - **Fixed world (meters).** Everything is computed in a shared world frame
   (field `x∈[-30,30]`, `z∈[-20,20]`, goals at `x=±27`) so a phone and a laptop
@@ -148,5 +152,6 @@ Then visit `https://your-domain/multiplayer/soccer/`.
 - **Kick power** scales how hard swipes hit; if the goal feels too far, nudge it up.
 - **Rematch:** either player can trigger a rematch from the final screen.
 - The host's settings are locked once the match begins.
-- This is turn-based (a shootout-style duel), matching the basketball app's model.
-  It is **not** the real-time free-roam design — that's a separate project.
+- This is free play: one shared, always-live ball that **either** player can kick
+  at any time, resetting to centre only after a goal. (The basketball app remains a
+  turn-based shootout — a different model.)

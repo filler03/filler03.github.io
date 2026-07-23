@@ -2,15 +2,17 @@
 
 // Server-authoritative soccer match. One Match instance per room; it runs the 3D
 // ball physics for BOTH players. Clients only send kicks and render what they
-// receive. The simulation is ported from the single-player browser game so the
-// gameplay feel is unchanged -- the only difference is *where* it runs.
+// receive. The physics is ported from the single-player browser game so the
+// ball's *feel* is unchanged -- the only difference is where it runs.
 //
-// The pitch plays down its long (x) axis with a goal at EACH end, facing inward.
-// It is turn-based, exactly like the basketball version: the current player kicks
-// the ball from midfield at their far goal, the server simulates it until it
-// scores or comes to rest, then it's the other player's turn. Timed halves swap
-// which goal each player attacks at the interval, and a per-turn kick clock keeps
-// things moving.
+// FREE PLAY (no turns): there is ONE shared ball, live at all times. Either
+// player may kick it at any moment (a light per-player cooldown only stops
+// frame-spam). The ball is never recentred between kicks -- it keeps rolling
+// wherever it lies. It is reset to the centre spot ONLY when a goal is scored:
+// the server freezes it, broadcasts a 'goal' event (the client flashes "GOAL!"),
+// holds for a short beat, then recentres and play continues. A single running
+// match clock ends the game; there is no halftime and sides never swap --
+// player 1 always attacks the RIGHT goal (+x), player 2 the LEFT (-x).
 //
 //   World units are meters. Field: x in [-30, 30] (length), z in [-20, 20]
 //   (width), y up. Left goal's mouth faces +x, right goal's faces -x.
@@ -36,15 +38,19 @@ var GOAL_BOUNCE = 0.5;     // posts / crossbar
 var NET_BOUNCE = 0.3;
 
 var MAX_KICK_SPEED = 40;   // clamp against bad / malicious input (m/s)
-var REST_SPEED = 0.35;     // below this (and on the ground) the ball is "at rest"
-var MAX_FLIGHT_MS = 7000;  // safety: force-settle a ball still rolling after this
+
+// ---- free-play tuning ------------------------------------------------------
+var KICK_COOLDOWN_MS = 120; // min gap between one player's kicks (anti-spam)
+var GOAL_RESET_MS = 1500;   // "GOAL!" pause before the ball returns to centre
 
 // How often the server streams the ball while it's moving, in ms.
 // ~33ms = 30/sec; the client interpolates between updates so it looks smooth.
 var BALL_SEND_MS = 33;
 
 var COLORS = { 1: '#ff5b5b', 2: '#4a9eff' };
-var DEFAULTS = { speed: 1.0, kickClock: 10, halfLength: 90, bounce: 0.7 };
+// NOTE: `halfLength` is the TOTAL match length in seconds. The name is kept so
+// the client<->server option plumbing is unchanged; there are no halves.
+var DEFAULTS = { speed: 1.0, halfLength: 90, bounce: 0.7 };
 
 // The two goals. `sign` is the direction from the goal line toward the net
 // interior (and toward the wall behind it): -1 for the left goal, +1 for the
@@ -71,7 +77,6 @@ function sanitizeOptions(o) {
   o = o || {};
   return {
     speed: num(o.speed, 0.6, 1.8, DEFAULTS.speed),
-    kickClock: Math.round(num(o.kickClock, 5, 20, DEFAULTS.kickClock)),
     halfLength: Math.round(num(o.halfLength, 30, 180, DEFAULTS.halfLength)),
     bounce: num(o.bounce, 0.4, 0.85, DEFAULTS.bounce)
   };
@@ -85,7 +90,7 @@ class Match {
     this.connected = { 1: true, 2: true };
     this.lastBallSent = 0;
     this.lastHeartbeat = 0;
-    this.lastTick = 0;
+    this._lastBallStr = '';
     this._timers = [];
     this._destroyed = false;
     this.reset();
@@ -94,19 +99,14 @@ class Match {
   reset() {
     this.phase = 'playing';
     this.players = { 1: { score: 0, kicks: 0 }, 2: { score: 0, kicks: 0 } };
-    this.currentPlayer = 1;
-    this.half = 1;
-    this.sidesSwapped = false;
-    this.kickClock = this.options.kickClock;
     this.gameTimer = this.options.halfLength;
-    this.started = false;             // first possession begun (game clock runs after this)
-    this.waitingForNextTurn = false;
-    this.kickInFlight = false;
-    this.scoredThisKick = false;
-    this.flightStart = 0;
+    this.started = false;             // kickoff done (game clock runs after this)
+    this.goalPause = false;           // true during the post-goal "GOAL!" pause
+    this.scoredThisGoal = false;      // guards against double-counting one goal
+    this.lastKickAt = { 1: 0, 2: 0 }; // per-player kick cooldown timestamps
     this.ball = { x: 0, y: BALL_R, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, avx: 0, avy: 0, avz: 0, grounded: true };
-    this.lastClock = 0;
     this.lastGameClock = 0;
+    this._lastBallStr = '';
   }
 
   _timeout(fn, ms) {
@@ -127,35 +127,33 @@ class Match {
   start() {
     this.reset();
     this.send({ t: 'start', o: this.options, p1: this.names[1], p2: this.names[2] });
-    this.beginPossession(1, true);
+    this.kickoff(true);
   }
   rematch() {
     this.reset();
     this.send({ t: 'start', o: this.options, p1: this.names[1], p2: this.names[2] });
-    this.beginPossession(1, true);
+    this.kickoff(true);
   }
 
-  // A player's socket dropped: the match keeps running. If it's *their* turn the
-  // clocks hold (see updateClocks) so they aren't penalized; the opponent is
-  // never notified.
+  // A player's socket dropped: the match keeps running, but the game clock holds
+  // (see updateClocks) so nobody is run down while their opponent reconnects.
   onDisconnect(role) { this.connected[role] = false; }
   onReconnect(role) {
     this.connected[role] = true;
-    var t = now();
-    this.lastClock = t; this.lastGameClock = t; this.lastTick = t;
+    this.lastGameClock = now();
   }
   resyncPayload() {
     return { t: 'resync', o: this.options, p1: this.names[1], p2: this.names[2], st: this.stateObj(), ball: this.ballObj() };
   }
 
-  // half 1: player 1 attacks the RIGHT goal (+x), player 2 the LEFT (-x).
-  // Sides swap at halftime.
-  attackSignFor(player) {
-    var base = (player === 1) ? 1 : -1;
-    return this.sidesSwapped ? -base : base;
-  }
-  // Which player is attacking a given goal right now.
-  ownerOf(goal) { return this.attackSignFor(1) === goal.sign ? 1 : 2; }
+  // Play is paused (ball frozen, clock held) during the post-goal reset and
+  // whenever a player is away -- so nobody can farm the shared ball solo.
+  isPaused() { return this.goalPause || !this.connected[1] || !this.connected[2]; }
+
+  // player 1 always attacks the RIGHT goal (+x); player 2 the LEFT (-x).
+  attackSignFor(player) { return (player === 1) ? 1 : -1; }
+  // Which player is attacking (i.e. scores in) a given goal.
+  ownerOf(goal) { return goal.sign === 1 ? 1 : 2; }
 
   centerBall() {
     var b = this.ball;
@@ -165,34 +163,32 @@ class Match {
     b.grounded = true;
   }
 
-  beginPossession(player, initial) {
-    this.currentPlayer = player;
+  // Place the ball on the centre spot and (re)start live play. Used at the match
+  // start and after every goal.
+  kickoff(initial) {
     this.centerBall();
-    this.kickInFlight = false;
-    this.scoredThisKick = false;
-    this.waitingForNextTurn = false;
-    this.kickClock = this.options.kickClock;
-    var t = now();
-    this.lastClock = t; this.lastGameClock = t; this.lastTick = t;
+    this.goalPause = false;
+    this.scoredThisGoal = false;
+    this.lastGameClock = now();
     if (initial) this.started = true;
-    this.sendTurn();
     this.sendState();
     this.sendBall(true);
   }
 
+  // Either player may kick, any time the ball is live (i.e. not mid-reset after a
+  // goal). No turn check -- just a small per-player cooldown and a speed clamp.
   applyKick(player, vx, vy, vz) {
     if (this._destroyed || this.phase !== 'playing') return;
-    if (this.currentPlayer !== player) return;
-    if (!this.ball.grounded || this.kickInFlight || this.waitingForNextTurn) return;
+    if (this.isPaused()) return;
+    var t = now();
+    if (t - (this.lastKickAt[player] || 0) < KICK_COOLDOWN_MS) return;
     var c = clampKick(vx, vy, vz); if (!c) return;
+    this.lastKickAt[player] = t;
     var b = this.ball;
     b.vx = c[0]; b.vy = c[1]; b.vz = c[2];
     b.grounded = false;
     // Spin from the kick direction (cosmetic, ported feel).
     b.avx = c[2] * 0.6; b.avz = -c[0] * 0.6; b.avy = 0;
-    this.kickInFlight = true;
-    this.scoredThisKick = false;
-    this.flightStart = now();
     this.players[player].kicks++;
     this.send({ t: 'evt', k: 'kick', by: player, c: COLORS[player] });
     this.sendState();
@@ -203,22 +199,15 @@ class Match {
   step(dtMs) {
     if (this._destroyed || this.phase !== 'playing') return;
     var t = now();
-    // frame-based sim with a capped dt, exactly like the browser game's loop.
     var dt = Math.min(dtMs / 1000, 0.05);
-    if (this.kickInFlight) {
+    // The ball is live at all times -- simulate every tick unless play is paused
+    // (the brief "GOAL!" reset, or a player being away), when it is frozen.
+    if (!this.isPaused()) {
       this.simulate(dt);
       this.sendBall(false);
-      if (this.ballAtRest()) this.onKickSettled(false);
-      else if (t - this.flightStart > MAX_FLIGHT_MS) { this.ball.grounded = true; this.onKickSettled(false); }
     }
     this.updateClocks();
     if (t - this.lastHeartbeat > 1000) { this.lastHeartbeat = t; this.sendState(); }
-  }
-
-  ballAtRest() {
-    var b = this.ball;
-    if (!b.grounded) return false;
-    return Math.abs(b.vx) < REST_SPEED && Math.abs(b.vz) < REST_SPEED && Math.abs(b.vy) < REST_SPEED;
   }
 
   simulate(dt) {
@@ -257,7 +246,7 @@ class Match {
       for (var g = 0; g < GOALS.length; g++) this.collideGoal(res, GOALS[g]);
       nx = res.x; ny = res.y; nz = res.z;
 
-      if (!this.scoredThisKick) {
+      if (!this.scoredThisGoal) {
         for (var g2 = 0; g2 < GOALS.length; g2++) {
           if (this.crossedLine(prevX, nx, ny, nz, GOALS[g2])) { this.onGoal(GOALS[g2]); break; }
         }
@@ -270,6 +259,10 @@ class Match {
     var af = Math.pow(ANG_FRICTION, dt * 60);
     b.avx *= af; b.avy *= af; b.avz *= af;
     b.rx += b.avx * dt; b.ry += b.avy * dt; b.rz += b.avz * dt;
+
+    // grounded is cosmetic now (drives the client's "kickable" ring): the ball
+    // is grounded whenever it is sitting on the pitch surface.
+    b.grounded = b.y <= BALL_R + 0.02;
   }
 
   // Resolve the ball against one goal's posts, crossbar, back frame and nets.
@@ -361,90 +354,40 @@ class Match {
   }
 
   onGoal(goal) {
-    if (this.scoredThisKick) return;
-    this.scoredThisKick = true;
+    if (this.scoredThisGoal || this.goalPause) return;
+    this.scoredThisGoal = true;
     var scorer = this.ownerOf(goal);
     this.players[scorer].score++;
-    var self = this;
     var b = this.ball;
     this.send({ t: 'evt', k: 'goal', by: scorer, side: goal.side, x: r2(b.x), y: r2(b.y), z: r2(b.z), c: COLORS[scorer] });
+    // Freeze the ball in the net, hold for the "GOAL!" beat, then recentre.
+    this.goalPause = true;
+    b.vx = 0; b.vy = 0; b.vz = 0; b.avx = 0; b.avy = 0; b.avz = 0;
     this.sendState();
-    // let the ball nestle in the net for a beat, then hand the turn over.
-    this.waitingForNextTurn = true;
-    this.kickInFlight = false;
-    this._timeout(function () { self.nextTurn(); }, 1400);
-  }
-
-  // The kick came to rest without scoring.
-  onKickSettled(scored) {
-    if (scored || this.waitingForNextTurn) return;
-    this.kickInFlight = false;
-    this.waitingForNextTurn = true;
-    var self = this;
-    this.send({ t: 'evt', k: 'miss', by: this.currentPlayer });
     this.sendBall(true);
-    this.sendState();
-    this._timeout(function () { self.nextTurn(); }, 700);
+    var self = this;
+    this._timeout(function () { self.afterGoal(); }, GOAL_RESET_MS);
   }
 
-  nextTurn() {
-    if (this.phase !== 'playing') return;
-    var next = this.currentPlayer === 1 ? 2 : 1;
-    this.beginPossession(next, false);
+  afterGoal() {
+    if (this.phase !== 'playing') return;   // match may have ended meanwhile
+    this.kickoff(false);                     // recentre + resume; clock continues
   }
 
   updateClocks() {
+    if (this.phase !== 'playing') return;
     var t = now();
-    // If it's the disconnected player's turn, freeze the clocks and wait for them.
-    if (!this.connected[this.currentPlayer]) { this.lastClock = t; this.lastGameClock = t; return; }
-
-    // kick clock: only ticks while the ball is sitting at midfield awaiting a kick
-    if (this.phase === 'playing' && this.ball.grounded && !this.kickInFlight && !this.waitingForNextTurn) {
-      var el = (t - this.lastClock) / 1000;
-      if (el >= 1) {
-        this.kickClock -= Math.floor(el); this.lastClock = t;
-        if (this.kickClock <= 0) {
-          this.kickClock = 0;
-          this.waitingForNextTurn = true;
-          this.send({ t: 'evt', k: 'timeout', by: this.currentPlayer });
-          this.sendState();
-          var self = this;
-          this._timeout(function () { self.nextTurn(); }, 900);
-        } else {
-          this.sendState();
-        }
-      }
-    }
-
-    // game clock: runs once the match is underway
-    if (this.phase === 'playing' && this.started) {
-      var el2 = (t - this.lastGameClock) / 1000;
-      if (el2 >= 1) {
-        this.gameTimer -= Math.floor(el2); this.lastGameClock = t;
-        if (this.gameTimer < 0) this.gameTimer = 0;
-        this.sendState();
-      }
-      if (this.gameTimer <= 0 && this.ball.grounded && !this.kickInFlight && !this.waitingForNextTurn) {
-        if (this.half === 1) this.halftime(); else this.gameOver();
-      }
+    // Hold the clock while play is paused (goal reset or a player away) or before
+    // the opening kickoff.
+    if (this.isPaused() || !this.started) { this.lastGameClock = t; return; }
+    var el = (t - this.lastGameClock) / 1000;
+    if (el >= 1) {
+      this.gameTimer -= Math.floor(el); this.lastGameClock = t;
+      if (this.gameTimer <= 0) { this.gameTimer = 0; this.sendState(); this.gameOver(); return; }
+      this.sendState();
     }
   }
 
-  halftime() {
-    this.phase = 'halftime';
-    this.sendPhase('halftime');
-    var self = this;
-    this._timeout(function () { self.secondHalf(); }, 4500);
-  }
-  secondHalf() {
-    this.half = 2;
-    this.phase = 'playing';
-    this.sidesSwapped = true;
-    this.gameTimer = this.options.halfLength;
-    this.sendPhase('second');
-    // loser-of-first-half-ish convention: player 2 kicks off the second half.
-    this.beginPossession(2, false);
-  }
   gameOver() {
     this.phase = 'gameover';
     this.sendPhase('gameover');
@@ -457,22 +400,30 @@ class Match {
   }
   sendBall(force) {
     var t = now();
-    if (!force && t - this.lastBallSent < BALL_SEND_MS) return;
+    var o = this.ballObj();
+    if (!force) {
+      if (t - this.lastBallSent < BALL_SEND_MS) return;
+      // Skip streaming a ball that hasn't visibly moved since the last send (a
+      // resting ball micro-settles internally but its rendered pose is fixed).
+      var sig = o.x + ',' + o.y + ',' + o.z + ',' + o.rx + ',' + o.ry + ',' + o.rz + ',' + o.g;
+      if (sig === this._lastBallStr) { this.lastBallSent = t; return; }
+      this._lastBallStr = sig;
+    } else {
+      this._lastBallStr = o.x + ',' + o.y + ',' + o.z + ',' + o.rx + ',' + o.ry + ',' + o.rz + ',' + o.g;
+    }
     this.lastBallSent = t;
-    this.send(Object.assign({ t: 'ball' }, this.ballObj()));
+    this.send(Object.assign({ t: 'ball' }, o));
   }
   stateObj() {
     var p = this.players;
     return {
       s1: p[1].score, s2: p[2].score, k1: p[1].kicks, k2: p[2].kicks,
-      cp: this.currentPlayer, kc: this.kickClock, gt: this.gameTimer, hf: this.half,
-      sw: this.sidesSwapped ? 1 : 0, gr: this.ball.grounded ? 1 : 0,
-      wn: this.waitingForNextTurn ? 1 : 0, ki: this.kickInFlight ? 1 : 0, ph: this.phase
+      gt: this.gameTimer, gp: this.goalPause ? 1 : 0,
+      gr: this.ball.grounded ? 1 : 0, ph: this.phase
     };
   }
   sendState() { this.send(Object.assign({ t: 'state' }, this.stateObj())); }
-  sendTurn() { this.send({ t: 'turn', cp: this.currentPlayer, kc: this.kickClock, gt: this.gameTimer, sw: this.sidesSwapped ? 1 : 0 }); }
-  sendPhase(ph) { this.send({ t: 'phase', ph: ph, cp: this.currentPlayer, gt: this.gameTimer, hf: this.half, sw: this.sidesSwapped ? 1 : 0 }); }
+  sendPhase(ph) { this.send({ t: 'phase', ph: ph, gt: this.gameTimer }); }
 }
 
 module.exports = { Match: Match, sanitizeOptions: sanitizeOptions };

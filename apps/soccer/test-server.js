@@ -1,9 +1,10 @@
 'use strict';
 
 // End-to-end test of the soccer multiplayer server: HTTP health, the WebSocket
-// join/lobby handshake, an authoritative kick that scores a goal, turn ownership,
-// reconnect-by-token, and room-full rejection. Uses Node's built-in global
-// WebSocket client (Node >= 21), so there is nothing to install.
+// join/lobby handshake, FREE-PLAY kicks (either player, any time), a goal that
+// credits the right player and resets the ball to centre, reconnect-by-token,
+// and room-full rejection. Uses Node's built-in global WebSocket client
+// (Node >= 21), so there is nothing to install.
 //
 //   node test-server.js
 //
@@ -88,40 +89,52 @@ async function main() {
   const aJoined = await A.waitFor((m) => m.type === 'joined');
   ok(aJoined.role === 1, 'first client is seat 1 (host)');
   const token = aJoined.token;
-  A.send({ t: 'setup', o: { speed: 1.0, kickClock: 12, halfLength: 120, bounce: 0.7 } });
+  A.send({ t: 'setup', o: { speed: 1.0, halfLength: 120, bounce: 0.7 } });
 
   const B = client('B'); await B.open();
   B.send({ type: 'join', code: 'GOAL1', name: 'Bob' });
   const bJoined = await B.waitFor((m) => m.type === 'joined');
   ok(bJoined.role === 2, 'second client is seat 2');
 
-  // both should receive the authoritative start + a turn + a ball
+  // both should receive the authoritative start + the centred, live ball
   const aStart = await A.waitFor((m) => m.t === 'start');
   ok(aStart.p1 === 'Ann' && aStart.p2 === 'Bob', 'start carries both names');
   await B.waitFor((m) => m.t === 'start');
-  const turn = await A.waitFor((m) => m.t === 'turn');
-  ok(turn.cp === 1, 'player 1 kicks off');
-  await A.waitFor((m) => m.t === 'ball');
+  const ball0 = await A.waitFor((m) => m.t === 'ball');
+  ok(Math.abs(ball0.x) < 0.5 && Math.abs(ball0.z) < 0.5, 'match opens with the ball on the centre spot');
 
-  console.log('Authoritative turn ownership');
-  // B is NOT allowed to kick (not their turn): server must ignore it.
-  B.send({ t: 'kick', vx: 24, vy: 6, vz: 0 });
-  await sleep(400);
-  ok(!B.seen((m) => m.t === 'evt' && m.k === 'goal'), 'off-turn kick produces no goal');
-  const st0 = await A.waitFor((m) => m.t === 'state');
-  ok(st0.s1 === 0 && st0.s2 === 0, 'score still 0-0 after off-turn kick');
+  console.log('Free play: either player may kick (no turns)');
+  // Seat 2 (Bob) attacks the LEFT goal (-x). In free play he can kick whenever.
+  B.send({ t: 'kick', vx: -26, vy: 6, vz: 0 });
+  const bKick = await B.waitFor((m) => m.t === 'evt' && m.k === 'kick');
+  ok(bKick.by === 2, 'player 2 may kick at any time (no turn gating)');
+  let sawNeg = false;
+  for (let i = 0; i < 14; i++) { const b = await B.waitFor((m) => m.t === 'ball'); if (b.x < -3) { sawNeg = true; break; } }
+  ok(sawNeg, 'the ball travels the way player 2 kicked it (-x)');
 
-  console.log('A scores a goal');
-  // A (seat 1) attacks the RIGHT goal at +x. Kick straight down the pitch.
-  A.send({ t: 'kick', vx: 24, vy: 6, vz: 0 });
-  const kickEvt = await A.waitFor((m) => m.t === 'evt' && m.k === 'kick');
-  ok(kickEvt.by === 1, 'kick event attributed to player 1');
-  // ball should travel toward +x
-  let sawForward = false;
-  for (let i = 0; i < 12; i++) { const b = await A.waitFor((m) => m.t === 'ball'); if (b.x > 3) { sawForward = true; break; } }
-  ok(sawForward, 'ball travels toward the target goal (+x)');
-  const goal = await A.waitFor((m) => m.t === 'evt' && m.k === 'goal', 5000);
-  ok(goal.by === 1 && goal.side === 'right', 'goal credited to player 1 in the right goal');
+  console.log('Player 2 scores in the left goal');
+  const g2 = await B.waitFor((m) => m.t === 'evt' && m.k === 'goal', 6000);
+  ok(g2.by === 2 && g2.side === 'left', 'goal credited to player 2 in the left goal');
+  const sc2 = await B.waitFor((m) => m.t === 'state' && m.s2 >= 1);
+  ok(sc2.s2 === 1, 'player 2 score is now 1');
+
+  console.log('Ball resets to centre after a goal');
+  // A's message queue still holds every ball frame from B's shot (centre -> net),
+  // so first consume through the ball sitting in the left goal mouth (x < -20)...
+  let sawInNet = false;
+  for (let i = 0; i < 60; i++) { const b = await A.waitFor((m) => m.t === 'ball', 4000); if (b.x < -20) { sawInNet = true; break; } }
+  ok(sawInNet, 'the scored ball is seen in the left goal mouth');
+  // ...then the server holds briefly (client flashes "GOAL!") and the next ball
+  // frames put it back on the centre spot.
+  let recentred = false;
+  for (let i = 0; i < 15; i++) { const b = await A.waitFor((m) => m.t === 'ball', 4000); if (Math.abs(b.x) < 0.5 && Math.abs(b.z) < 0.5) { recentred = true; break; } }
+  ok(recentred, 'ball returns to the centre spot after the goal');
+
+  console.log('Player 1 can also score (shared ball, both attack)');
+  // Seat 1 (Ann) attacks the RIGHT goal (+x).
+  A.send({ t: 'kick', vx: 26, vy: 6, vz: 0 });
+  const g1 = await A.waitFor((m) => m.t === 'evt' && m.k === 'goal' && m.by === 1, 6000);
+  ok(g1.side === 'right', 'goal credited to player 1 in the right goal');
   const scored = await A.waitFor((m) => m.t === 'state' && m.s1 >= 1);
   ok(scored.s1 === 1, 'player 1 score is now 1');
 

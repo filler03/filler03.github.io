@@ -101,6 +101,8 @@
 
   .err { color: var(--danger); font-size: 13px; min-height: 18px; margin: 10px 2px 0; text-align: center; }
   .how { margin: 18px 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; text-align: center; }
+  .back-link { display: inline-block; margin-top: 16px; color: var(--muted); font-size: 12.5px; letter-spacing: .04em; text-decoration: none; border-bottom: 1px solid transparent; transition: color .2s ease, border-color .2s ease; }
+  .back-link:hover { color: var(--amber); border-bottom-color: var(--line); }
 
   /* scoreboard-style code shown while waiting */
   .code-badge {
@@ -245,6 +247,7 @@
     <div class="err" id="menuErr"></div>
     <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. Swipe on the court to shoot.</p>
     <p class="how" id="iosHint" style="display:none">iPhone browsers can't go fullscreen. For an app-like fullscreen: open this in <b>Safari</b> → Share → <b>Add to Home Screen</b>, then launch it from the home screen.</p>
+    <div style="text-align:center"><a class="back-link" href="/">← Back to site</a></div>
   </div>
 </div>
 
