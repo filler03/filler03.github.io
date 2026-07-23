@@ -1,0 +1,11 @@
+{
+  "name": "Soccer Multiplayer",
+  "short_name": "Soccer",
+  "description": "Two-player online soccer.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0a1a0f",
+  "theme_color": "#0a1a0f"
+}

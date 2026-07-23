@@ -1,0 +1,15 @@
+{
+  "name": "soccer-multiplayer",
+  "version": "1.0.0",
+  "description": "Two-player online soccer with a goal at each end. Self-contained Node server (static files + server-authoritative match) with zero runtime dependencies.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT"
+}
