@@ -78,7 +78,9 @@ class Rooms {
     }
     if (msg.t === 'leave') { this._leave(conn); return; }
     if (!room.match) return;
-    if (msg.t === 'shot') { room.match.applyShot(role, Number(msg.vx), Number(msg.vy)); return; }
+    if (msg.t === 'shot') { room.match.applyShot(role, Number(msg.vx), Number(msg.vy), msg.i); return; }
+    if (msg.t === 'grab') { room.match.grab(role, Number(msg.x), Number(msg.y)); return; }   // frenzy: claim/aim a ball
+    if (msg.t === 'release') { room.match.release(role, msg.i); return; }                    // frenzy: cancel aim
     if (msg.t === 'rematch') { room.match.rematch(); return; }
   }
 

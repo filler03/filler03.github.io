@@ -119,6 +119,10 @@
   .set-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 12px 0; }
   .set-row .name { font-size: 13.5px; color: var(--ink); }
   .set-row .val { font-size: 13px; color: var(--amber); font-variant-numeric: tabular-nums; min-width: 54px; text-align: right; }
+  .seg { display: inline-flex; border-radius: 9px; overflow: hidden; border: 1px solid rgba(255,255,255,0.18); }
+  .seg button { background: transparent; color: var(--muted); border: none; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; -webkit-appearance: none; }
+  .seg button.on { background: var(--amber); color: #1a1205; }
+  .set-row.mode-row { margin-bottom: 16px; }
   input[type=range] { -webkit-appearance: none; appearance: none; width: 150px; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.18); outline: none; }
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
   input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: none; border-radius: 50%; background: var(--amber); cursor: pointer; }
@@ -245,7 +249,7 @@
     </label>
     <button class="btn" id="playBtn" type="button">Play</button>
     <div class="err" id="menuErr"></div>
-    <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. Swipe on the court to shoot.</p>
+    <p class="how">One taps <b>Play</b> to host and set the rules; the other enters the same code to join. Pick <b>Duel</b> (take turns) or <b>Frenzy</b> (both shoot at once with a pile of balls). Swipe on the court to shoot.</p>
     <p class="how" id="iosHint" style="display:none">iPhone browsers can't go fullscreen. For an app-like fullscreen: open this in <b>Safari</b> → Share → <b>Add to Home Screen</b>, then launch it from the home screen.</p>
     <div style="text-align:center"><a class="back-link" href="/">← Back to site</a></div>
   </div>
@@ -259,10 +263,25 @@
     <p class="sub" id="waitSub">Your friend enters this exact code to join you.</p>
     <div class="code-badge" id="waitCode">----</div>
     <div class="settings" id="hostSettings">
+      <div class="set-row mode-row"><span class="name">Mode</span>
+        <span class="seg" id="segMode">
+          <button type="button" data-mode="duel">Duel</button>
+          <button type="button" data-mode="frenzy">Frenzy</button>
+        </span>
+      </div>
       <div class="set-row"><span class="name">Game speed</span><input type="range" id="sSpeed" min="0.6" max="1.8" step="0.1"><span class="val" id="vSpeed">1.1x</span></div>
-      <div class="set-row"><span class="name">Shot clock</span><input type="range" id="sClock" min="5" max="24" step="1"><span class="val" id="vClock">10s</span></div>
-      <div class="set-row"><span class="name">Half length</span><input type="range" id="sHalf" min="30" max="180" step="15"><span class="val" id="vHalf">1:00</span></div>
+      <div class="set-row" id="rowClock"><span class="name">Shot clock</span><input type="range" id="sClock" min="5" max="24" step="1"><span class="val" id="vClock">10s</span></div>
+      <div class="set-row" id="rowBalls"><span class="name">Balls</span><input type="range" id="sBalls" min="2" max="10" step="2"><span class="val" id="vBalls">6</span></div>
+      <div class="set-row" id="rowPoints"><span class="name">Bonus every</span><input type="range" id="sPoints" min="2" max="20" step="1"><span class="val" id="vPoints">5 pts</span></div>
+      <div class="set-row" id="rowBonus"><span class="name">Bonus time</span><input type="range" id="sBonus" min="5" max="30" step="5"><span class="val" id="vBonus">+10s</span></div>
+      <div class="set-row" id="rowHalf"><span class="name" id="nameHalf">Half length</span><input type="range" id="sHalf" min="30" max="180" step="15"><span class="val" id="vHalf">1:00</span></div>
       <div class="set-row"><span class="name">Ball bounce</span><input type="range" id="sBounce" min="0.4" max="0.85" step="0.05"><span class="val" id="vBounce">0.70</span></div>
+      <div class="set-row" id="rowScore"><span class="name">Score in</span>
+        <span class="seg" id="segScore">
+          <button type="button" data-score="own">Own hoop</button>
+          <button type="button" data-score="any">Either</button>
+        </span>
+      </div>
       <div class="divider"></div>
     </div>
     <p class="sub" id="waitStatus"><span class="waiting-dots">Waiting for opponent</span></p>
@@ -340,6 +359,9 @@ var STEP = 1 / 60;              // fixed physics timestep (host)
 var MAX_SHOT_SPEED = 60;        // clamp, guards against bad input
 var COLORS = { 1: '#ff6b6b', 2: '#4a9eff' };
 var DEFAULTS = { speed: 1.1, shotClock: 10, halfLength: 60, bounce: 0.7 };
+// Frenzy mode (simultaneous, multi-ball). Defaults mirror the server's.
+var FRENZY_DEFAULTS = { balls: 6, pointsPer: 5, bonusSecs: 10, scoreMode: 'own' };
+var GRAB_R = 70;   // tap-to-grab radius in world units (must match game.js)
 
 var hoopLeft = { x: 15, y: WORLD_H * 0.4, side: 'left' };
 var hoopRight = { x: WORLD_W - 15, y: WORLD_H * 0.4, side: 'right' };
@@ -364,20 +386,30 @@ function formatTime(s) { s = Math.max(0, Math.floor(s)); var m = Math.floor(s / 
 function clampSpeed(vx, vy) { var sp = Math.hypot(vx, vy); if (sp > MAX_SHOT_SPEED) { vx = vx * MAX_SHOT_SPEED / sp; vy = vy * MAX_SHOT_SPEED / sp; } return [vx, vy]; }
 
 function newGame(options, p1, p2) {
-  return {
+  var mode = (options && options.mode === 'frenzy') ? 'frenzy' : 'duel';
+  var g = {
+    mode: mode,
     phase: 'playing',
     options: options,
     names: { 1: p1 || 'Player 1', 2: p2 || 'Player 2' },
     players: { 1: { score: 0, shots: 0, made: 0, turnovers: 0 }, 2: { score: 0, shots: 0, made: 0, turnovers: 0 } },
-    currentPlayer: 1, half: 1, sidesSwapped: false,
-    shotClock: options.shotClock, gameTimer: options.halfLength,
-    initialDrop: true, waitingForNextTurn: false, shotClockActive: false,
-    scoredThisShot: false, wentThroughBelow: false, shotOriginX: WORLD_W / 2, lastBallY: 0,
-    ball: { x: WORLD_W / 2, y: -BALL_R, vx: 0, vy: 0, rot: 0, angularVel: 0, grounded: false },
-    ballTarget: null,     // joiner render target
+    gameTimer: options.halfLength,
     pausedByPeer: false,
     lastClock: 0, lastGameClock: 0
   };
+  if (mode === 'frenzy') {
+    g.balls = [];            // render list, indexed by ball id: {i,x,y,rot,tx,ty,tr,h,g,s}
+    g.pointsPer = options.pointsPer;
+    g._gotBalls = false;
+  } else {
+    g.currentPlayer = 1; g.half = 1; g.sidesSwapped = false;
+    g.shotClock = options.shotClock;
+    g.initialDrop = true; g.waitingForNextTurn = false; g.shotClockActive = false;
+    g.scoredThisShot = false; g.wentThroughBelow = false; g.shotOriginX = WORLD_W / 2; g.lastBallY = 0;
+    g.ball = { x: WORLD_W / 2, y: -BALL_R, vx: 0, vy: 0, rot: 0, angularVel: 0, grounded: false };
+    g.ballTarget = null;     // joiner render target
+  }
+  return g;
 }
 function targetHoop(player) {
   if (G.sidesSwapped) return player === 1 ? 'left' : 'right';
@@ -455,6 +487,7 @@ function handleGame(m) {
     case 'start': joinerStart(m); break;
     case 'resync': joinerResync(m); break;
     case 'ball': setBallTarget(m); break;
+    case 'balls': setBalls(m); break;
     case 'state': applyState(m); break;
     case 'turn': applyTurn(m); break;
     case 'evt': applyEvt(m); break;
@@ -564,7 +597,8 @@ document.addEventListener('visibilitychange', function () {
   // A backgrounded tab pauses requestAnimationFrame, so the ball didn't animate
   // while we were away. Snap it to the server's latest position so it's correct the
   // instant we're looking again, then normal interpolation takes over.
-  if (G && G.ballTarget) { G.ball.x = G.ballTarget.x; G.ball.y = G.ballTarget.y; G.ball.rot = G.ballTarget.r; G.ball.grounded = !!G.ballTarget.g; }
+  if (G && G.mode === 'frenzy' && G.balls) { for (var bi = 0; bi < G.balls.length; bi++) { var bb = G.balls[bi]; if (bb) { bb.x = bb.tx; bb.y = bb.ty; bb.rot = bb.tr; } } }
+  else if (G && G.ballTarget) { G.ball.x = G.ballTarget.x; G.ball.y = G.ballTarget.y; G.ball.rot = G.ballTarget.r; G.ball.grounded = !!G.ballTarget.g; }
   if (net.manualClose || !net.token) return;
   if (!(inGame() || inLobby())) return;
   var ws = net.ws, dead = !ws || ws.readyState === 2 || ws.readyState === 3; // CLOSING | CLOSED
@@ -585,21 +619,41 @@ function screenToWorld(cx, cy) {
 // ============================================================
 //  Input (swipe to shoot)
 // ============================================================
-var drag = { active: false, sx: 0, sy: 0, cx: 0, cy: 0 };
+var drag = { active: false, sx: 0, sy: 0, cx: 0, cy: 0, i: -1 };
 function pointer(e) {
   if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
   if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
   return { x: e.clientX, y: e.clientY };
 }
+// Duel: you shoot on your turn once the single ball is at rest.
 function canShoot() {
-  return G && G.phase === 'playing' && !G.pausedByPeer && net.connected &&
+  return G && G.mode !== 'frenzy' && G.phase === 'playing' && !G.pausedByPeer && net.connected &&
     G.currentPlayer === net.role && G.ball.grounded && !G.waitingForNextTurn && !turnover.active;
 }
+// Frenzy helpers: a shared pool of balls, either player can grab a free, resting one.
+function frenzyActive() { return G && G.mode === 'frenzy' && G.phase === 'playing' && !G.pausedByPeer && net.connected; }
+function iAmHolding() { if (!G || !G.balls) return -1; for (var i = 0; i < G.balls.length; i++) { if (G.balls[i] && G.balls[i].h === net.role) return i; } return -1; }
+function nearestGrabbable(wx, wy) {
+  if (!G || !G.balls) return -1;
+  var best = -1, bestD = GRAB_R;
+  for (var i = 0; i < G.balls.length; i++) { var b = G.balls[i]; if (!b || b.h !== 0 || !b.g) continue; var d = Math.hypot(b.x - wx, b.y - wy); if (d < bestD) { bestD = d; best = b.i; } }
+  return best;
+}
 function onDown(e) {
+  var p = pointer(e);
+  if (frenzyActive()) {
+    if (iAmHolding() >= 0) return;                 // already aiming a ball
+    var w = screenToWorld(p.x, p.y);
+    var idx = nearestGrabbable(w.x, w.y);
+    if (idx < 0) return;                            // tapped empty floor — nothing to grab
+    e.preventDefault();
+    drag.active = true; drag.i = idx; drag.sx = p.x; drag.sy = p.y; drag.cx = p.x; drag.cy = p.y;
+    send({ t: 'grab', x: w.x, y: w.y });
+    return;
+  }
   if (!canShoot()) return;
   e.preventDefault();
-  var p = pointer(e);
-  drag.active = true; drag.sx = p.x; drag.sy = p.y; drag.cx = p.x; drag.cy = p.y;
+  drag.active = true; drag.i = -1; drag.sx = p.x; drag.sy = p.y; drag.cx = p.x; drag.cy = p.y;
 }
 function onDrag(e) {
   if (!drag.active) return;
@@ -614,10 +668,21 @@ function onUp(e) {
   var s = screenToWorld(drag.sx, drag.sy);
   var c = screenToWorld(drag.cx, drag.cy);
   var dx = c.x - s.x, dy = c.y - s.y, dist = Math.hypot(dx, dy);
+  if (G && G.mode === 'frenzy') {
+    var i = iAmHolding(); if (i < 0) i = drag.i;
+    if (i < 0) return;
+    if (dist < 10) { send({ t: 'release', i: i }); return; }   // a tap lets the ball go
+    var powerF = Math.min(dist / 200, 1), speedF = powerF * 55;
+    send({ t: 'shot', i: i, vx: dx / dist * speedF, vy: dy / dist * speedF });
+    return;
+  }
   if (dist < 10) return;
   var power = Math.min(dist / 200, 1), speed = power * 55;
-  var vx = dx / dist * speed, vy = dy / dist * speed;
-  send({ t: 'shot', vx: vx, vy: vy });
+  send({ t: 'shot', vx: dx / dist * speed, vy: dy / dist * speed });
+}
+function cancelDrag() {
+  if (drag.active && G && G.mode === 'frenzy') { var i = iAmHolding(); if (i < 0) i = drag.i; if (i >= 0) send({ t: 'release', i: i }); }
+  drag.active = false;
 }
 canvas.addEventListener('mousedown', onDown);
 canvas.addEventListener('mousemove', onDrag);
@@ -625,7 +690,7 @@ window.addEventListener('mouseup', onUp);
 canvas.addEventListener('touchstart', onDown, { passive: false });
 canvas.addEventListener('touchmove', onDrag, { passive: false });
 canvas.addEventListener('touchend', onUp, { passive: false });
-canvas.addEventListener('touchcancel', function () { drag.active = false; });
+canvas.addEventListener('touchcancel', cancelDrag);
 
 
 // ============================================================
@@ -639,7 +704,7 @@ canvas.addEventListener('touchcancel', function () { drag.active = false; });
 function joinerStart(m) {
   G = newGame(m.o, m.p1, m.p2);
   particles = []; popups = []; turnover.active = false;
-  G.ball.grounded = false; G.ball.y = -BALL_R;
+  if (G.mode !== 'frenzy') { G.ball.grounded = false; G.ball.y = -BALL_R; }
   hideOverlays(); showGameUI(); setPill(false);
   acquireWakeLock();
 }
@@ -647,7 +712,11 @@ function joinerResync(m) {
   if (!G) G = newGame(m.o, m.p1, m.p2);
   G.options = m.o; G.names = { 1: m.p1, 2: m.p2 };
   applyStateObj(m.st);
-  if (m.ball) { G.ball.x = m.ball.x; G.ball.y = m.ball.y; G.ball.rot = m.ball.r; G.ball.grounded = !!m.ball.g; G.ballTarget = { x: m.ball.x, y: m.ball.y, r: m.ball.r, g: m.ball.g }; }
+  if (G.mode === 'frenzy') {
+    if (m.balls) { G.balls = []; setBalls({ b: m.balls }); }
+  } else if (m.ball) {
+    G.ball.x = m.ball.x; G.ball.y = m.ball.y; G.ball.rot = m.ball.r; G.ball.grounded = !!m.ball.g; G.ballTarget = { x: m.ball.x, y: m.ball.y, r: m.ball.r, g: m.ball.g };
+  }
   net.reconnecting = false; net.retries = 0;
   clearPeerDropTimer();
   restoreScreen();
@@ -657,10 +726,23 @@ function applyStateObj(s) {
   if (!G || !s) return;
   var p = G.players;
   p[1].score = s.s1; p[2].score = s.s2; p[1].shots = s.h1; p[2].shots = s.h2;
-  p[1].made = s.m1; p[2].made = s.m2; p[1].turnovers = s.o1; p[2].turnovers = s.o2;
-  G.currentPlayer = s.cp; G.shotClock = s.sc; G.gameTimer = s.gt; G.half = s.hf;
-  G.sidesSwapped = !!s.sw; G.ball.grounded = !!s.gr; G.waitingForNextTurn = !!s.wn;
+  p[1].made = s.m1; p[2].made = s.m2;
+  G.gameTimer = s.gt;
   if (s.ph) G.phase = s.ph;
+  if (G.mode === 'frenzy' || s.md === 'frenzy') { if (s.pp != null) G.pointsPer = s.pp; return; }
+  p[1].turnovers = s.o1; p[2].turnovers = s.o2;
+  G.currentPlayer = s.cp; G.shotClock = s.sc; G.half = s.hf;
+  G.sidesSwapped = !!s.sw; G.ball.grounded = !!s.gr; G.waitingForNextTurn = !!s.wn;
+}
+// Frenzy: merge the streamed ball array into the render list.
+function setBalls(m) {
+  if (!G || !m.b) return;
+  for (var k = 0; k < m.b.length; k++) {
+    var s = m.b[k], b = G.balls[s.i];
+    if (!b) { G.balls[s.i] = { i: s.i, x: s.x, y: s.y, rot: s.r, tx: s.x, ty: s.y, tr: s.r, h: s.h, g: s.g, s: s.s }; }
+    else { b.tx = s.x; b.ty = s.y; b.tr = s.r; b.h = s.h; b.g = s.g; b.s = s.s; }
+  }
+  G._gotBalls = true;
 }
 function applyState(m) {
   applyStateObj(m);
@@ -692,6 +774,16 @@ function applyEvt(m) {
   else if (m.k === 'rim') spawnRimFx(m.x, m.y);
   else if (m.k === 'shot') spawnShotFx(m.x, m.y, m.c);
   else if (m.k === 'turnover') showTurnover(m.p);
+  else if (m.k === 'bonus') spawnBonusFx(m.add);
+  // 'grab' / 'release' / 'clack' are reflected in the streamed ball state; no FX needed.
+}
+function spawnBonusFx(add) {
+  popups.push({ x: WORLD_W / 2, y: 74, text: '+' + add + 's', life: 1.4, scale: 1.1, color: '#ffd700' });
+  var palette = ['#ffd700', '#fff3b0', '#00ff88'];
+  for (var i = 0; i < 18; i++) {
+    var a = Math.random() * Math.PI * 2, sp = Math.random() * 6 + 2;
+    particles.push({ x: WORLD_W / 2, y: 74, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, decay: 0.02, size: Math.random() * 8 + 4, color: palette[i % 3] });
+  }
 }
 function applyPhase(m) {
   if (!G) return;
@@ -712,6 +804,15 @@ function lerpBall(dt) {
   var k = 1 - Math.pow(1 - BALL_SMOOTH, Math.max(0, dt) * 60);   // dt-normalized to 60fps
   b.x += (tg.x - b.x) * k; b.y += (tg.y - b.y) * k; b.rot = tg.r;
   if (tg.g && Math.abs(tg.x - b.x) < 0.6 && Math.abs(tg.y - b.y) < 0.6) { b.x = tg.x; b.y = tg.y; }
+}
+function lerpBalls(dt) {
+  if (!G || !G.balls) return;
+  var k = 1 - Math.pow(1 - BALL_SMOOTH, Math.max(0, dt) * 60);
+  for (var i = 0; i < G.balls.length; i++) {
+    var b = G.balls[i]; if (!b) continue;
+    b.x += (b.tx - b.x) * k; b.y += (b.ty - b.y) * k; b.rot = b.tr;
+    if (Math.abs(b.tx - b.x) < 0.6 && Math.abs(b.ty - b.y) < 0.6) { b.x = b.tx; b.y = b.ty; }
+  }
 }
 
 // ============================================================
@@ -778,6 +879,8 @@ function drawCourt() {
 }
 function hoopColorFor(hoop) {
   var isLeft = hoop.side === 'left';
+  // Frenzy: fixed sides — colour each hoop as the player who scores there (P1 right, P2 left).
+  if (G && G.mode === 'frenzy') return isLeft ? COLORS[2] : COLORS[1];
   if (G.sidesSwapped) return isLeft ? COLORS[2] : COLORS[1];
   return isLeft ? COLORS[1] : COLORS[2];
 }
@@ -831,18 +934,15 @@ function drawOffscreen() {
   ctx.fillStyle = 'white'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
   ctx.fillText(Math.abs(Math.round(b.y)) + '', ix, 62);
 }
-function drawAim() {
-  if (!drag.active || !canShoot()) return;
-  var s = screenToWorld(drag.sx, drag.sy), c = screenToWorld(drag.cx, drag.cy);
-  var dx = c.x - s.x, dy = c.y - s.y, dist = Math.hypot(dx, dy);
-  if (dist < 10) return;
-  var b = G.ball, len = Math.min(dist * 1.5, 200), ang = Math.atan2(dy, dx);
-  var ex = b.x + Math.cos(ang) * len, ey = b.y + Math.sin(ang) * len;
+// Shared aim arrow, drawn from an origin (bx,by) in the swipe direction.
+function drawAimArrow(bx, by, dx, dy, dist) {
+  var len = Math.min(dist * 1.5, 200), ang = Math.atan2(dy, dx);
+  var ex = bx + Math.cos(ang) * len, ey = by + Math.sin(ang) * len;
   var col = COLORS[net.role];
-  var grad = ctx.createLinearGradient(b.x, b.y, ex, ey);
+  var grad = ctx.createLinearGradient(bx, by, ex, ey);
   grad.addColorStop(0, col); grad.addColorStop(1, col + '88');
   ctx.strokeStyle = grad; ctx.lineWidth = 5; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
   var hl = 18, ha = 0.5;
   ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(ex, ey);
   ctx.lineTo(ex - hl * Math.cos(ang - ha), ey - hl * Math.sin(ang - ha));
@@ -850,10 +950,45 @@ function drawAim() {
   ctx.closePath(); ctx.fill();
   var dots = Math.floor(len / 30);
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  for (var i = 1; i <= dots; i++) { var tt = i / (dots + 1); ctx.beginPath(); ctx.arc(b.x + Math.cos(ang) * len * tt, b.y + Math.sin(ang) * len * tt, 3, 0, Math.PI * 2); ctx.fill(); }
+  for (var i = 1; i <= dots; i++) { var tt = i / (dots + 1); ctx.beginPath(); ctx.arc(bx + Math.cos(ang) * len * tt, by + Math.sin(ang) * len * tt, 3, 0, Math.PI * 2); ctx.fill(); }
   var power = Math.min(Math.round((dist / 200) * 100), 100);
   ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
-  ctx.fillText(power + '%', b.x, b.y - BALL_R - 12);
+  ctx.fillText(power + '%', bx, by - BALL_R - 12);
+}
+function drawAim() {
+  if (!drag.active || !canShoot()) return;
+  var s = screenToWorld(drag.sx, drag.sy), c = screenToWorld(drag.cx, drag.cy);
+  var dx = c.x - s.x, dy = c.y - s.y, dist = Math.hypot(dx, dy);
+  if (dist < 10) return;
+  drawAimArrow(G.ball.x, G.ball.y, dx, dy, dist);
+}
+// ---- frenzy rendering ----
+function drawBallsFrenzy() {
+  if (!G.balls) return;
+  for (var i = 0; i < G.balls.length; i++) {
+    var b = G.balls[i]; if (!b) continue;
+    if (b.s) {                         // in flight: glow ring in the shooter's colour
+      ctx.save(); ctx.globalAlpha = 0.55; ctx.strokeStyle = COLORS[b.s]; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R + 5, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
+    if (b.h) {                         // being aimed: protected — dashed ring in holder's colour
+      ctx.save(); ctx.strokeStyle = COLORS[b.h]; ctx.globalAlpha = 0.95; ctx.lineWidth = 3;
+      ctx.setLineDash([7, 6]); ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R + 9, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.restore();
+    }
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+    ctx.font = (BALL_R * 2) + 'px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('🏀', 0, 0); ctx.restore();
+  }
+}
+function drawAimFrenzy() {
+  if (!drag.active) return;
+  var i = iAmHolding(); if (i < 0) i = drag.i;
+  var b = (i >= 0 && G.balls) ? G.balls[i] : null; if (!b) return;
+  var s = screenToWorld(drag.sx, drag.sy), c = screenToWorld(drag.cx, drag.cy);
+  var dx = c.x - s.x, dy = c.y - s.y, dist = Math.hypot(dx, dy);
+  if (dist < 10) return;
+  drawAimArrow(b.x, b.y, dx, dy, dist);
 }
 function drawParticles() {
   for (var i = 0; i < particles.length; i++) { var p = particles[i]; ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2); ctx.fill(); }
@@ -886,8 +1021,9 @@ function render() {
   drawBackboard(hoopLeft); drawBackboard(hoopRight);
   drawParticles();
   drawHoop(hoopLeft); drawHoop(hoopRight);
-  drawBall(); drawOffscreen();
-  drawAim(); drawPopups(); drawTurnover();
+  if (G.mode === 'frenzy') { drawBallsFrenzy(); drawAimFrenzy(); }
+  else { drawBall(); drawOffscreen(); drawAim(); }
+  drawPopups(); drawTurnover();
 }
 function drawIdleCourt() {
   var g = ctx.createLinearGradient(0, 0, 0, WORLD_H);
@@ -907,6 +1043,20 @@ function updateHud() {
   $('p1score').textContent = G.players[1].score;
   $('p2score').textContent = G.players[2].score;
   $('gtimer').textContent = formatTime(G.gameTimer);
+  $('p1card').classList.toggle('you', net.role === 1);
+  $('p2card').classList.toggle('you', net.role === 2);
+  if (G.mode === 'frenzy') {
+    $('half').textContent = 'FRENZY';
+    var scF = $('shotclock'); scF.textContent = ''; scF.classList.remove('warn');
+    // Both players are always live in frenzy — light both cards.
+    $('p1card').classList.toggle('active', G.phase === 'playing');
+    $('p2card').classList.toggle('active', G.phase === 'playing');
+    var thF = $('turnhint');
+    thF.innerHTML = (G.phase === 'playing')
+      ? 'Grab a ball&nbsp;&nbsp;<span class="swipe">— swipe to shoot, both at once</span>'
+      : '';
+    return;
+  }
   $('half').textContent = G.half === 1 ? '1st' : '2nd';
   var sc = $('shotclock');
   if (G.phase === 'playing' && G.ball.grounded && G.shotClock > 0 && !G.waitingForNextTurn && !turnover.active) {
@@ -915,8 +1065,6 @@ function updateHud() {
   } else { sc.textContent = ''; sc.classList.remove('warn'); }
   $('p1card').classList.toggle('active', G.currentPlayer === 1 && G.phase === 'playing');
   $('p2card').classList.toggle('active', G.currentPlayer === 2 && G.phase === 'playing');
-  $('p1card').classList.toggle('you', net.role === 1);
-  $('p2card').classList.toggle('you', net.role === 2);
   var th = $('turnhint');
   if (G.phase === 'playing') {
     if (G.currentPlayer === net.role) {
@@ -1108,8 +1256,9 @@ function leaveGame() {
 //  Settings (host) + lobby wiring
 // ============================================================
 var setState = (function () {
-  var d = Object.assign({}, DEFAULTS);
+  var d = Object.assign({ mode: 'duel' }, DEFAULTS, FRENZY_DEFAULTS);
   try { var s = JSON.parse(localStorage.getItem('bmp_settings') || 'null'); if (s) d = Object.assign(d, s); } catch (e) {}
+  if (d.mode !== 'frenzy') d.mode = 'duel';
   return d;
 })();
 function saveSettings() { try { localStorage.setItem('bmp_settings', JSON.stringify(setState)); } catch (e) {} }
@@ -1122,6 +1271,35 @@ bindSlider('sSpeed', 'vSpeed', 'speed', function (v) { return v.toFixed(1) + 'x'
 bindSlider('sClock', 'vClock', 'shotClock', function (v) { return v + 's'; });
 bindSlider('sHalf', 'vHalf', 'halfLength', function (v) { return formatTime(v); });
 bindSlider('sBounce', 'vBounce', 'bounce', function (v) { return v.toFixed(2); });
+bindSlider('sBalls', 'vBalls', 'balls', function (v) { return String(v); });
+bindSlider('sPoints', 'vPoints', 'pointsPer', function (v) { return v + ' pts'; });
+bindSlider('sBonus', 'vBonus', 'bonusSecs', function (v) { return '+' + v + 's'; });
+
+// Mode + score-in are segmented toggles (bindSlider only handles numeric ranges).
+function updateSettingsVisibility() {
+  var frenzy = setState.mode === 'frenzy';
+  $('rowClock').style.display = frenzy ? 'none' : 'flex';
+  $('rowBalls').style.display = frenzy ? 'flex' : 'none';
+  $('rowPoints').style.display = frenzy ? 'flex' : 'none';
+  $('rowBonus').style.display = frenzy ? 'flex' : 'none';
+  $('rowScore').style.display = frenzy ? 'flex' : 'none';
+  $('nameHalf').textContent = frenzy ? 'Match length' : 'Half length';
+  var mb = $('segMode').getElementsByTagName('button');
+  for (var i = 0; i < mb.length; i++) mb[i].classList.toggle('on', mb[i].getAttribute('data-mode') === setState.mode);
+  var sb = $('segScore').getElementsByTagName('button');
+  for (var j = 0; j < sb.length; j++) sb[j].classList.toggle('on', sb[j].getAttribute('data-score') === setState.scoreMode);
+}
+$('segMode').addEventListener('click', function (e) {
+  var t = e.target; while (t && t !== this && !t.getAttribute('data-mode')) t = t.parentNode;
+  if (!t || !t.getAttribute('data-mode')) return;
+  setState.mode = t.getAttribute('data-mode'); saveSettings(); updateSettingsVisibility(); sendSetup();
+});
+$('segScore').addEventListener('click', function (e) {
+  var t = e.target; while (t && t !== this && !t.getAttribute('data-score')) t = t.parentNode;
+  if (!t || !t.getAttribute('data-score')) return;
+  setState.scoreMode = t.getAttribute('data-score'); saveSettings(); updateSettingsVisibility(); sendSetup();
+});
+updateSettingsVisibility();
 
 function randomCode() {
   var chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', s = '';
@@ -1147,7 +1325,13 @@ function startPlay() {
 // match automatically once both seats are filled, so we send these on entering the
 // lobby and whenever a slider moves — no reliance on a peer-joined echo to kick off.
 function currentOptions() {
-  return { speed: setState.speed, shotClock: Math.round(setState.shotClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce };
+  if (setState.mode === 'frenzy') {
+    return {
+      mode: 'frenzy', speed: setState.speed, halfLength: Math.round(setState.halfLength), bounce: setState.bounce,
+      balls: Math.round(setState.balls), pointsPer: Math.round(setState.pointsPer), bonusSecs: Math.round(setState.bonusSecs), scoreMode: setState.scoreMode
+    };
+  }
+  return { mode: 'duel', speed: setState.speed, shotClock: Math.round(setState.shotClock), halfLength: Math.round(setState.halfLength), bounce: setState.bounce };
 }
 function sendSetup() {
   if (net.role === 1 && net.connected && net.ws) { try { send({ t: 'setup', o: currentOptions() }); } catch (e) {} }
@@ -1174,7 +1358,8 @@ $('nameInput').addEventListener('keydown', function (e) { if (e.key === 'Enter')
 var lastFrame = performance.now();
 function loop(t) {
   var dt = (t - lastFrame) / 1000; lastFrame = t;
-  if (G) lerpBall(dt);        // smooth toward the server's latest ball position
+  if (G && G.mode === 'frenzy') lerpBalls(dt);
+  else if (G) lerpBall(dt);   // smooth toward the server's latest ball position
   updateFx(dt);
   render();
   if (G) updateHud();
