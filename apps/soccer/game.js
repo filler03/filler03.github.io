@@ -120,13 +120,12 @@ class Match {
   onDisconnect(role) { this.connected[role] = false; }
   onReconnect(role) {
     this.connected[role] = true;
-    this.lastGameClock = now();
   }
   resyncPayload() {
     return { t: 'resync', o: this.options, p1: this.names[1], p2: this.names[2], st: this.stateObj(), ball: this.ballObj() };
   }
 
-  isPaused() { return this.goalPause || !this.connected[1] || !this.connected[2]; }
+  isPaused() { return this.goalPause; }
 
   attackSignFor(player) { return (player === 1) ? 1 : -1; }
   ownerOf(goal) { return goal.sign === 1 ? 1 : 2; }

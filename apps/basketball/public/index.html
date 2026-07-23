@@ -647,6 +647,7 @@ function joinerResync(m) {
   net.reconnecting = false; net.retries = 0;
   clearPeerDropTimer();
   restoreScreen();
+  setPill(false);
   acquireWakeLock();
 }
 function applyStateObj(s) {
@@ -842,6 +843,18 @@ function drawOffscreen() {
   ctx.fillStyle = 'white'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
   ctx.fillText(Math.abs(Math.round(b.y)) + '', ix, 62);
 }
+function drawOffscreenFrenzy() {
+  if (!G.balls) return;
+  for (var i = 0; i < G.balls.length; i++) {
+    var b = G.balls[i]; if (!b) continue;
+    if (b.y + BALL_R >= 0) continue;
+    var ix = Math.max(30, Math.min(WORLD_W - 30, b.x));
+    ctx.fillStyle = COLORS[b.s] || '#ffcc33';
+    ctx.beginPath(); ctx.moveTo(ix, 20); ctx.lineTo(ix - 15, 45); ctx.lineTo(ix + 15, 45); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'white'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(Math.abs(Math.round(b.y)) + '', ix, 62);
+  }
+}
 function drawAimArrow(bx, by, dx, dy, dist) {
   var len = Math.min(dist * 1.5, 200), ang = Math.atan2(dy, dx);
   var ex = bx + Math.cos(ang) * len, ey = by + Math.sin(ang) * len;
@@ -926,7 +939,7 @@ function render() {
   drawBackboard(hoopLeft); drawBackboard(hoopRight);
   drawParticles();
   drawHoop(hoopLeft); drawHoop(hoopRight);
-  if (G.mode === 'frenzy') { drawBallsFrenzy(); drawAimFrenzy(); }
+  if (G.mode === 'frenzy') { drawBallsFrenzy(); drawOffscreenFrenzy(); drawAimFrenzy(); }
   else { drawBall(); drawOffscreen(); drawAim(); }
   drawPopups(); drawTurnover();
 }
@@ -1238,7 +1251,14 @@ function sendSetup() {
 $('playBtn').addEventListener('click', startPlay);
 $('readyBtn').addEventListener('click', toggleReady);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
-$('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
+$('cancelBtn').addEventListener('click', function () {
+  // Tell the server to free this seat right away -- without an explicit
+  // 'leave', the server only sees the socket close and holds the seat open
+  // for the full reconnect grace window, which blocks other players from
+  // taking that slot in the room.
+  try { send({ t: 'leave' }); } catch (e) {}
+  clearSession(); closeSocket(); showMenu();
+});
 $('exitBtn').addEventListener('click', function () {
   // Room's already closed at game over; the 'session-ended' control message
   // closed the socket. Just wipe local state and go back to menu.

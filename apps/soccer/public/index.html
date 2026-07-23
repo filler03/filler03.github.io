@@ -733,7 +733,7 @@ function joinerResync(m) {
   G.options = m.o; G.names = { 1: m.p1, 2: m.p2 };
   applyStateObj(m.st);
   if (m.ball) { G.ballTarget = { x: m.ball.x, y: m.ball.y, z: m.ball.z, rx: m.ball.rx, ry: m.ball.ry, rz: m.ball.rz, g: m.ball.g }; G.gotBall = true; soccerBall.position.set(m.ball.x, m.ball.y, m.ball.z); }
-  net.reconnecting = false; net.retries = 0; clearPeerDropTimer(); restoreScreen(); setDefaultView(); acquireWakeLock();
+  net.reconnecting = false; net.retries = 0; clearPeerDropTimer(); restoreScreen(); setDefaultView(); setPill(false); acquireWakeLock();
 }
 function applyStateObj(s) {
   if (!G || !s) return;
@@ -1042,7 +1042,7 @@ function startPlay() {
 
 $('playBtn').addEventListener('click', startPlay);
 $('randomBtn').addEventListener('click', function () { $('codeInput').value = randomCode(); });
-$('cancelBtn').addEventListener('click', function () { clearSession(); closeSocket(); showMenu(); });
+$('cancelBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
 $('readyBtn').addEventListener('click', toggleReady);
 $('exitBtn').addEventListener('click', function () { try { send({ t: 'leave' }); } catch (e) {} clearSession(); closeSocket(); showMenu(); });
 $('leaveBtn').addEventListener('click', function () { $('confirmLeave').classList.remove('hidden'); });
@@ -1084,7 +1084,14 @@ function goImmersive() {
 var wakeLock = null;
 function acquireWakeLock() { try { if (navigator.wakeLock && navigator.wakeLock.request) navigator.wakeLock.request('screen').then(function (wl) { wakeLock = wl; }).catch(function () {}); } catch (e) {} }
 function releaseWakeLock() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
-document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') acquireWakeLock(); });
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible') return;
+  acquireWakeLock();
+  if (net.manualClose || !net.token) return;
+  if (!(inGame() || inLobby())) return;
+  var ws = net.ws, dead = !ws || ws.readyState === 2 || ws.readyState === 3;
+  if (dead && !net.reconnecting) { net.reconnecting = true; showReconnecting('Reconnecting…'); tryReconnect(); }
+});
 
 window.addEventListener('resize', function () {
   camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
@@ -1126,5 +1133,6 @@ function init() {
 }
 init();
   </script>
+  <script src="./gameover-patch.js"></script>
 </body>
 </html>

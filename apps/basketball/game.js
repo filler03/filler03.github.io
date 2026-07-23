@@ -18,6 +18,8 @@ var GRAB_R = 70;
 var MAX_HOLD_MS = 8000;
 var BALL_REST = 0.9;
 var BALLS_SEND_MS = 33;
+var GRAB_MAX_SPEED = 9;
+var GRAB_GROUND_BAND = 26;
 
 var hoopLeft = { x: 15, y: WORLD_H * 0.4, side: 'left' };
 var hoopRight = { x: WORLD_W - 15, y: WORLD_H * 0.4, side: 'right' };
@@ -322,7 +324,16 @@ class Match {
 
   heldByOf(i) { return this.held[1] === i ? 1 : (this.held[2] === i ? 2 : 0); }
   targetHoopFrenzy(player) { return player === 1 ? 'right' : 'left'; }
-  grabbable(b) { return this.heldByOf(b.i) === 0 && b.grounded; }
+  // Grabbable doesn't require the ball to be fully at rest -- just resting on
+  // (or very near) the floor and slow enough that snatching it feels fair
+  // rather than plucking it out of a fast bounce.
+  grabbable(b) {
+    if (this.heldByOf(b.i) !== 0) return false;
+    if (b.grounded) return true;
+    var touchingGround = (b.y + BALL_R) >= (FLOOR_Y - GRAB_GROUND_BAND);
+    var slowEnough = Math.hypot(b.vx, b.vy) <= GRAB_MAX_SPEED;
+    return touchingGround && slowEnough;
+  }
 
   grab(player, x, y) {
     if (this.mode !== 'frenzy' || this._destroyed || this.phase !== 'playing') return;
@@ -516,7 +527,7 @@ class Match {
     var out = [];
     for (var k = 0; k < this.balls.length; k++) {
       var b = this.balls[k];
-      out.push({ i: b.i, x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.rot * 100) / 100, h: this.heldByOf(b.i), g: b.grounded ? 1 : 0, s: b.shooter || 0 });
+      out.push({ i: b.i, x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.rot * 100) / 100, h: this.heldByOf(b.i), g: this.grabbable(b) ? 1 : 0, s: b.shooter || 0 });
     }
     return out;
   }
