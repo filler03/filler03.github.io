@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Bible Memory Verse</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- SETUP SCREEN -->
+  <div id="setup-screen" class="screen active">
+    <div class="stars" id="stars"></div>
+    <div class="setup-content">
+      <h1 class="title glow-text">Bible Memory Verse</h1>
+      <p class="subtitle">Learn scripture one verse at a time</p>
+
+      <div class="selector-group">
+        <label class="selector-label">Translation</label>
+        <div id="translation-picker" class="translation-buttons">
+          <button class="trans-btn active" data-slug="esv">ESV</button>
+          <button class="trans-btn" data-slug="kjv">KJV</button>
+          <button class="trans-btn" data-slug="niv">NIV</button>
+          <button class="trans-btn" data-slug="nkjv">NKJV</button>
+          <button class="trans-btn" data-slug="nlt">NLT</button>
+        </div>
+      </div>
+
+      <div class="selector-group">
+        <label class="selector-label">Book</label>
+        <div class="dropdown-wrapper">
+          <input type="text" id="book-search" class="search-input" placeholder="Select a book..." autocomplete="off">
+          <div id="book-dropdown" class="dropdown-list hidden"></div>
+        </div>
+      </div>
+
+      <div class="selector-row">
+        <div class="selector-group flex-1">
+          <label class="selector-label">Chapter</label>
+          <div class="dropdown-wrapper">
+            <input type="text" id="chapter-search" class="search-input" placeholder="--" autocomplete="off" disabled>
+            <div id="chapter-dropdown" class="dropdown-list hidden"></div>
+          </div>
+        </div>
+        <div class="selector-group flex-1">
+          <label class="selector-label">Verse</label>
+          <div class="dropdown-wrapper">
+            <input type="text" id="verse-search" class="search-input" placeholder="--" autocomplete="off" disabled>
+            <div id="verse-dropdown" class="dropdown-list hidden"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="verse-preview" id="verse-preview"></div>
+
+      <div class="selector-group">
+        <label class="selector-label">Word Spread</label>
+        <div class="spread-row">
+          <input type="range" id="spread-slider" class="spread-slider" min="1" max="5" step="0.5" value="1">
+          <span class="spread-value" id="spread-value">1x</span>
+        </div>
+      </div>
+
+      <button id="start-btn" class="start-btn glow-btn" disabled>Start Game</button>
+    </div>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="game-screen" class="screen hidden">
+    <div class="game-header">
+      <div class="verse-ref" id="verse-ref"></div>
+      <div class="verse-slots" id="verse-slots"></div>
+      <button id="back-btn" class="back-btn">✕</button>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <div id="celebration-overlay" class="celebration-overlay hidden">
+      <div class="celebration-text glow-text">Well Done!</div>
+      <div class="celebration-verse" id="celebration-verse"></div>
+      <button id="next-verse-btn" class="start-btn glow-btn">Next Verse</button>
+    </div>
+  </div>
+
+  <canvas id="particle-canvas"></canvas>
+
+  <script src="js/api.js"></script>
+  <script src="js/setup.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
