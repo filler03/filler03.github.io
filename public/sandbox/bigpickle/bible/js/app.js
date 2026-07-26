@@ -23,9 +23,8 @@ const App = (() => {
         verseRef.chapter,
         verseRef.verse
       );
-      data.spread = verseRef.spread;
-      data.bookSlug = verseRef.book;
-      Game.init(data);
+      const verseData = { ...data, spread: verseRef.spread, showHints: verseRef.showHints, bookSlug: verseRef.book };
+      Game.init(verseData);
     } catch (e) {
       console.error('Failed to load verse for game:', e);
       showSetup();

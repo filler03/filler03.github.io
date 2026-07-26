@@ -78,6 +78,7 @@ const Game = (() => {
   function buildVerseSlots() {
     const container = $('verse-slots');
     container.innerHTML = '';
+    container.classList.toggle('hints-hidden', !verseData.showHints);
     $('verse-ref').textContent = `${verseData.bookName} ${verseData.chapter}:${verseData.verse} · ${verseData.version.toUpperCase()}`;
 
     words.forEach((word, i) => {
@@ -282,7 +283,7 @@ const Game = (() => {
   }
 
   function startWordDrag(idx, cx, cy) {
-    if (wordsPlaced[idx] || animating) return;
+    if (wordsPlaced[idx] || idx === placingIdx) return;
     dragIdx = idx;
     dragMoved = false;
     dragStartScreenX = cx;

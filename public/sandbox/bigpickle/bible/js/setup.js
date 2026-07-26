@@ -7,6 +7,7 @@ const Setup = (() => {
   let chapterCount = 0;
   let verseCount = 0;
   let spread = 1;
+  let showHints = true;
 
   const $ = (id) => document.getElementById(id);
 
@@ -16,6 +17,7 @@ const Setup = (() => {
     bindDropdowns();
     bindStartButton();
     bindSpreadSlider();
+    bindHintsToggle();
     generateStars();
   }
 
@@ -292,6 +294,12 @@ const Setup = (() => {
     });
   }
 
+  function bindHintsToggle() {
+    $('hints-toggle').addEventListener('change', (e) => {
+      showHints = e.target.checked;
+    });
+  }
+
   function bindStartButton() {
     $('start-btn').addEventListener('click', () => {
       if (!selectedBook || !selectedChapter || !selectedVerse) return;
@@ -301,7 +309,8 @@ const Setup = (() => {
         bookName: selectedBook.name.en,
         chapter: selectedChapter,
         verse: selectedVerse,
-        spread: spread
+        spread: spread,
+        showHints: showHints
       };
       App.startGame(verseRef);
     });
