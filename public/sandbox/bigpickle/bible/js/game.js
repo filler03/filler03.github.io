@@ -110,95 +110,87 @@ const Game = (() => {
     });
   }
 
+  const WORD_THRESHOLD = 20;
+  const SCALE_PER_EXTRA = 1.05;
+
   function scatterWords() {
     wordElements.forEach(el => el.remove());
     wordElements = [];
     wordWorldPos = [];
 
-    const headerH = document.querySelector('.game-header').getBoundingClientRect().height + 20;
-    const topPad = headerH + 20;
-    const sidePad = 20;
-    const bottomPad = 80;
+    const headerH = document.querySelector('.game-header').getBoundingClientRect().height;
 
-    let maxWordW = 120;
-    words.forEach(word => {
-      const probe = document.createElement('div');
-      probe.className = 'word-tile';
-      probe.textContent = word;
-      probe.style.position = 'absolute';
-      probe.style.visibility = 'hidden';
-      document.getElementById('game-screen').appendChild(probe);
-      maxWordW = Math.max(maxWordW, probe.offsetWidth + 20);
-      probe.remove();
-    });
+    const playW = window.innerWidth;
+    const playH = window.innerHeight - headerH;
 
-    const minCellW = Math.min(maxWordW, 160);
-    const minCellH = 50;
-    const baseW = Math.max(window.innerWidth * verseData.spread, window.innerWidth);
-    const usableW = baseW - sidePad * 2;
-    const cols = Math.max(1, Math.floor(usableW / minCellW));
-    const rows = Math.ceil(words.length / cols);
+    let w = playW;
+    let h = playH;
+    if (words.length > WORD_THRESHOLD) {
+      const excess = words.length - WORD_THRESHOLD;
+      const factor = Math.pow(SCALE_PER_EXTRA, excess);
+      w *= factor;
+      h *= factor;
+    }
 
-    worldW = Math.max(baseW, cols * minCellW + sidePad * 2);
-    worldH = Math.max(window.innerHeight * verseData.spread, window.innerHeight, topPad + rows * minCellH + bottomPad);
+    w *= verseData.spread;
+    h *= verseData.spread;
+
+    worldW = w;
+    worldH = h;
     cameraX = (worldW - window.innerWidth) / 2;
     cameraY = (worldH - window.innerHeight) / 2;
-
-    const usableH = worldH - topPad - bottomPad;
-
-    const positions = generatePositions(words.length, usableW, usableH, sidePad, topPad, cols, rows);
 
     words.forEach((word, i) => {
       const el = document.createElement('div');
       el.className = 'word-tile';
       el.textContent = word;
       el.dataset.idx = i;
+      el.style.left = '0px';
+      el.style.top = '0px';
+      document.getElementById('game-screen').appendChild(el);
+      wordElements.push(el);
+    });
 
-      const wx = positions[i].x;
-      const wy = positions[i].y;
-      wordWorldPos.push({ x: wx, y: wy });
+    words.forEach((word, i) => {
+      const el = wordElements[i];
+      const tw = el.offsetWidth;
+      const th = el.offsetHeight;
+      const x = Math.random() * (worldW - tw);
+      const y = Math.random() * (worldH - th);
+      wordWorldPos.push({ x, y });
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
 
       const color = NEON_COLORS[i % NEON_COLORS.length];
       el.style.borderColor = color + '80';
       el.style.color = color;
       el.style.textShadow = `0 0 6px ${color}`;
       el.style.boxShadow = `0 0 12px ${color}40`;
-
-      document.getElementById('game-screen').appendChild(el);
-      wordElements.push(el);
     });
-  }
 
-  function generatePositions(count, usableW, usableH, sidePad, topPad, numCols, numRows) {
-    const positions = [];
-    const cols = numCols;
-    const rows = numRows;
-    const cellW = usableW / cols;
-    const cellH = usableH / rows;
-
-    const cells = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        cells.push({ r, c });
+    let needExpand = true;
+    while (needExpand) {
+      needExpand = false;
+      wordElements.forEach((el, i) => {
+        const tw = el.offsetWidth;
+        const th = el.offsetHeight;
+        const pos = wordWorldPos[i];
+        const overRight = pos.x + tw - worldW;
+        const overBottom = pos.y + th - worldH;
+        const overLeft = -pos.x;
+        const overTop = -pos.y;
+        if (overRight > 0) { worldW += overRight; needExpand = true; }
+        if (overBottom > 0) { worldH += overBottom; needExpand = true; }
+        if (overLeft > 0) { wordWorldPos.forEach(p => p.x += overLeft); worldW += overLeft; needExpand = true; }
+        if (overTop > 0) { wordWorldPos.forEach(p => p.y += overTop); worldH += overTop; needExpand = true; }
+      });
+      if (needExpand) {
+        wordElements.forEach((el, i) => {
+          el.style.left = wordWorldPos[i].x + 'px';
+          el.style.top = wordWorldPos[i].y + 'px';
+        });
       }
     }
-    for (let i = cells.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [cells[i], cells[j]] = [cells[j], cells[i]];
-    }
-
-    const worldBottom = topPad + numRows * cellH;
-    const worldRight = sidePad + numCols * cellW;
-
-    for (let i = 0; i < count; i++) {
-      const cell = cells[i];
-      const jitterX = (Math.random() - 0.5) * cellW * 0.5;
-      const jitterY = (Math.random() - 0.5) * cellH * 0.6;
-      const x = Math.max(sidePad + 60, Math.min(worldRight - 60, sidePad + cell.c * cellW + cellW / 2 + jitterX));
-      const y = Math.max(topPad + 20, Math.min(worldBottom - 20, topPad + cell.r * cellH + cellH / 2 + jitterY));
-      positions.push({ x, y });
-    }
-    return positions;
   }
 
   /* ---- PAN (drag on empty canvas) ---- */
@@ -343,6 +335,7 @@ const Game = (() => {
       el.style.top = wy + 'px';
       setTimeout(() => { el.style.transition = ''; }, 260);
     } else {
+      el.style.zIndex = '';
       const dropScreenX = parseFloat(el.style.left);
       const dropScreenY = parseFloat(el.style.top);
       wordWorldPos[dragIdx].x = dropScreenX + cameraX;
@@ -493,6 +486,7 @@ const Game = (() => {
     setTimeout(() => {
       $('celebration-verse').textContent = `"${verseData.text}"`;
       $('celebration-overlay').classList.remove('hidden');
+      document.querySelector('.game-header').classList.add('expanded');
       spawnCelebration();
     }, 800);
   }
@@ -511,16 +505,17 @@ const Game = (() => {
       App.showSetup(currentRef);
     };
     $('next-verse-btn').onclick = () => {
-      const nextRef = {
+      const currentRef = {
         version: verseData.version,
         book: verseData.bookSlug,
         bookName: verseData.bookName,
         chapter: verseData.chapter,
-        verse: verseData.verse + 1,
-        spread: verseData.spread
+        verse: verseData.verse,
+        spread: verseData.spread,
+        showHints: verseData.showHints
       };
       cleanup();
-      App.showSetup(nextRef);
+      App.startNextVerse(currentRef);
     };
   }
 
@@ -693,6 +688,7 @@ const Game = (() => {
     particles = [];
     $('verse-slots').innerHTML = '';
     $('celebration-overlay').classList.add('hidden');
+    document.querySelector('.game-header').classList.remove('expanded');
   }
 
   return { init, cleanup };

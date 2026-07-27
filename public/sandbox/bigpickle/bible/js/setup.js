@@ -18,6 +18,7 @@ const Setup = (() => {
     bindStartButton();
     bindSpreadSlider();
     bindHintsToggle();
+    bindNavButtons();
     generateStars();
   }
 
@@ -342,6 +343,79 @@ const Setup = (() => {
     selectedVerse = ref.verse;
     $('verse-search').value = String(ref.verse);
     previewVerse();
+  }
+
+  async function navigateVerse(direction) {
+    if (!selectedBook || !selectedChapter || !selectedVerse) return;
+
+    let newVerse = selectedVerse + direction;
+    let newChapter = selectedChapter;
+    let newBook = selectedBook;
+
+    if (direction > 0) {
+      if (newVerse > verseCount) {
+        newVerse = 1;
+        newChapter++;
+        if (newChapter > (newBook.chapters || 50)) {
+          const bookIdx = allBooks.indexOf(newBook);
+          if (bookIdx < allBooks.length - 1) {
+            newBook = allBooks[bookIdx + 1];
+            newChapter = 1;
+          } else {
+            return;
+          }
+        }
+        await loadVerseCountFor(newBook, newChapter);
+      }
+    } else {
+      if (newVerse < 1) {
+        newChapter--;
+        if (newChapter < 1) {
+          const bookIdx = allBooks.indexOf(newBook);
+          if (bookIdx > 0) {
+            newBook = allBooks[bookIdx - 1];
+            newChapter = newBook.chapters || 50;
+          } else {
+            return;
+          }
+        }
+        await loadVerseCountFor(newBook, newChapter);
+        newVerse = verseCount;
+      }
+    }
+
+    selectedBook = newBook;
+    selectedChapter = newChapter;
+    selectedVerse = newVerse;
+
+    $('book-search').value = `${newBook.name.en} (${newBook.testament === 'old' ? 'OT' : 'NT'})`;
+    $('chapter-search').value = String(newChapter);
+    $('verse-search').value = String(newVerse);
+    $('chapter-search').disabled = false;
+    $('verse-search').disabled = false;
+
+    previewVerse();
+  }
+
+  async function loadVerseCountFor(book, chapter) {
+    try {
+      const res = await fetch(
+        `https://api.midvash.com/v1/${selectedTranslation}/${book.slug.en}/${chapter}`
+      );
+      const json = await res.json();
+      if (json.data && json.data.verses) {
+        verseCount = json.data.verses.length;
+      } else {
+        verseCount = 40;
+      }
+    } catch (e) {
+      verseCount = 40;
+    }
+  }
+
+  function bindNavButtons() {
+    $('prev-verse-btn').addEventListener('click', () => navigateVerse(-1));
+    $('next-verse-setup-btn').addEventListener('click', () => navigateVerse(1));
   }
 
   return { init, reset, selectVerse };
