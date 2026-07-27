@@ -568,7 +568,7 @@ html, body {
   color: var(--neon-yellow);
   text-shadow: 0 0 10px var(--neon-yellow);
   box-shadow: 0 0 32px rgba(255, 230, 0, 0.5);
-  z-index: 20 !important;
+  z-index: 20;
   cursor: grabbing;
   transition: none;
 }

@@ -39,6 +39,7 @@ const Game = (() => {
   let panStartCamY = 0;
   let cameraDirty = true;
   let cachedHeaderH = 0;
+  let nextZIndex = 21;
 
   const $ = (id) => document.getElementById(id);
 
@@ -291,7 +292,7 @@ const Game = (() => {
     dragOffsetX = cx - screenX;
     dragOffsetY = cy - screenY;
 
-    el.style.zIndex = 20;
+    el.style.zIndex = nextZIndex++;
     el.classList.add('dragging');
   }
 
@@ -303,6 +304,7 @@ const Game = (() => {
     if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragMoved = true;
 
     const el = wordElements[dragIdx];
+    el.style.zIndex = nextZIndex++;
     el.style.left = (cx - dragOffsetX) + 'px';
     el.style.top = (cy - dragOffsetY) + 'px';
 
@@ -333,7 +335,6 @@ const Game = (() => {
       dragIdx = -1;
       placeWord(savedDragIdx, slotIdx);
     } else if (isInVerseArea(cx, cy)) {
-      el.style.zIndex = '';
       el.style.transition = 'left 0.25s ease, top 0.25s ease';
       const wx = wordWorldPos[dragIdx].x - cameraX;
       const wy = wordWorldPos[dragIdx].y - cameraY;
@@ -341,7 +342,6 @@ const Game = (() => {
       el.style.top = wy + 'px';
       setTimeout(() => { el.style.transition = ''; }, 260);
     } else {
-      el.style.zIndex = '';
       const dropScreenX = parseFloat(el.style.left);
       const dropScreenY = parseFloat(el.style.top);
       wordWorldPos[dragIdx].x = dropScreenX + cameraX;
