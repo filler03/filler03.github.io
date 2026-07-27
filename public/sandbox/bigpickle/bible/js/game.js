@@ -153,7 +153,7 @@ const Game = (() => {
       wordElements.push(el);
     });
 
-    const minY = cameraY + headerH;
+    const minY = headerH;
     words.forEach((word, i) => {
       const el = wordElements[i];
       const tw = el.offsetWidth;
@@ -552,13 +552,8 @@ const Game = (() => {
     if (cameraDirty) {
       cachedHeaderH = document.querySelector('.game-header').getBoundingClientRect().height;
     }
-    gameCtx.save();
-    gameCtx.beginPath();
-    gameCtx.rect(0, cachedHeaderH || 0, gameCanvas.width, gameCanvas.height);
-    gameCtx.clip();
     drawGrid();
     drawOffscreenArrows();
-    gameCtx.restore();
 
     if (!cameraDirty) return;
     cameraDirty = false;
