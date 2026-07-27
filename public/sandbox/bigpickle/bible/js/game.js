@@ -37,6 +37,8 @@ const Game = (() => {
   let panStartY = 0;
   let panStartCamX = 0;
   let panStartCamY = 0;
+  let cameraDirty = true;
+  let cachedHeaderH = 0;
 
   const $ = (id) => document.getElementById(id);
 
@@ -98,7 +100,7 @@ const Game = (() => {
     const slots = document.querySelectorAll('.word-slot');
     slots.forEach((s, i) => {
       const color = NEON_COLORS[i % NEON_COLORS.length];
-      const isNext = i === nextSlotIdx && !placedWords[i];
+      const isNext = !verseData.anyOrder && i === nextSlotIdx && !placedWords[i];
       s.classList.toggle('next-target', isNext);
       if (isNext) {
         s.style.borderColor = color;
@@ -135,8 +137,8 @@ const Game = (() => {
     w *= verseData.spread;
     h *= verseData.spread;
 
-    worldW = w;
-    worldH = h;
+    worldW = Math.max(w, window.innerWidth);
+    worldH = Math.max(h, window.innerHeight);
     cameraX = (worldW - window.innerWidth) / 2;
     cameraY = (worldH - window.innerHeight) / 2;
 
@@ -151,12 +153,13 @@ const Game = (() => {
       wordElements.push(el);
     });
 
+    const minY = cameraY + headerH;
     words.forEach((word, i) => {
       const el = wordElements[i];
       const tw = el.offsetWidth;
       const th = el.offsetHeight;
       const x = Math.random() * (worldW - tw);
-      const y = Math.random() * (worldH - th);
+      const y = minY + Math.random() * Math.max(0, worldH - minY - th);
       wordWorldPos.push({ x, y });
       el.style.left = x + 'px';
       el.style.top = y + 'px';
@@ -216,7 +219,7 @@ const Game = (() => {
     }, { passive: false });
 
     boundPanMove = (e) => {
-      if (!panActive) return;
+      if (!panActive || dragIdx >= 0) return;
       if (e.cancelable) e.preventDefault();
       const cx = e.touches ? e.touches[0].clientX : e.clientX;
       const cy = e.touches ? e.touches[0].clientY : e.clientY;
@@ -225,10 +228,11 @@ const Game = (() => {
       cameraY = panStartCamY - (cy - panStartY);
       cameraX = Math.max(0, Math.min(cameraX, worldW - window.innerWidth));
       cameraY = Math.max(0, Math.min(cameraY, worldH - window.innerHeight));
+      cameraDirty = true;
     };
 
     boundPanEnd = () => {
-      panActive = false;
+      if (dragIdx < 0) panActive = false;
       gameCanvas.style.cursor = '';
     };
 
@@ -320,7 +324,9 @@ const Game = (() => {
     const slotIdx = getSlotUnderPoint(cx, cy);
     clearDropHighlights();
 
-    const isCorrect = slotIdx >= 0 && slotIdx === nextSlotIdx && words[dragIdx] === words[slotIdx];
+    const isCorrect = verseData.anyOrder
+      ? (slotIdx >= 0 && !placedWords[slotIdx] && words[dragIdx] === words[slotIdx])
+      : (slotIdx >= 0 && slotIdx === nextSlotIdx && words[dragIdx] === words[slotIdx]);
 
     if (isCorrect) {
       const savedDragIdx = dragIdx;
@@ -361,8 +367,10 @@ const Game = (() => {
   function highlightDropTarget(cx, cy) {
     clearDropHighlights();
     const slotIdx = getSlotUnderPoint(cx, cy);
-    if (slotIdx >= 0 && slotIdx === nextSlotIdx && dragIdx >= 0 && words[dragIdx] === words[slotIdx]) {
-      document.querySelectorAll('.word-slot')[slotIdx].classList.add('drop-hover');
+    if (slotIdx >= 0 && dragIdx >= 0 && words[dragIdx] === words[slotIdx] && !placedWords[slotIdx]) {
+      if (verseData.anyOrder || slotIdx === nextSlotIdx) {
+        document.querySelectorAll('.word-slot')[slotIdx].classList.add('drop-hover');
+      }
     }
   }
 
@@ -541,8 +549,19 @@ const Game = (() => {
     gameCtx.fillStyle = 'rgba(10, 10, 26, 1)';
     gameCtx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
 
+    if (cameraDirty) {
+      cachedHeaderH = document.querySelector('.game-header').getBoundingClientRect().height;
+    }
+    gameCtx.save();
+    gameCtx.beginPath();
+    gameCtx.rect(0, cachedHeaderH || 0, gameCanvas.width, gameCanvas.height);
+    gameCtx.clip();
     drawGrid();
     drawOffscreenArrows();
+    gameCtx.restore();
+
+    if (!cameraDirty) return;
+    cameraDirty = false;
 
     wordElements.forEach((el, i) => {
       if (wordsPlaced[i]) return;
@@ -601,7 +620,7 @@ const Game = (() => {
       const sx = wordWorldPos[i].x - cameraX;
       const sy = wordWorldPos[i].y - cameraY;
 
-      const headerH = document.querySelector('.game-header').getBoundingClientRect().height;
+      const headerH = cachedHeaderH;
       const topEdge = headerH + 15;
 
       const offScreen = sx < -80 || sx > w + 80 || sy < -80 || sy > h + 80;

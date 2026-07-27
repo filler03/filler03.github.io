@@ -8,6 +8,7 @@ const Setup = (() => {
   let verseCount = 0;
   let spread = 1;
   let showHints = true;
+  let anyOrder = false;
 
   const $ = (id) => document.getElementById(id);
 
@@ -18,6 +19,7 @@ const Setup = (() => {
     bindStartButton();
     bindSpreadSlider();
     bindHintsToggle();
+    bindAnyOrderToggle();
     bindNavButtons();
     generateStars();
   }
@@ -301,6 +303,12 @@ const Setup = (() => {
     });
   }
 
+  function bindAnyOrderToggle() {
+    $('any-order-toggle').addEventListener('change', (e) => {
+      anyOrder = e.target.checked;
+    });
+  }
+
   function bindStartButton() {
     $('start-btn').addEventListener('click', () => {
       if (!selectedBook || !selectedChapter || !selectedVerse) return;
@@ -311,7 +319,8 @@ const Setup = (() => {
         chapter: selectedChapter,
         verse: selectedVerse,
         spread: spread,
-        showHints: showHints
+        showHints: showHints,
+        anyOrder: anyOrder
       };
       App.startGame(verseRef);
     });
