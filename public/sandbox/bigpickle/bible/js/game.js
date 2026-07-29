@@ -44,6 +44,7 @@ const Game = (() => {
   const $ = (id) => document.getElementById(id);
 
   function init(verse) {
+    SFX.ensure();
     verseData = verse;
     words = verse.text.split(/\s+/).filter(w => w.length > 0);
     placedWords = new Array(words.length).fill(false);
@@ -280,6 +281,7 @@ const Game = (() => {
   }
 
   function startWordDrag(idx, cx, cy) {
+    SFX.ensure();
     if (wordsPlaced[idx] || placingIdxs.has(idx)) return;
     dragIdx = idx;
     dragMoved = false;
@@ -287,10 +289,9 @@ const Game = (() => {
     dragStartScreenY = cy;
 
     const el = wordElements[idx];
-    const screenX = wordWorldPos[idx].x - cameraX;
-    const screenY = wordWorldPos[idx].y - cameraY;
-    dragOffsetX = cx - screenX;
-    dragOffsetY = cy - screenY;
+    const rect = el.getBoundingClientRect();
+    dragOffsetX = cx - rect.left;
+    dragOffsetY = cy - rect.top;
 
     el.style.zIndex = nextZIndex++;
     el.classList.add('dragging');
@@ -406,6 +407,7 @@ const Game = (() => {
       placingIdxs.delete(wordIdx);
 
       spawnPlacementBurst(targetX, targetY);
+      SFX.playPlacement(slotIdx);
 
       if (nextSlotIdx >= 0) {
     updateNextTarget();
@@ -492,6 +494,8 @@ const Game = (() => {
   function autoComplete() {
     if (animCount > 0) return;
 
+    document.querySelector('.game-header').classList.add('expanded');
+
     const duration = verseData.autoDuration || 500;
     const overlapDelay = verseData.autoOverlap || 150;
 
@@ -554,6 +558,7 @@ const Game = (() => {
         nextSlotIdx = findNextSlot();
 
         spawnPlacementBurst(targetX, targetY);
+        SFX.playPlacement(slotIdx);
         updateNextTarget();
 
         requestAnimationFrame(() => {
@@ -577,6 +582,7 @@ const Game = (() => {
 
   function onVerseComplete() {
     spawnCelebration();
+    SFX.playComplete();
     setTimeout(() => {
       $('celebration-verse').textContent = `"${verseData.text}"`;
       $('celebration-overlay').classList.remove('hidden');
@@ -586,7 +592,7 @@ const Game = (() => {
   }
 
   function setupBackButton() {
-    $('auto-btn').onclick = autoComplete;
+    $('auto-btn').onclick = () => { SFX.ensure(); autoComplete(); };
     $('back-btn').onclick = () => {
       const currentRef = {
         version: verseData.version,
