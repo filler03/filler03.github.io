@@ -365,6 +365,37 @@ html, body {
   background: var(--neon-cyan);
 }
 
+.speed-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.speed-btn {
+  flex: 1;
+  padding: 10px 0;
+  border: 1px solid var(--slot-border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.speed-btn:hover {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.15);
+  color: var(--neon-green);
+}
+.speed-btn.active {
+  background: rgba(57, 255, 20, 0.1);
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  box-shadow: 0 0 16px rgba(57, 255, 20, 0.25), inset 0 0 12px rgba(57, 255, 20, 0.08);
+}
+
 /* ---- GAME SCREEN ---- */
 .game-header {
   position: absolute;
@@ -448,6 +479,34 @@ html, body {
 .word-slot.next-target {
   border-color: var(--neon-yellow);
   box-shadow: 0 0 10px rgba(255, 230, 0, 0.2);
+}
+
+.auto-btn {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--slot-border);
+  border-radius: 18px;
+  background: var(--bg-surface);
+  color: var(--neon-green);
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  z-index: 30;
+}
+.auto-btn:hover {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  box-shadow: 0 0 14px rgba(57, 255, 20, 0.3);
 }
 
 .back-btn {

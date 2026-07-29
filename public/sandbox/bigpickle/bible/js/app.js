@@ -23,7 +23,7 @@ const App = (() => {
         verseRef.chapter,
         verseRef.verse
       );
-      const verseData = { ...data, spread: verseRef.spread, showHints: verseRef.showHints, anyOrder: verseRef.anyOrder, bookSlug: verseRef.book };
+      const verseData = { ...data, spread: verseRef.spread, showHints: verseRef.showHints, anyOrder: verseRef.anyOrder, autoSpeed: verseRef.autoSpeed || 'normal', bookSlug: verseRef.book };
       Game.init(verseData);
     } catch (e) {
       console.error('Failed to load verse for game:', e);
@@ -33,7 +33,7 @@ const App = (() => {
 
   async function startNextVerse(ref) {
     try {
-      let { version, book, chapter, verse, spread, showHints, anyOrder } = ref;
+      let { version, book, chapter, verse, spread, showHints, anyOrder, autoSpeed } = ref;
       let nextVerse = verse + 1;
       let nextChapter = chapter;
       let nextBook = book;
@@ -72,7 +72,7 @@ const App = (() => {
         }
       }
 
-      await startGame({ version, book: nextBook, chapter: nextChapter, verse: nextVerse, spread, showHints, anyOrder });
+      await startGame({ version, book: nextBook, chapter: nextChapter, verse: nextVerse, spread, showHints, anyOrder, autoSpeed });
     } catch (e) {
       console.error('Failed to navigate to next verse:', e);
       showSetup(ref);

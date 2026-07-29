@@ -21,11 +21,11 @@ const Game = (() => {
 
   let wordElements = [];
   let wordWorldPos = [];
-  let animating = false;
+  let animCount = 0;
   let wordsPlaced = [];
 
   let dragIdx = -1;
-  let placingIdx = -1;
+  let placingIdxs = new Set();
   let dragOffsetX = 0;
   let dragOffsetY = 0;
   let dragStartScreenX = 0;
@@ -50,7 +50,7 @@ const Game = (() => {
     wordsPlaced = new Array(words.length).fill(false);
     nextSlotIdx = 0;
     dragIdx = -1;
-    placingIdx = -1;
+    placingIdxs = new Set();
     panActive = false;
 
     gameCanvas = $('game-canvas');
@@ -280,7 +280,7 @@ const Game = (() => {
   }
 
   function startWordDrag(idx, cx, cy) {
-    if (wordsPlaced[idx] || idx === placingIdx) return;
+    if (wordsPlaced[idx] || placingIdxs.has(idx)) return;
     dragIdx = idx;
     dragMoved = false;
     dragStartScreenX = cx;
@@ -386,8 +386,8 @@ const Game = (() => {
     const targetX = slotRect.left + slotRect.width / 2;
     const targetY = slotRect.top + slotRect.height / 2;
 
-    animating = true;
-    placingIdx = wordIdx;
+    animCount++;
+    placingIdxs.add(wordIdx);
 
     const startX = parseFloat(el.style.left) || (wordWorldPos[wordIdx].x - cameraX);
     const startY = parseFloat(el.style.top) || (wordWorldPos[wordIdx].y - cameraY);
@@ -402,8 +402,8 @@ const Game = (() => {
       placedWords[slotIdx] = true;
       wordsPlaced[wordIdx] = true;
       nextSlotIdx = findNextSlot();
-      animating = false;
-      placingIdx = -1;
+      animCount--;
+      placingIdxs.delete(wordIdx);
 
       spawnPlacementBurst(targetX, targetY);
 
@@ -421,8 +421,8 @@ const Game = (() => {
     });
   }
 
-  function animateWordToSlot(el, fromX, fromY, toX, toY, onDone) {
-    const duration = 500;
+  function animateWordToSlot(el, fromX, fromY, toX, toY, onDone, duration) {
+    if (duration === undefined) duration = 500;
     const start = performance.now();
 
     function tick(now) {
@@ -489,6 +489,96 @@ const Game = (() => {
     }
   }
 
+  function autoComplete() {
+    if (animCount > 0) return;
+
+    const speedMap = {
+      slow: { duration: 800, overlapDelay: 250 },
+      normal: { duration: 500, overlapDelay: 150 },
+      fast: { duration: 320, overlapDelay: 80 }
+    };
+    const speed = speedMap[verseData.autoSpeed || 'normal'];
+
+    const unplacedWords = [];
+    for (let j = 0; j < words.length; j++) {
+      if (!wordsPlaced[j]) unplacedWords.push(j);
+    }
+    if (unplacedWords.length === 0) return;
+
+    const queue = [];
+    for (let i = 0; i < words.length; i++) {
+      if (placedWords[i]) continue;
+      const wordIdx = unplacedWords.find(j => words[j] === words[i]);
+      if (wordIdx === undefined) continue;
+      queue.push({ slotIdx: i, wordIdx });
+      unplacedWords.splice(unplacedWords.indexOf(wordIdx), 1);
+    }
+
+    let qi = 0;
+    let done = false;
+
+    function placeNext() {
+      if (qi >= queue.length) {
+        if (!done && animCount <= 0 && findNextSlot() < 0) {
+          done = true;
+          onVerseComplete();
+        }
+        return;
+      }
+
+      const { slotIdx, wordIdx } = queue[qi++];
+      const el = wordElements[wordIdx];
+      const slot = document.querySelectorAll('.word-slot')[slotIdx];
+      if (!el || !slot) { placeNext(); return; }
+
+      slot.scrollIntoView({ block: 'center' });
+      const slotRect = slot.getBoundingClientRect();
+      const targetX = slotRect.left + slotRect.width / 2;
+      const targetY = slotRect.top + slotRect.height / 2;
+      const startX = parseFloat(el.style.left) || (wordWorldPos[wordIdx].x - cameraX);
+      const startY = parseFloat(el.style.top) || (wordWorldPos[wordIdx].y - cameraY);
+
+      animCount++;
+      placingIdxs.add(wordIdx);
+      el.style.zIndex = nextZIndex++;
+
+      if (qi < queue.length) {
+        setTimeout(placeNext, speed.overlapDelay);
+      }
+
+      animateWordToSlot(el, startX, startY, targetX, targetY, () => {
+        el.style.display = 'none';
+        slot.classList.add('filled');
+        const color = NEON_COLORS[slotIdx % NEON_COLORS.length];
+        slot.style.borderColor = color + '80';
+        slot.style.color = color;
+        slot.style.textShadow = `0 0 6px ${color}`;
+        placedWords[slotIdx] = true;
+        wordsPlaced[wordIdx] = true;
+        nextSlotIdx = findNextSlot();
+
+        spawnPlacementBurst(targetX, targetY);
+        updateNextTarget();
+
+        requestAnimationFrame(() => {
+          document.querySelectorAll('.word-slot').forEach(s => {
+            s.style.width = s.offsetWidth + 'px';
+          });
+        });
+
+        animCount--;
+        placingIdxs.delete(wordIdx);
+
+        if (!done && animCount <= 0 && nextSlotIdx < 0) {
+          done = true;
+          onVerseComplete();
+        }
+      }, speed.duration);
+    }
+
+    placeNext();
+  }
+
   function onVerseComplete() {
     spawnCelebration();
     setTimeout(() => {
@@ -500,6 +590,7 @@ const Game = (() => {
   }
 
   function setupBackButton() {
+    $('auto-btn').onclick = autoComplete;
     $('back-btn').onclick = () => {
       const currentRef = {
         version: verseData.version,
@@ -507,7 +598,8 @@ const Game = (() => {
         bookName: verseData.bookName,
         chapter: verseData.chapter,
         verse: verseData.verse,
-        spread: verseData.spread
+        spread: verseData.spread,
+        autoSpeed: verseData.autoSpeed
       };
       cleanup();
       App.showSetup(currentRef);
@@ -520,7 +612,8 @@ const Game = (() => {
         chapter: verseData.chapter,
         verse: verseData.verse,
         spread: verseData.spread,
-        showHints: verseData.showHints
+        showHints: verseData.showHints,
+        autoSpeed: verseData.autoSpeed
       };
       cleanup();
       App.startNextVerse(currentRef);
@@ -561,7 +654,7 @@ const Game = (() => {
     wordElements.forEach((el, i) => {
       if (wordsPlaced[i]) return;
       if (i === dragIdx) return;
-      if (i === placingIdx) return;
+      if (placingIdxs.has(i)) return;
 
       const wx = wordWorldPos[i].x;
       const wy = wordWorldPos[i].y;
@@ -610,7 +703,7 @@ const Game = (() => {
     wordElements.forEach((el, i) => {
       if (wordsPlaced[i]) return;
       if (i === dragIdx) return;
-      if (i === placingIdx) return;
+      if (placingIdxs.has(i)) return;
 
       const sx = wordWorldPos[i].x - cameraX;
       const sy = wordWorldPos[i].y - cameraY;

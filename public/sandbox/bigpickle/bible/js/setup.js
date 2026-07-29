@@ -9,19 +9,21 @@ const Setup = (() => {
   let spread = 1;
   let showHints = true;
   let anyOrder = false;
+  let autoSpeed = 'normal';
 
   const $ = (id) => document.getElementById(id);
 
   function init() {
-    bindTranslationButtons();
+    try { bindTranslationButtons(); } catch (e) {}
     loadBooks().then(() => selectGenesis());
-    bindDropdowns();
-    bindStartButton();
-    bindSpreadSlider();
-    bindHintsToggle();
-    bindAnyOrderToggle();
-    bindNavButtons();
-    generateStars();
+    try { bindDropdowns(); } catch (e) {}
+    try { bindStartButton(); } catch (e) {}
+    try { bindSpreadSlider(); } catch (e) {}
+    try { bindHintsToggle(); } catch (e) {}
+    try { bindAnyOrderToggle(); } catch (e) {}
+    try { bindSpeedButtons(); } catch (e) {}
+    try { bindNavButtons(); } catch (e) {}
+    try { generateStars(); } catch (e) {}
   }
 
   async function selectGenesis() {
@@ -309,6 +311,18 @@ const Setup = (() => {
     });
   }
 
+  function bindSpeedButtons() {
+    const picker = $('speed-picker');
+    if (!picker) return;
+    picker.addEventListener('click', (e) => {
+      const btn = e.target.closest('.speed-btn');
+      if (!btn) return;
+      picker.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      autoSpeed = btn.dataset.speed;
+    });
+  }
+
   function bindStartButton() {
     $('start-btn').addEventListener('click', () => {
       if (!selectedBook || !selectedChapter || !selectedVerse) return;
@@ -320,7 +334,8 @@ const Setup = (() => {
         verse: selectedVerse,
         spread: spread,
         showHints: showHints,
-        anyOrder: anyOrder
+        anyOrder: anyOrder,
+        autoSpeed: autoSpeed
       };
       App.startGame(verseRef);
     });
@@ -351,6 +366,28 @@ const Setup = (() => {
     await loadVerses();
     selectedVerse = ref.verse;
     $('verse-search').value = String(ref.verse);
+    if (ref.autoSpeed) {
+      autoSpeed = ref.autoSpeed;
+      const picker = $('speed-picker');
+      if (picker) {
+        picker.querySelectorAll('.speed-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.speed === autoSpeed);
+        });
+      }
+    }
+    if (ref.spread) {
+      spread = ref.spread;
+      $('spread-slider').value = spread;
+      $('spread-value').textContent = spread + 'x';
+    }
+    if (ref.showHints !== undefined) {
+      showHints = ref.showHints;
+      $('hints-toggle').checked = showHints;
+    }
+    if (ref.anyOrder !== undefined) {
+      anyOrder = ref.anyOrder;
+      $('any-order-toggle').checked = anyOrder;
+    }
     previewVerse();
   }
 
