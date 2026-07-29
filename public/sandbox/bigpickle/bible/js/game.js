@@ -533,8 +533,8 @@ const Game = (() => {
 
       slot.scrollIntoView({ block: 'center' });
       const slotRect = slot.getBoundingClientRect();
-      const targetX = slotRect.left + slotRect.width / 2;
-      const targetY = slotRect.top + slotRect.height / 2;
+      const targetX = slotRect.left + slotRect.width / 2 - el.offsetWidth / 2;
+      const targetY = slotRect.top + slotRect.height / 2 - el.offsetHeight / 2;
       const startX = parseFloat(el.style.left) || (wordWorldPos[wordIdx].x - cameraX);
       const startY = parseFloat(el.style.top) || (wordWorldPos[wordIdx].y - cameraY);
 
