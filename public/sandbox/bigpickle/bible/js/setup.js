@@ -9,7 +9,8 @@ const Setup = (() => {
   let spread = 1;
   let showHints = true;
   let anyOrder = false;
-  let autoSpeed = 'normal';
+  let autoDuration = 500;
+  let autoOverlap = 150;
 
   const $ = (id) => document.getElementById(id);
 
@@ -21,7 +22,8 @@ const Setup = (() => {
     try { bindSpreadSlider(); } catch (e) {}
     try { bindHintsToggle(); } catch (e) {}
     try { bindAnyOrderToggle(); } catch (e) {}
-    try { bindSpeedButtons(); } catch (e) {}
+    try { bindDurationSlider(); } catch (e) {}
+    try { bindOverlapSlider(); } catch (e) {}
     try { bindNavButtons(); } catch (e) {}
     try { generateStars(); } catch (e) {}
   }
@@ -311,15 +313,23 @@ const Setup = (() => {
     });
   }
 
-  function bindSpeedButtons() {
-    const picker = $('speed-picker');
-    if (!picker) return;
-    picker.addEventListener('click', (e) => {
-      const btn = e.target.closest('.speed-btn');
-      if (!btn) return;
-      picker.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      autoSpeed = btn.dataset.speed;
+  function bindDurationSlider() {
+    const slider = $('duration-slider');
+    const label = $('duration-value');
+    if (!slider || !label) return;
+    slider.addEventListener('input', () => {
+      autoDuration = parseInt(slider.value);
+      label.textContent = autoDuration + 'ms';
+    });
+  }
+
+  function bindOverlapSlider() {
+    const slider = $('overlap-slider');
+    const label = $('overlap-value');
+    if (!slider || !label) return;
+    slider.addEventListener('input', () => {
+      autoOverlap = parseInt(slider.value);
+      label.textContent = autoOverlap + 'ms';
     });
   }
 
@@ -335,7 +345,8 @@ const Setup = (() => {
         spread: spread,
         showHints: showHints,
         anyOrder: anyOrder,
-        autoSpeed: autoSpeed
+        autoDuration: autoDuration,
+        autoOverlap: autoOverlap
       };
       App.startGame(verseRef);
     });
@@ -366,14 +377,15 @@ const Setup = (() => {
     await loadVerses();
     selectedVerse = ref.verse;
     $('verse-search').value = String(ref.verse);
-    if (ref.autoSpeed) {
-      autoSpeed = ref.autoSpeed;
-      const picker = $('speed-picker');
-      if (picker) {
-        picker.querySelectorAll('.speed-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.speed === autoSpeed);
-        });
-      }
+    if (ref.autoDuration) {
+      autoDuration = ref.autoDuration;
+      $('duration-slider').value = autoDuration;
+      $('duration-value').textContent = autoDuration + 'ms';
+    }
+    if (ref.autoOverlap) {
+      autoOverlap = ref.autoOverlap;
+      $('overlap-slider').value = autoOverlap;
+      $('overlap-value').textContent = autoOverlap + 'ms';
     }
     if (ref.spread) {
       spread = ref.spread;

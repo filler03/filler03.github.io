@@ -492,12 +492,8 @@ const Game = (() => {
   function autoComplete() {
     if (animCount > 0) return;
 
-    const speedMap = {
-      slow: { duration: 800, overlapDelay: 250 },
-      normal: { duration: 500, overlapDelay: 150 },
-      fast: { duration: 320, overlapDelay: 80 }
-    };
-    const speed = speedMap[verseData.autoSpeed || 'normal'];
+    const duration = verseData.autoDuration || 500;
+    const overlapDelay = verseData.autoOverlap || 150;
 
     const unplacedWords = [];
     for (let j = 0; j < words.length; j++) {
@@ -543,7 +539,7 @@ const Game = (() => {
       el.style.zIndex = nextZIndex++;
 
       if (qi < queue.length) {
-        setTimeout(placeNext, speed.overlapDelay);
+        setTimeout(placeNext, overlapDelay);
       }
 
       animateWordToSlot(el, startX, startY, targetX, targetY, () => {
@@ -573,7 +569,7 @@ const Game = (() => {
           done = true;
           onVerseComplete();
         }
-      }, speed.duration);
+      }, duration);
     }
 
     placeNext();
@@ -599,7 +595,8 @@ const Game = (() => {
         chapter: verseData.chapter,
         verse: verseData.verse,
         spread: verseData.spread,
-        autoSpeed: verseData.autoSpeed
+        autoDuration: verseData.autoDuration,
+        autoOverlap: verseData.autoOverlap
       };
       cleanup();
       App.showSetup(currentRef);
@@ -613,7 +610,8 @@ const Game = (() => {
         verse: verseData.verse,
         spread: verseData.spread,
         showHints: verseData.showHints,
-        autoSpeed: verseData.autoSpeed
+        autoDuration: verseData.autoDuration,
+        autoOverlap: verseData.autoOverlap
       };
       cleanup();
       App.startNextVerse(currentRef);
