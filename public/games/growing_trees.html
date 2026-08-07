@@ -31,29 +31,9 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     z-index: 10;
   }
-  #ui {
-    position: fixed;
-    bottom: 16px;
-    right: 16px;
-    display: flex;
-    gap: 8px;
-    z-index: 10;
-  }
-  #ui button {
-    background: rgba(255,255,255,0.85);
-    border: none;
-    color: #2e5d34;
-    padding: 10px 16px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  }
-  #ui button:hover { background: #fff; }
   #count {
     position: fixed;
-    bottom: 20px;
+    top: 16px;
     left: 16px;
     color: #2e5d34;
     font-size: 13px;
@@ -131,8 +111,51 @@
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
   .val { font-weight: 700; }
-  .note-pick { display: flex; gap: 6px; }
-  .note-pick select { flex: 1; }
+  #panZone {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    height: 12%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.15);
+    color: rgba(46,93,52,0.35);
+    font-size: clamp(16px, 3vw, 26px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  #vertZone {
+    position: fixed;
+    right: 0;
+    top: 10%;
+    height: 80%;
+    width: 14%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.15);
+    color: rgba(46,93,52,0.35);
+    font-size: clamp(14px, 2.5vw, 22px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  #clear {
+    width: 100%;
+    padding: 9px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  #clear:hover { background: #e7f4d7; }
   #testSound {
     width: 100%;
     padding: 9px;
@@ -147,11 +170,8 @@
 </style>
 </head>
 <body>
-<div id="hint">🌱 Tap to plant • drag to pan • pinch to zoom</div>
+<div id="hint">🌱 Tap or drag the ground to plant • bottom slider pans & pinches to zoom • right slider moves up/down</div>
 <div id="count">🌳 0 trees</div>
-<div id="ui">
-  <button id="reset">Clear 🍂</button>
-</div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
 <div id="settingsPanel" class="hidden">
   <div class="panel-head">
@@ -160,14 +180,10 @@
   </div>
   <div class="tabs">
     <button class="tab active" data-level="start">🌱 Tree start</button>
-    <button class="tab" data-level="finish">🌳 Tree finish</button>
   </div>
   <div class="grid">
     <label for="note">Note</label>
-    <div class="note-pick">
-      <select id="note"></select>
-      <select id="octave"></select>
-    </div>
+    <select id="note"></select>
     <label for="wave">Wave</label>
     <select id="wave">
       <option value="sine">Sine</option>
@@ -175,21 +191,20 @@
       <option value="square">Square</option>
       <option value="sawtooth">Sawtooth</option>
     </select>
-    <label for="attack">Attack <b class="val" id="attackVal"></b></label>
-    <input type="range" id="attack" min="0" max="200" step="1">
     <label for="decay">Decay <b class="val" id="decayVal"></b></label>
     <input type="range" id="decay" min="0" max="1000" step="10">
     <label for="sustain">Sustain <b class="val" id="sustainVal"></b></label>
     <input type="range" id="sustain" min="0" max="100" step="1">
-    <label for="hold">Hold <b class="val" id="holdVal"></b></label>
-    <input type="range" id="hold" min="0" max="2000" step="10">
     <label for="release">Release <b class="val" id="releaseVal"></b></label>
     <input type="range" id="release" min="0" max="2000" step="10">
   </div>
+  <button id="clear">Clear trees 🍂</button>
   <button id="testSound">▶ Play test</button>
 </div>
 
 <canvas id="scene"></canvas>
+<div id="panZone" title="Drag to pan">⇄</div>
+<div id="vertZone" title="Drag to move up/down">↕</div>
 
 <script>
 /* ============================================================
@@ -265,10 +280,11 @@ const HAZE_L = 86, HAZE_S = 18;   // sky/haze color distant things fade toward
 
 /* ---------- Seed ---------- */
 class Seed {
-  constructor(x, depth, sizeRoll) {
+  constructor(x, depth, sizeRoll, sound) {
     this.x = x;
     this.depth = depth;
     this.sizeRoll = sizeRoll;
+    this.sound = sound || null;
     this.groundY = groundYFor(depth);
     this.y = -10;
     this.vy = 0;
@@ -282,7 +298,7 @@ class Seed {
     if (this.y >= this.groundY) {
       this.y = this.groundY;
       this.landed = true;
-      chime('start');
+      chime('start', this.sound);
       const tree = new Tree(this.x, this.groundY, this.depth, this.sizeRoll);
       liveTrees.push(tree);
       treeCount++;
@@ -553,8 +569,8 @@ class Tree {
 /* ---------- Interaction ---------- */
 const MIN_ZOOM = 0.3, MAX_ZOOM = 3.0;
 // cam is a screen-space translation: screen = world * zoom - cam.
-// Vertical scrolling is locked so trees never float off the ground —
-// cam.y only moves (keeping the pinch point anchored) while zooming.
+// The pan slider pans cam.x, the vertical slider pans cam.y, and a
+// pinch inside the pan slider changes cam.zoom.
 const cam = { x: 0, y: 0, zoom: 1 };
 
 function toWorld(sx, sy) {
@@ -572,7 +588,7 @@ function zoomAt(sx, sy, factor) {
   cam.y = w.y * nz - sy;
 }
 
-function plantAt(sx, sy) {
+function plantAt(sx, sy, sound) {
   // Land the seed exactly where you touched the ground: the touch Y picks
   // the scene depth (near bottom .. far horizon), so the seed drops right
   // at your fingertip. Bigger trees still grow further back.
@@ -581,13 +597,67 @@ function plantAt(sx, sy) {
   const scatter  = (Math.random() - 0.5) * 0.45;     // some randomness
   const sizeRoll = clamp01(1 - depth + scatter);
 
-  seeds.push(new Seed(w.x, depth, sizeRoll));
+  seeds.push(new Seed(w.x, depth, sizeRoll, sound));
   document.getElementById('hint').style.opacity = '0';
 }
 
 const pointers = new Map();
-let dragState = null;
-let pinchStart = null;
+let panState = null;   // drag in the pan slider -> move camera horizontally
+let vertState = null;  // drag in the vertical slider -> move camera vertically
+let dragState = null;  // drag on the ground -> plant gesture
+let pinchState = null; // { dist } last finger-spacing; two-finger pinch in the pan slider -> zoom
+
+const GAP_X = 0;            // gap from the right edge (fraction of W)
+const GAP_Y = 0;            // gap from the bottom edge (fraction of H)
+const PAN_LEN = 0.90;       // pan slider length (fraction of W)
+const PAN_TH = 0.12;        // pan slider thickness (fraction of H)
+const SLIDER_W = 0.14;      // right-side slider width (fraction of W)
+const SLIDER_TOP = 0.10;    // vertical slider starts 10% down the screen
+const SLIDER_BOTTOM = 0.90; // ... and ends 90% down
+const PAN_SENS = 2;         // camera movement multiplier
+const PINCH_SENS = 0.4;     // pinch zoom dampening (<1 = less sensitive)
+
+// A gesture only registers when it BEGINS inside one of the sliders.
+function inPanSlider(x, y) {
+  const w = PAN_LEN * W, h = PAN_TH * H;
+  const y1 = H - GAP_Y * H;
+  return x >= (W - w) / 2 && x <= (W + w) / 2 &&
+         y >= y1 - h && y <= y1;
+}
+function inVertSlider(x, y) {
+  const rw = SLIDER_W * W, x1 = W - GAP_X * W;
+  return x >= x1 - rw && x <= x1 &&
+         y >= H * SLIDER_TOP && y <= H * SLIDER_BOTTOM;
+}
+function zoneFor(x, y) {
+  if (inPanSlider(x, y)) return 'pan';
+  if (inVertSlider(x, y)) return 'vert';
+  return 'plant';
+}
+
+// Keep the horizon visible: its screen position (HORIZON * zoom - cam.y)
+// stays within [0, H].
+function clampCamY() {
+  const minY = HORIZON * cam.zoom - H;
+  const maxY = HORIZON * cam.zoom;
+  cam.y = Math.max(minY, Math.min(maxY, cam.y));
+}
+
+const TAP_THRESHOLD = 8;      // px of total movement before a drag counts
+const MAX_ATTACK = 200;       // ms — 1 vertical px = 1ms of attack
+const HOLD_PER_PX = 4;        // ms per horizontal px of sustain hold
+const MAX_HOLD = 10000;       // ms cap for sustain hold (10s)
+
+function gestureSound(sx, sy, cx, cy) {
+  return {
+    attack: Math.min(MAX_ATTACK, Math.round(Math.abs(cy - sy))),
+    hold:   Math.min(MAX_HOLD,   Math.round(Math.abs(cx - sx) * HOLD_PER_PX)),
+  };
+}
+
+function gestureMoved(g) {
+  return Math.abs(g.curX - g.startX) + Math.abs(g.curY - g.startY) > TAP_THRESHOLD;
+}
 
 canvas.addEventListener('pointerdown', e => {
   initAudio();
@@ -595,17 +665,19 @@ canvas.addEventListener('pointerdown', e => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size === 1) {
-    dragState = { startX: e.clientX, startY: e.clientY, moved: false };
+    panState = null; vertState = null; dragState = null;
+    const g = { startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY };
+    const zone = zoneFor(e.clientX, e.clientY);
+    if (zone === 'pan') panState = { ...g };
+    else if (zone === 'vert') vertState = { ...g };
+    else dragState = g;
   } else if (pointers.size === 2) {
-    dragState = null;
     const [a, b] = [...pointers.values()];
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    pinchStart = {
-      dist: Math.hypot(a.x - b.x, a.y - b.y),
-      zoom: cam.zoom,
-      wx: toWorld(mx, my).x,
-      wy: toWorld(mx, my).y,
-    };
+    panState = null; vertState = null; dragState = null;
+    // Pinch zoom only when BOTH fingers begin inside the pan slider.
+    pinchState = (inPanSlider(a.x, a.y) && inPanSlider(b.x, b.y))
+      ? { dist: Math.hypot(a.x - b.x, a.y - b.y) }
+      : null;
   }
 });
 
@@ -615,49 +687,58 @@ canvas.addEventListener('pointermove', e => {
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
 
-  if (pointers.size === 2 && pinchStart) {
+  if (pointers.size === 2 && pinchState) {
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    let nz = pinchStart.zoom * (dist / pinchStart.dist);
-    nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nz));
-    cam.zoom = nz;
-    cam.x = pinchStart.wx * nz - mx;
-    cam.y = pinchStart.wy * nz - my;
+    // Incremental delta from the LAST move (not the pinch start), so the
+    // factor never compounds across events — keeps the zoom smooth.
+    const factor = Math.pow(dist / pinchState.dist, PINCH_SENS);
+    pinchState.dist = dist;
+    zoomAt(mx, my, factor);
+    clampCamY();
+  } else if (pointers.size === 1 && panState) {
+    panState.curX = e.clientX; panState.curY = e.clientY;
+    cam.x -= dx * PAN_SENS;
+  } else if (pointers.size === 1 && vertState) {
+    cam.y -= dy * PAN_SENS;
+    clampCamY();
   } else if (pointers.size === 1 && dragState) {
-    if (!dragState.moved &&
-        Math.abs(e.clientX - dragState.startX) + Math.abs(e.clientY - dragState.startY) > 8) {
-      dragState.moved = true;
-    }
-    if (dragState.moved) {
-      cam.x -= dx;   // horizontal-only scroll; cam.y stays locked
-    }
+    dragState.curX = e.clientX; dragState.curY = e.clientY;
   }
 });
 
 canvas.addEventListener('pointerup', e => {
-  const wasPinch = pointers.size === 2;
   pointers.delete(e.pointerId);
+  pinchState = null;
   if (pointers.size === 1) {
     const p = [...pointers.values()][0];
-    dragState = { startX: p.x, startY: p.y, moved: true };
+    panState = null; vertState = null; dragState = null;
+    const g = { startX: p.x, startY: p.y, curX: p.x, curY: p.y };
+    const zone = zoneFor(p.x, p.y);
+    if (zone === 'pan') panState = { ...g };
+    else if (zone === 'vert') vertState = { ...g };
+    else dragState = g;
   } else if (pointers.size === 0) {
-    if (dragState && !dragState.moved && !wasPinch) plantAt(dragState.startX, dragState.startY);
+    if (dragState) {
+      const sound = gestureMoved(dragState)
+        ? gestureSound(dragState.startX, dragState.startY, dragState.curX, dragState.curY)
+        : null;
+      plantAt(dragState.startX, dragState.startY, sound);
+    }
+    panState = null;
+    vertState = null;
     dragState = null;
   }
-  pinchStart = null;
 });
 
 canvas.addEventListener('pointercancel', e => {
   pointers.delete(e.pointerId);
-  pinchStart = null;
-  if (pointers.size === 0) dragState = null;
+  pinchState = null;
+  if (pointers.size === 0) {
+    panState = null; vertState = null; dragState = null;
+  }
 });
-
-canvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
-}, { passive: false });
 
 /* ---------- Synthesized audio ---------- */
 let audioCtx = null;
@@ -666,17 +747,17 @@ let masterGain = null;
 const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
 
 // Per-level chime settings: note (pitch), wave type, and ADSR envelope.
-// Each level is a different stage of the tree's life.
+// The drag gesture can override attack/hold for individual drops.
 const CHIME_SETTINGS = {
-  start:  { note: 'C3', wave: 'sine', attack: 5,   decay: 400, sustain: 10, hold: 0,   release: 250 },
-  finish: { note: 'C4', wave: 'sine', attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },
+  start:  { note: 'C4', wave: 'sine', attack: 5,   decay: 100, sustain: 90, hold: 0,   release: 810 },
+  finish: { note: 'C4', wave: 'sine', attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
 };
 
-function chime(level) {
+function chime(level, overrides) {
   initAudio();
   resumeAudio();
   if (!audioCtx || !masterGain) return;
-  const s = CHIME_SETTINGS[level];
+  const s = Object.assign({}, CHIME_SETTINGS[level], overrides || {});
   const t0 = audioCtx.currentTime;
   const peak = 0.12;
 
@@ -737,6 +818,7 @@ function resumeAudio() {
 /* ---------- Chime settings panel ---------- */
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const NOTE_OFFSETS = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+const NOTE_OCTAVE = 4;
 
 function noteToFreq(name) {
   const m = name.match(/^([A-G]#?)(\d)$/);
@@ -746,22 +828,18 @@ function noteToFreq(name) {
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsPanel = document.getElementById('settingsPanel');
 const noteSel = document.getElementById('note');
-const octSel = document.getElementById('octave');
 const waveSel = document.getElementById('wave');
 const tabs = document.querySelectorAll('.tab');
-const ENV_FIELDS = ['attack', 'decay', 'sustain', 'hold', 'release'];
+const ENV_FIELDS = ['decay', 'sustain', 'release'];
 let currentLevel = 'start';
 
 for (const n of NOTE_NAMES) noteSel.add(new Option(n, n));
-for (let o = 2; o <= 6; o++) octSel.add(new Option('Octave ' + o, String(o)));
 
 function fmt(f, v) { return f === 'sustain' ? v + '%' : v + 'ms'; }
 
 function loadLevelUI(level) {
   const s = CHIME_SETTINGS[level];
-  const m = s.note.match(/^([A-G]#?)(\d)$/);
-  noteSel.value = m[1];
-  octSel.value = m[2];
+  noteSel.value = s.note.slice(0, -1);
   waveSel.value = s.wave;
   for (const f of ENV_FIELDS) {
     const el = document.getElementById(f);
@@ -777,11 +855,7 @@ function previewChime() {
 }
 
 noteSel.addEventListener('change', () => {
-  CHIME_SETTINGS[currentLevel].note = noteSel.value + octSel.value;
-  previewChime();
-});
-octSel.addEventListener('change', () => {
-  CHIME_SETTINGS[currentLevel].note = noteSel.value + octSel.value;
+  CHIME_SETTINGS[currentLevel].note = noteSel.value + NOTE_OCTAVE;
   previewChime();
 });
 waveSel.addEventListener('change', () => {
@@ -816,7 +890,7 @@ document.getElementById('closeSettings').addEventListener('click', () => {
 });
 document.getElementById('testSound').addEventListener('click', previewChime);
 
-document.getElementById('reset').addEventListener('click', () => {
+document.getElementById('clear').addEventListener('click', () => {
   seeds.length = 0;
   liveTrees.length = 0;
   bakedTrees.length = 0;
@@ -854,7 +928,6 @@ function loop() {
   for (let i = liveTrees.length - 1; i >= 0; i--) {
     const t = liveTrees[i];
     if (t.update()) {
-      chime('finish');
       t.bake();
       bakedTrees.push(t);
       liveTrees.splice(i, 1);
@@ -873,6 +946,38 @@ function loop() {
   }
 
   for (const s of seeds) s.draw(ctx);
+
+  // drag feedback: guide line + live attack/hold readout for the plant gesture
+  if (dragState && gestureMoved(dragState)) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const snd = gestureSound(dragState.startX, dragState.startY, dragState.curX, dragState.curY);
+
+    ctx.strokeStyle = 'rgba(46,93,52,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.moveTo(dragState.startX, dragState.startY);
+    ctx.lineTo(dragState.curX, dragState.curY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(46,93,52,0.85)';
+    ctx.beginPath();
+    ctx.arc(dragState.startX, dragState.startY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const label = `attack ${snd.attack}ms · hold ${snd.hold}ms`;
+    ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
+    const tw = ctx.measureText(label).width;
+    let lx = dragState.curX + 12, ly = dragState.curY - 12;
+    if (lx + tw + 12 > W) lx = dragState.curX - tw - 20;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    ctx.roundRect(lx, ly - 22, tw + 16, 28, 8);
+    ctx.fill();
+    ctx.fillStyle = '#2e5d34';
+    ctx.fillText(label, lx + 8, ly - 2);
+  }
 
   requestAnimationFrame(loop);
 }
