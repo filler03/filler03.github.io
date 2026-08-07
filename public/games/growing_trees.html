@@ -14,7 +14,7 @@
     font-family: 'Segoe UI', system-ui, sans-serif;
     cursor: crosshair;
   }
-  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
+  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; touch-action: none; }
   #hint {
     position: fixed;
     top: 16px;
@@ -66,7 +66,7 @@
 </style>
 </head>
 <body>
-<div id="hint">🌱 Click anywhere to plant a seed</div>
+<div id="hint">🌱 Tap to plant • drag to pan • pinch to zoom</div>
 <div id="count">🌳 0 trees</div>
 <div id="ui">
   <button id="reset">Clear 🍂</button>
@@ -156,7 +156,7 @@ class Seed {
     this.y = -10;
     this.vy = 0;
     this.landed = false;
-    this.r = mix(3, 5, depth);
+    this.r = mix(3, 5, Math.min(1, depth));
   }
   update() {
     if (this.landed) return;
@@ -189,7 +189,7 @@ class Branch {
     this.depth = depth;
     this.grown = 0;
     this.bend = (Math.random() - 0.5) * length * 0.30;
-    this.lightJitter = (Math.random() * 8) - 3 - depth * 1.5;
+    this.lightJitter = Math.max(-6, (Math.random() * 8) - 3 - depth * 1.5);
     this.children = [];
     this.spawned = false;
     this.leaves = [];
@@ -377,7 +377,7 @@ class Branch {
 class Tree {
   constructor(x, y, sceneDepth, sizeRoll) {
     this.depth = sceneDepth;                         // 0 far .. 1 near
-    this.hazeAmt = (1 - sceneDepth) * 0.8;
+    this.hazeAmt = Math.max(0, (1 - sceneDepth) * 0.4);
     this.species = SPECIES[Math.floor(Math.random() * SPECIES.length)];
     const base = BARK[Math.floor(Math.random() * BARK.length)];
     this.bark = {
@@ -431,17 +431,111 @@ class Tree {
 }
 
 /* ---------- Interaction ---------- */
-canvas.addEventListener('click', e => {
-  // Roll the tree's intrinsic size first. Bigger trees tend to grow
-  // further BACK, smaller ones up FRONT, with random scatter so the
-  // treeline never looks perfectly stratified.
-  const sizeRoll = Math.random();                    // 0 small .. 1 big
-  const scatter  = (Math.random() - 0.5) * 0.45;     // some randomness
-  const depth    = clamp01((1 - sizeRoll) + scatter);// big -> far(0), small -> near(1)
+const MIN_ZOOM = 0.3, MAX_ZOOM = 3.0;
+// cam is a screen-space translation: screen = world * zoom - cam.
+// Vertical scrolling is locked so trees never float off the ground —
+// cam.y only moves (keeping the pinch point anchored) while zooming.
+const cam = { x: 0, y: 0, zoom: 1 };
 
-  seeds.push(new Seed(e.clientX, depth, sizeRoll));
+function toWorld(sx, sy) {
+  return {
+    x: (sx + cam.x) / cam.zoom,
+    y: (sy + cam.y) / cam.zoom,
+  };
+}
+
+function zoomAt(sx, sy, factor) {
+  const w = toWorld(sx, sy);
+  const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, cam.zoom * factor));
+  cam.zoom = nz;
+  cam.x = w.x * nz - sx;
+  cam.y = w.y * nz - sy;
+}
+
+function plantAt(sx, sy) {
+  // Land the seed exactly where you touched the ground: the touch Y picks
+  // the scene depth (near bottom .. far horizon), so the seed drops right
+  // at your fingertip. Bigger trees still grow further back.
+  const w = toWorld(sx, sy);
+  const depth    = Math.max(0, (w.y - HORIZON) / (H * 0.42));
+  const scatter  = (Math.random() - 0.5) * 0.45;     // some randomness
+  const sizeRoll = clamp01(1 - depth + scatter);
+
+  seeds.push(new Seed(w.x, depth, sizeRoll));
   document.getElementById('hint').style.opacity = '0';
+}
+
+const pointers = new Map();
+let dragState = null;
+let pinchStart = null;
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 1) {
+    dragState = { startX: e.clientX, startY: e.clientY, moved: false };
+  } else if (pointers.size === 2) {
+    dragState = null;
+    const [a, b] = [...pointers.values()];
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    pinchStart = {
+      dist: Math.hypot(a.x - b.x, a.y - b.y),
+      zoom: cam.zoom,
+      wx: toWorld(mx, my).x,
+      wy: toWorld(mx, my).y,
+    };
+  }
 });
+
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY;
+
+  if (pointers.size === 2 && pinchStart) {
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    let nz = pinchStart.zoom * (dist / pinchStart.dist);
+    nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nz));
+    cam.zoom = nz;
+    cam.x = pinchStart.wx * nz - mx;
+    cam.y = pinchStart.wy * nz - my;
+  } else if (pointers.size === 1 && dragState) {
+    if (!dragState.moved &&
+        Math.abs(e.clientX - dragState.startX) + Math.abs(e.clientY - dragState.startY) > 8) {
+      dragState.moved = true;
+    }
+    if (dragState.moved) {
+      cam.x -= dx;   // horizontal-only scroll; cam.y stays locked
+    }
+  }
+});
+
+canvas.addEventListener('pointerup', e => {
+  const wasPinch = pointers.size === 2;
+  pointers.delete(e.pointerId);
+  if (pointers.size === 1) {
+    const p = [...pointers.values()][0];
+    dragState = { startX: p.x, startY: p.y, moved: true };
+  } else if (pointers.size === 0) {
+    if (dragState && !dragState.moved && !wasPinch) plantAt(dragState.startX, dragState.startY);
+    dragState = null;
+  }
+  pinchStart = null;
+});
+
+canvas.addEventListener('pointercancel', e => {
+  pointers.delete(e.pointerId);
+  pinchStart = null;
+  if (pointers.size === 0) dragState = null;
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+}, { passive: false });
 
 document.getElementById('reset').addEventListener('click', () => {
   seeds.length = 0;
@@ -453,7 +547,24 @@ document.getElementById('reset').addEventListener('click', () => {
 
 /* ---------- Main loop ---------- */
 function loop() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, W, H);
+  ctx.setTransform(cam.zoom, 0, 0, cam.zoom, -cam.x, -cam.y);
+
+  // Draw the sky/ground gradient in WORLD coordinates so the ground
+  // scales and pans together with the trees (the CSS background is a
+  // fixed layer and would otherwise make trees look like they float).
+  const vx0 = cam.x / cam.zoom, vy0 = cam.y / cam.zoom;
+  const vw = W / cam.zoom, vh = H / cam.zoom;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0.0, '#87ceeb');
+  grad.addColorStop(0.45, '#a9d6e8');
+  grad.addColorStop(0.55, '#bfe3f0');
+  grad.addColorStop(0.56, '#cdeab3');
+  grad.addColorStop(0.78, '#b7dd93');
+  grad.addColorStop(1.0, '#a6d17e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(vx0, vy0, vw, vh);
 
   for (let i = seeds.length - 1; i >= 0; i--) {
     const s = seeds[i];
