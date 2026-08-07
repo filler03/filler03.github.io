@@ -63,6 +63,87 @@
     border-radius: 14px;
     z-index: 10;
   }
+  #settingsBtn {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 42px;
+    height: 42px;
+    background: rgba(255,255,255,0.85);
+    border: none;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 20;
+  }
+  #settingsBtn:hover { background: #fff; }
+  #settingsPanel {
+    position: fixed;
+    top: 66px;
+    right: 16px;
+    width: 300px;
+    max-width: calc(100vw - 32px);
+    background: rgba(255,255,255,0.96);
+    border-radius: 14px;
+    padding: 14px 16px 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    color: #2e5d34;
+    font-size: 13px;
+    z-index: 30;
+  }
+  #settingsPanel.hidden { display: none; }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 10px;
+  }
+  .panel-head button {
+    background: none;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+    color: #2e5d34;
+  }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab {
+    flex: 1;
+    padding: 7px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .tab.active { background: #cdeab3; }
+  .grid {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    gap: 9px 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .grid label { font-weight: 600; }
+  .grid select, .grid input[type=range] { width: 100%; }
+  .val { font-weight: 700; }
+  .note-pick { display: flex; gap: 6px; }
+  .note-pick select { flex: 1; }
+  #testSound {
+    width: 100%;
+    padding: 9px;
+    border: none;
+    border-radius: 10px;
+    background: #2e5d34;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  #testSound:hover { background: #3c7a45; }
 </style>
 </head>
 <body>
@@ -70,6 +151,42 @@
 <div id="count">🌳 0 trees</div>
 <div id="ui">
   <button id="reset">Clear 🍂</button>
+</div>
+<button id="settingsBtn" title="Sound settings">⚙️</button>
+<div id="settingsPanel" class="hidden">
+  <div class="panel-head">
+    <span>Sound settings</span>
+    <button id="closeSettings">✕</button>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-level="start">🌱 Tree start</button>
+    <button class="tab" data-level="finish">🌳 Tree finish</button>
+  </div>
+  <div class="grid">
+    <label for="note">Note</label>
+    <div class="note-pick">
+      <select id="note"></select>
+      <select id="octave"></select>
+    </div>
+    <label for="wave">Wave</label>
+    <select id="wave">
+      <option value="sine">Sine</option>
+      <option value="triangle">Triangle</option>
+      <option value="square">Square</option>
+      <option value="sawtooth">Sawtooth</option>
+    </select>
+    <label for="attack">Attack <b class="val" id="attackVal"></b></label>
+    <input type="range" id="attack" min="0" max="200" step="1">
+    <label for="decay">Decay <b class="val" id="decayVal"></b></label>
+    <input type="range" id="decay" min="0" max="1000" step="10">
+    <label for="sustain">Sustain <b class="val" id="sustainVal"></b></label>
+    <input type="range" id="sustain" min="0" max="100" step="1">
+    <label for="hold">Hold <b class="val" id="holdVal"></b></label>
+    <input type="range" id="hold" min="0" max="2000" step="10">
+    <label for="release">Release <b class="val" id="releaseVal"></b></label>
+    <input type="range" id="release" min="0" max="2000" step="10">
+  </div>
+  <button id="testSound">▶ Play test</button>
 </div>
 
 <canvas id="scene"></canvas>
@@ -165,7 +282,9 @@ class Seed {
     if (this.y >= this.groundY) {
       this.y = this.groundY;
       this.landed = true;
-      liveTrees.push(new Tree(this.x, this.groundY, this.depth, this.sizeRoll));
+      chime('start');
+      const tree = new Tree(this.x, this.groundY, this.depth, this.sizeRoll);
+      liveTrees.push(tree);
       treeCount++;
       countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
     }
@@ -376,7 +495,8 @@ class Branch {
 /* ---------- Tree ---------- */
 class Tree {
   constructor(x, y, sceneDepth, sizeRoll) {
-    this.depth = sceneDepth;                         // 0 far .. 1 near
+    this.x = x;                                   // world position (used for chords)
+    this.depth = sceneDepth;                      // 0 far .. 1 near
     this.hazeAmt = Math.max(0, (1 - sceneDepth) * 0.4);
     this.species = SPECIES[Math.floor(Math.random() * SPECIES.length)];
     const base = BARK[Math.floor(Math.random() * BARK.length)];
@@ -470,6 +590,8 @@ let dragState = null;
 let pinchStart = null;
 
 canvas.addEventListener('pointerdown', e => {
+  initAudio();
+  resumeAudio();
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size === 1) {
@@ -537,6 +659,163 @@ canvas.addEventListener('wheel', e => {
   zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
 }, { passive: false });
 
+/* ---------- Synthesized audio ---------- */
+let audioCtx = null;
+let masterGain = null;
+
+const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
+
+// Per-level chime settings: note (pitch), wave type, and ADSR envelope.
+// Each level is a different stage of the tree's life.
+const CHIME_SETTINGS = {
+  start:  { note: 'C3', wave: 'sine', attack: 5,   decay: 400, sustain: 10, hold: 0,   release: 250 },
+  finish: { note: 'C4', wave: 'sine', attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },
+};
+
+function chime(level) {
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return;
+  const s = CHIME_SETTINGS[level];
+  const t0 = audioCtx.currentTime;
+  const peak = 0.12;
+
+  const atk = s.attack / 1000;
+  const dec = s.decay / 1000;
+  const sus = s.sustain / 100;
+  const hold = s.hold / 1000;
+  const rel = s.release / 1000;
+
+  const tPeak = t0 + atk;
+  const tSus = tPeak + dec;
+  const tRel = tSus + hold;
+  const tEnd = tRel + rel;
+
+  const gain = audioCtx.createGain();
+  const g = gain.gain;
+  g.setValueAtTime(0, t0);
+  if (atk > 0) g.linearRampToValueAtTime(peak, tPeak);
+  else g.setValueAtTime(peak, tPeak);
+  g.linearRampToValueAtTime(peak * sus, tSus);
+  g.setValueAtTime(peak * sus, tRel);
+  g.linearRampToValueAtTime(0, tEnd);
+  gain.connect(masterGain);
+
+  const osc = audioCtx.createOscillator();
+  osc.type = s.wave;
+  osc.frequency.value = noteToFreq(s.note);
+  osc.connect(gain);
+  osc.start(t0);
+  osc.stop(tEnd + 0.05);
+
+  setTimeout(() => {
+    try { osc.disconnect(); gain.disconnect(); } catch (e) {}
+  }, (tEnd - t0 + 0.5) * 1000);
+}
+
+function initAudio() {
+  if (audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  audioCtx = new AC();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.45;
+  const comp = audioCtx.createDynamicsCompressor();
+  comp.threshold.value = -20;
+  comp.knee.value = 16;
+  comp.ratio.value = 8;
+  comp.attack.value = 0.01;
+  comp.release.value = 0.3;
+  masterGain.connect(comp);
+  comp.connect(audioCtx.destination);
+}
+
+function resumeAudio() {
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+/* ---------- Chime settings panel ---------- */
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const NOTE_OFFSETS = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+
+function noteToFreq(name) {
+  const m = name.match(/^([A-G]#?)(\d)$/);
+  return midiFreq((+m[2] + 1) * 12 + NOTE_OFFSETS[m[1]]);
+}
+
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+const noteSel = document.getElementById('note');
+const octSel = document.getElementById('octave');
+const waveSel = document.getElementById('wave');
+const tabs = document.querySelectorAll('.tab');
+const ENV_FIELDS = ['attack', 'decay', 'sustain', 'hold', 'release'];
+let currentLevel = 'start';
+
+for (const n of NOTE_NAMES) noteSel.add(new Option(n, n));
+for (let o = 2; o <= 6; o++) octSel.add(new Option('Octave ' + o, String(o)));
+
+function fmt(f, v) { return f === 'sustain' ? v + '%' : v + 'ms'; }
+
+function loadLevelUI(level) {
+  const s = CHIME_SETTINGS[level];
+  const m = s.note.match(/^([A-G]#?)(\d)$/);
+  noteSel.value = m[1];
+  octSel.value = m[2];
+  waveSel.value = s.wave;
+  for (const f of ENV_FIELDS) {
+    const el = document.getElementById(f);
+    el.value = s[f];
+    document.getElementById(f + 'Val').textContent = fmt(f, s[f]);
+  }
+}
+
+function previewChime() {
+  initAudio();
+  resumeAudio();
+  chime(currentLevel);
+}
+
+noteSel.addEventListener('change', () => {
+  CHIME_SETTINGS[currentLevel].note = noteSel.value + octSel.value;
+  previewChime();
+});
+octSel.addEventListener('change', () => {
+  CHIME_SETTINGS[currentLevel].note = noteSel.value + octSel.value;
+  previewChime();
+});
+waveSel.addEventListener('change', () => {
+  CHIME_SETTINGS[currentLevel].wave = waveSel.value;
+  previewChime();
+});
+for (const f of ENV_FIELDS) {
+  const el = document.getElementById(f);
+  el.addEventListener('input', () => {
+    CHIME_SETTINGS[currentLevel][f] = +el.value;
+    document.getElementById(f + 'Val').textContent = fmt(f, +el.value);
+  });
+  el.addEventListener('change', () => previewChime());
+}
+
+for (const tab of tabs) {
+  tab.addEventListener('click', () => {
+    for (const t of tabs) t.classList.toggle('active', t === tab);
+    currentLevel = tab.dataset.level;
+    loadLevelUI(currentLevel);
+  });
+}
+
+settingsBtn.addEventListener('click', () => {
+  initAudio();
+  resumeAudio();
+  settingsPanel.classList.toggle('hidden');
+  if (!settingsPanel.classList.contains('hidden')) loadLevelUI(currentLevel);
+});
+document.getElementById('closeSettings').addEventListener('click', () => {
+  settingsPanel.classList.add('hidden');
+});
+document.getElementById('testSound').addEventListener('click', previewChime);
+
 document.getElementById('reset').addEventListener('click', () => {
   seeds.length = 0;
   liveTrees.length = 0;
@@ -575,6 +854,7 @@ function loop() {
   for (let i = liveTrees.length - 1; i >= 0; i--) {
     const t = liveTrees[i];
     if (t.update()) {
+      chime('finish');
       t.bake();
       bakedTrees.push(t);
       liveTrees.splice(i, 1);
