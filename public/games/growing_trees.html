@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Click to Grow a Tree 🌳</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+    background: linear-gradient(#87ceeb 0%, #a9d6e8 45%, #bfe3f0 55%, #cdeab3 56%, #b7dd93 78%, #a6d17e 100%);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    cursor: crosshair;
+  }
+  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
+  #hint {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.75);
+    color: #2e5d34;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 15px;
+    font-weight: 600;
+    pointer-events: none;
+    transition: opacity 0.6s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    z-index: 10;
+  }
+  #ui {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+  }
+  #ui button {
+    background: rgba(255,255,255,0.85);
+    border: none;
+    color: #2e5d34;
+    padding: 10px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  #ui button:hover { background: #fff; }
+  #count {
+    position: fixed;
+    bottom: 20px;
+    left: 16px;
+    color: #2e5d34;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.7);
+    padding: 6px 12px;
+    border-radius: 14px;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<div id="hint">🌱 Click anywhere to plant a seed</div>
+<div id="count">🌳 0 trees</div>
+<div id="ui">
+  <button id="reset">Clear 🍂</button>
+</div>
+
+<canvas id="scene"></canvas>
+
+<script>
+/* ============================================================
+   CLICK-TO-GROW TREES
+
+   SIZE vs DEPTH: each tree first rolls an intrinsic "size" (how big
+   a tree it wants to be). That roll biases its scene depth so that
+   BIGGER trees tend to grow further BACK (near the horizon) and
+   SMALLER trees tend to grow up FRONT — with a bit of random scatter
+   so it never looks too perfect. Perspective scaling is kept mild so
+   a large far-back tree still reads as genuinely large.
+
+   DEPTH ORDER: everything shares ONE canvas and is drawn in a single
+   depth-sorted pass each frame (far -> near), so background trees can
+   never render over foreground ones.
+
+   PERFORMANCE: a finished tree is rendered ONCE onto its own small
+   off-screen bitmap (sized to its bounding box) and thereafter just
+   blitted with drawImage() in its correct depth slot.
+
+   Realism: branches taper base->tip, curve gently, shaded like bark.
+   Wood: each tree picks a bark tone from a palette.
+   ============================================================ */
+
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+
+let W, H, HORIZON;
+let treeCount = 0;
+const countEl = document.getElementById('count');
+
+const seeds = [];          // falling seeds
+const liveTrees = [];      // trees still growing (full redraw each frame)
+const bakedTrees = [];     // finished trees, cached as bitmaps
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  HORIZON = H * 0.56;              // where ground meets sky (matches CSS)
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* depth 0 = far horizon, 1 = close foreground -> ground Y */
+function groundYFor(depth) { return HORIZON + (H * 0.42) * depth; }
+const mix = (a, b, t) => a + (b - a) * t;
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+
+/* ---------- Tree "species" (leaf color + fruit) ---------- */
+const SPECIES = [
+  { name: 'apple',    leafHue: [95, 135], fruit: { color: [226,59,46],  r: 5, chance: 0.55 } },
+  { name: 'orange',   leafHue: [90, 125], fruit: { color: [255,140,26], r: 5, chance: 0.5  } },
+  { name: 'cherry',   leafHue: [100,140], fruit: { color: [210,31,71],  r: 3, chance: 0.7  } },
+  { name: 'plum',     leafHue: [95, 130], fruit: { color: [125,60,181], r: 4, chance: 0.5  } },
+  { name: 'lemon',    leafHue: [90, 120], fruit: { color: [247,224,23], r: 4, chance: 0.5  } },
+  { name: 'blossom',  leafHue: [110,150], fruit: { color: [255,158,203],r: 4, chance: 0.8  } },
+  { name: 'autumn',   leafHue: [25, 55],  fruit: null },
+  { name: 'golden',   leafHue: [45, 70],  fruit: null },
+  { name: 'evergreen',leafHue: [140,165], fruit: null },
+];
+
+/* ---------- Bark palette (hue, sat, light) ---------- */
+const BARK = [
+  { name: 'brown',   h: 28, s: 40, l: 30 },
+  { name: 'redwood', h: 15, s: 45, l: 32 },
+  { name: 'grey',    h: 30, s: 10, l: 44 },
+  { name: 'dark',    h: 25, s: 35, l: 20 },
+  { name: 'birch',   h: 42, s: 12, l: 70 },
+  { name: 'olive',   h: 55, s: 28, l: 36 },
+];
+
+const HAZE_L = 86, HAZE_S = 18;   // sky/haze color distant things fade toward
+
+/* ---------- Seed ---------- */
+class Seed {
+  constructor(x, depth, sizeRoll) {
+    this.x = x;
+    this.depth = depth;
+    this.sizeRoll = sizeRoll;
+    this.groundY = groundYFor(depth);
+    this.y = -10;
+    this.vy = 0;
+    this.landed = false;
+    this.r = mix(3, 5, depth);
+  }
+  update() {
+    if (this.landed) return;
+    this.vy += 0.6;
+    this.y += this.vy;
+    if (this.y >= this.groundY) {
+      this.y = this.groundY;
+      this.landed = true;
+      liveTrees.push(new Tree(this.x, this.groundY, this.depth, this.sizeRoll));
+      treeCount++;
+      countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
+    }
+  }
+  draw(ctx) {
+    ctx.fillStyle = '#6b4423';
+    ctx.beginPath();
+    ctx.ellipse(this.x, this.y, this.r * 0.8, this.r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/* ---------- Branch ---------- */
+class Branch {
+  constructor(x, y, angle, length, thickness, depth) {
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.length = length;
+    this.thickness = thickness;
+    this.depth = depth;
+    this.grown = 0;
+    this.bend = (Math.random() - 0.5) * length * 0.30;
+    this.lightJitter = (Math.random() * 8) - 3 - depth * 1.5;
+    this.children = [];
+    this.spawned = false;
+    this.leaves = [];
+    this.fruit = null;
+    this.done = false;
+  }
+
+  get endX() { return this.x + Math.cos(this.angle) * this.length * this.grown; }
+  get endY() { return this.y + Math.sin(this.angle) * this.length * this.grown; }
+
+  update(tree) {
+    if (this.done) return true;
+
+    if (this.grown < 1) {
+      this.grown += 0.015;
+      if (this.grown > 1) this.grown = 1;
+      return false;
+    }
+
+    if (!this.spawned) {
+      this.spawned = true;
+      if (this.depth < tree.maxDepth) {
+        const n = 1 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < n; i++) {
+          const spread = (Math.random() - 0.5) * 1.4;
+          const newAngle = this.angle + spread;
+          const newLen = this.length * (0.62 + Math.random() * 0.22);
+          const newThick = Math.max(1.0, this.thickness * 0.72);
+          this.children.push(new Branch(this.endX, this.endY, newAngle,
+                                        newLen, newThick, this.depth + 1));
+        }
+      } else {
+        const sp = tree.species;
+        const [hMin, hMax] = sp.leafHue;
+        const leafCount = 3 + Math.floor(Math.random() * 4);
+        for (let i = 0; i < leafCount; i++) {
+          this.leaves.push({
+            x: this.endX + (Math.random() - 0.5) * 18 * tree.scale,
+            y: this.endY + (Math.random() - 0.5) * 18 * tree.scale,
+            size: 0,
+            target: (4 + Math.random() * 4) * Math.max(0.6, tree.scale),
+            hue: hMin + Math.random() * (hMax - hMin),
+            sat: 50 + Math.random() * 25,
+            light: 38 + Math.random() * 14,
+            rot: Math.random() * 0.4,
+          });
+        }
+        if (sp.fruit && Math.random() < sp.fruit.chance) {
+          this.fruit = {
+            x: this.endX + (Math.random() - 0.5) * 10,
+            y: this.endY + 4 + Math.random() * 6,
+            size: 0,
+            target: (sp.fruit.r + Math.random() * 2) * Math.max(0.6, tree.scale),
+            color: sp.fruit.color,
+          };
+        }
+      }
+    }
+
+    let allDone = true;
+    for (const c of this.children) if (!c.update(tree)) allDone = false;
+
+    let leavesDone = true;
+    for (const l of this.leaves) {
+      if (l.size < l.target) { l.size += 0.15; leavesDone = false; }
+    }
+    let fruitDone = true;
+    if (this.fruit && this.fruit.size < this.fruit.target) {
+      this.fruit.size += 0.08; fruitDone = false;
+    }
+
+    this.done = allDone && leavesDone && fruitDone;
+    return this.done;
+  }
+
+  bounds(box) {
+    const pts = [[this.x, this.y], [this.endX, this.endY]];
+    for (const [px, py] of pts) {
+      const t = this.thickness;
+      if (px - t < box.minX) box.minX = px - t;
+      if (px + t > box.maxX) box.maxX = px + t;
+      if (py - t < box.minY) box.minY = py - t;
+      if (py + t > box.maxY) box.maxY = py + t;
+    }
+    for (const l of this.leaves) {
+      const s = l.target * 1.5;
+      if (l.x - s < box.minX) box.minX = l.x - s;
+      if (l.x + s > box.maxX) box.maxX = l.x + s;
+      if (l.y - s < box.minY) box.minY = l.y - s;
+      if (l.y + s > box.maxY) box.maxY = l.y + s;
+    }
+    if (this.fruit) {
+      const f = this.fruit, s = f.target + 2;
+      if (f.x - s < box.minX) box.minX = f.x - s;
+      if (f.x + s > box.maxX) box.maxX = f.x + s;
+      if (f.y - s < box.minY) box.minY = f.y - s;
+      if (f.y + s > box.maxY) box.maxY = f.y + s;
+    }
+    for (const c of this.children) c.bounds(box);
+  }
+
+  drawWood(ctx, tree) {
+    const g  = this.grown;
+    const ex = this.endX, ey = this.endY;
+    const w0 = this.thickness;
+    const w1 = Math.max(0.7, this.thickness * 0.72);
+
+    const perp = this.angle + Math.PI / 2;
+    const mx = (this.x + ex) / 2, my = (this.y + ey) / 2;
+    const cpx = mx + Math.cos(perp) * this.bend * g;
+    const cpy = my + Math.sin(perp) * this.bend * g;
+
+    const N = 8;
+    const left = [], right = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, it = 1 - t;
+      const px = it * it * this.x + 2 * it * t * cpx + t * t * ex;
+      const py = it * it * this.y + 2 * it * t * cpy + t * t * ey;
+      const tx = 2 * it * (cpx - this.x) + 2 * t * (ex - cpx);
+      const ty = 2 * it * (cpy - this.y) + 2 * t * (ey - cpy);
+      const len = Math.hypot(tx, ty) || 1;
+      const nx = -ty / len, ny = tx / len;
+      const w = (w0 * (1 - t) + w1 * t) / 2;
+      left.push([px + nx * w, py + ny * w]);
+      right.push([px - nx * w, py - ny * w]);
+    }
+
+    const b = tree.bark, haze = tree.hazeAmt;
+    const baseL = b.l + this.lightJitter;
+    const litL  = mix(baseL + 10, HAZE_L, haze);
+    const shadL = mix(baseL - 10, HAZE_L, haze);
+    const S     = mix(b.s, HAZE_S, haze);
+
+    const gx0 = this.x + Math.cos(perp) * w0 / 2;
+    const gy0 = this.y + Math.sin(perp) * w0 / 2;
+    const gx1 = this.x - Math.cos(perp) * w0 / 2;
+    const gy1 = this.y - Math.sin(perp) * w0 / 2;
+    const grad = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+    grad.addColorStop(0.0, `hsl(${b.h}, ${S}%, ${shadL}%)`);
+    grad.addColorStop(0.45,`hsl(${b.h}, ${S}%, ${litL}%)`);
+    grad.addColorStop(1.0, `hsl(${b.h}, ${S}%, ${shadL - 2}%)`);
+
+    ctx.beginPath();
+    ctx.moveTo(left[0][0], left[0][1]);
+    for (let i = 1; i <= N; i++) ctx.lineTo(left[i][0], left[i][1]);
+    for (let i = N; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  draw(ctx, tree) {
+    this.drawWood(ctx, tree);
+    for (const c of this.children) c.draw(ctx, tree);
+
+    const haze = tree.hazeAmt;
+    for (const l of this.leaves) {
+      const L = mix(l.light, HAZE_L, haze);
+      const S = mix(l.sat,   HAZE_S, haze);
+      ctx.fillStyle = `hsl(${l.hue}, ${S}%, ${L}%)`;
+      ctx.beginPath();
+      ctx.ellipse(l.x, l.y, l.size, l.size * 1.4, l.rot, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (this.fruit && this.fruit.size > 0.3) {
+      const f = this.fruit;
+      const [r, g, bl] = f.color;
+      const rr = Math.round(mix(r, 210, haze));
+      const gg = Math.round(mix(g, 224, haze));
+      const bb = Math.round(mix(bl,232, haze));
+      ctx.fillStyle = `rgb(${rr},${gg},${bb})`;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${0.45 * (1 - haze)})`;
+      ctx.beginPath();
+      ctx.arc(f.x - f.size * 0.3, f.y - f.size * 0.3, f.size * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/* ---------- Tree ---------- */
+class Tree {
+  constructor(x, y, sceneDepth, sizeRoll) {
+    this.depth = sceneDepth;                         // 0 far .. 1 near
+    this.hazeAmt = (1 - sceneDepth) * 0.8;
+    this.species = SPECIES[Math.floor(Math.random() * SPECIES.length)];
+    const base = BARK[Math.floor(Math.random() * BARK.length)];
+    this.bark = {
+      h: base.h + (Math.random() * 8 - 4),
+      s: base.s + (Math.random() * 8 - 4),
+      l: base.l + (Math.random() * 8 - 4),
+    };
+
+    // ---- SIZE ----
+    // Intrinsic size comes from the roll (0 small .. 1 big). This is the
+    // "kind" of tree. Perspective is kept MILD so a big far-back tree
+    // still reads as big rather than being shrunk away.
+    const intrinsic   = 0.55 + sizeRoll * 1.15;      // ~0.55 .. 1.70
+    const perspective = 0.85 + sceneDepth * 0.30;    // far 0.85 .. near 1.15
+    this.scale = intrinsic * perspective;
+
+    // Bigger trees also branch more (bushier), small ones stay sparse.
+    this.maxDepth = 4 + Math.round(sizeRoll * 4);    // 4 .. 8 levels
+
+    const trunkLen = (55 + Math.random() * 45) * this.scale;
+    const trunkThick = Math.max(4, 12 * this.scale);
+    this.trunk = new Branch(x, y, -Math.PI / 2 + (Math.random() - 0.5) * 0.2,
+                            trunkLen, trunkThick, 0);
+    this.done = false;
+
+    this.bmp = null; this.bx = 0; this.by = 0;
+  }
+  update() { this.done = this.trunk.update(this); return this.done; }
+  draw(ctx) { this.trunk.draw(ctx, this); }
+
+  bake() {
+    const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    this.trunk.bounds(box);
+    const pad = 4;
+    this.bx = Math.floor(box.minX - pad);
+    this.by = Math.floor(box.minY - pad);
+    const w = Math.max(1, Math.ceil(box.maxX - box.minX) + pad * 2);
+    const h = Math.max(1, Math.ceil(box.maxY - box.minY) + pad * 2);
+
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const octx = off.getContext('2d');
+    octx.translate(-this.bx, -this.by);
+    this.draw(octx);
+    this.bmp = off;
+  }
+
+  blit(ctx) {
+    if (this.bmp) ctx.drawImage(this.bmp, this.bx, this.by);
+  }
+}
+
+/* ---------- Interaction ---------- */
+canvas.addEventListener('click', e => {
+  // Roll the tree's intrinsic size first. Bigger trees tend to grow
+  // further BACK, smaller ones up FRONT, with random scatter so the
+  // treeline never looks perfectly stratified.
+  const sizeRoll = Math.random();                    // 0 small .. 1 big
+  const scatter  = (Math.random() - 0.5) * 0.45;     // some randomness
+  const depth    = clamp01((1 - sizeRoll) + scatter);// big -> far(0), small -> near(1)
+
+  seeds.push(new Seed(e.clientX, depth, sizeRoll));
+  document.getElementById('hint').style.opacity = '0';
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  seeds.length = 0;
+  liveTrees.length = 0;
+  bakedTrees.length = 0;
+  treeCount = 0;
+  countEl.textContent = '🌳 0 trees';
+});
+
+/* ---------- Main loop ---------- */
+function loop() {
+  ctx.clearRect(0, 0, W, H);
+
+  for (let i = seeds.length - 1; i >= 0; i--) {
+    const s = seeds[i];
+    s.update();
+    if (s.landed) seeds.splice(i, 1);
+  }
+
+  for (let i = liveTrees.length - 1; i >= 0; i--) {
+    const t = liveTrees[i];
+    if (t.update()) {
+      t.bake();
+      bakedTrees.push(t);
+      liveTrees.splice(i, 1);
+    }
+  }
+
+  // single depth-sorted pass over everything (far -> near)
+  const all = [];
+  for (const t of bakedTrees) all.push(t);
+  for (const t of liveTrees)  all.push(t);
+  all.sort((a, b) => a.depth - b.depth);
+
+  for (const t of all) {
+    if (t.bmp) t.blit(ctx);
+    else       t.draw(ctx);
+  }
+
+  for (const s of seeds) s.draw(ctx);
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
