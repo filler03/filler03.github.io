@@ -62,6 +62,7 @@
     position: fixed;
     top: 66px;
     right: 16px;
+    bottom: 16px;
     width: 300px;
     max-width: calc(100vw - 32px);
     background: rgba(255,255,255,0.96);
@@ -71,8 +72,14 @@
     color: #2e5d34;
     font-size: 13px;
     z-index: 30;
+    overflow-y: auto;
   }
   #settingsPanel.hidden { display: none; }
+  #settingsPanel::-webkit-scrollbar { width: 10px; }
+  #settingsPanel::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
+  #settingsPanel::-webkit-scrollbar-thumb { background: #2e5d34; border-radius: 5px; border: 2px solid #fff; }
+  #settingsPanel::-webkit-scrollbar-thumb:hover { background: #3c7a45; }
+  #settingsPanel { scrollbar-width: thin; scrollbar-color: #2e5d34 rgba(46,93,52,0.06); }
   .panel-head {
     display: flex;
     justify-content: space-between;
@@ -111,39 +118,44 @@
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
   .val { font-weight: 700; }
-  #panZone {
-    position: fixed;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 90%;
-    height: 12%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.15);
-    color: rgba(46,93,52,0.35);
-    font-size: clamp(16px, 3vw, 26px);
-    pointer-events: none;
-    z-index: 10;
+  .vec-head {
+    font-weight: 700;
+    font-size: 12px;
+    color: #3c7a45;
+    border-top: 1px solid #cdeab3;
+    padding-top: 10px;
+    margin: 4px 0 10px;
   }
-  #vertZone {
-    position: fixed;
-    right: 0;
-    top: 10%;
-    height: 80%;
-    width: 14%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.15);
-    color: rgba(46,93,52,0.35);
-    font-size: clamp(14px, 2.5vw, 22px);
-    pointer-events: none;
-    z-index: 10;
+  .vec-sel.flash { border-color: #d9534f; background: #fdecea; }
+  .mm-legend {
+    display: grid;
+    grid-template-columns: 78px 1fr 52px 1fr 52px;
+    gap: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #3c7a45;
+    margin-bottom: 2px;
   }
+  .grid.mm { grid-template-columns: 78px 1fr 52px 1fr 52px; }
+  #modeBtn {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    padding: 11px 18px;
+    border: none;
+    border-radius: 26px;
+    background: #2e5d34;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    z-index: 20;
+  }
+  #modeBtn:hover { background: #3c7a45; }
+  #modeBtn.nav { background: #3a5ba0; }
+  #modeBtn.nav:hover { background: #4a6db0; }
   #clear {
     width: 100%;
     padding: 9px;
@@ -170,7 +182,7 @@
 </style>
 </head>
 <body>
-<div id="hint">🌱 Tap or drag the ground to plant • bottom slider pans & pinches to zoom • right slider moves up/down</div>
+<div id="hint">🌱 Planting: tap or drag the ground to grow a tree • pause ~1s mid-drag to start another line (up to 3 vectors set the note's volume/attack/decay/sustain/hold/release) • tap the button (bottom-right) to switch to 🧭 Navigating</div>
 <div id="count">🌳 0 trees</div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
 <div id="settingsPanel" class="hidden">
@@ -182,7 +194,7 @@
     <button class="tab active" data-level="start">🌱 Tree start</button>
   </div>
   <div class="grid">
-    <label for="note">Note</label>
+    <label for="note">Key</label>
     <select id="note"></select>
     <label for="wave">Wave</label>
     <select id="wave">
@@ -191,31 +203,102 @@
       <option value="square">Square</option>
       <option value="sawtooth">Sawtooth</option>
     </select>
+    <label for="blend">Wave blend <b class="val" id="blendVal"></b></label>
+    <input type="range" id="blend" min="0" max="100" step="1">
+    <label for="volume">Volume <b class="val" id="volumeVal"></b></label>
+    <input type="range" id="volume">
+    <label for="attack">Attack <b class="val" id="attackVal"></b></label>
+    <input type="range" id="attack">
     <label for="decay">Decay <b class="val" id="decayVal"></b></label>
     <input type="range" id="decay" min="0" max="1000" step="10">
     <label for="sustain">Sustain <b class="val" id="sustainVal"></b></label>
     <input type="range" id="sustain" min="0" max="100" step="1">
+    <label for="hold">Hold <b class="val" id="holdVal"></b></label>
+    <input type="range" id="hold">
     <label for="release">Release <b class="val" id="releaseVal"></b></label>
     <input type="range" id="release" min="0" max="2000" step="10">
+  </div>
+  <div class="vec-head">Gesture → Sound (each line's X/Y, in order)</div>
+  <div class="grid">
+    <label for="v1x">V1 X →</label>
+    <select id="v1x" class="vec-sel"></select>
+    <label for="v1y">V1 Y →</label>
+    <select id="v1y" class="vec-sel"></select>
+    <label for="v2x">V2 X →</label>
+    <select id="v2x" class="vec-sel"></select>
+    <label for="v2y">V2 Y →</label>
+    <select id="v2y" class="vec-sel"></select>
+    <label for="v3x">V3 X →</label>
+    <select id="v3x" class="vec-sel"></select>
+    <label for="v3y">V3 Y →</label>
+    <select id="v3y" class="vec-sel"></select>
+    <label for="pause">New line <b class="val" id="pauseVal"></b></label>
+    <input type="range" id="pause" min="300" max="2000" step="50">
+  </div>
+  <div class="vec-head">Sensitivity (units per 100px)</div>
+  <div class="grid">
+    <label for="sens-volume">Volume <b class="val" id="sens-volumeVal"></b></label>
+    <input type="range" id="sens-volume">
+    <label for="sens-attack">Attack <b class="val" id="sens-attackVal"></b></label>
+    <input type="range" id="sens-attack">
+    <label for="sens-decay">Decay <b class="val" id="sens-decayVal"></b></label>
+    <input type="range" id="sens-decay">
+    <label for="sens-sustain">Sustain <b class="val" id="sens-sustainVal"></b></label>
+    <input type="range" id="sens-sustain">
+    <label for="sens-hold">Hold <b class="val" id="sens-holdVal"></b></label>
+    <input type="range" id="sens-hold">
+    <label for="sens-release">Release <b class="val" id="sens-releaseVal"></b></label>
+    <input type="range" id="sens-release">
+  </div>
+  <div class="vec-head">Min / Max per quality (gesture values clamp here)</div>
+  <div class="mm-legend">
+    <span></span><span>Min</span><span></span><span>Max</span><span></span>
+  </div>
+  <div class="grid mm">
+    <label for="min-volume">Volume</label>
+    <input type="range" id="min-volume"><b class="val" id="min-volumeVal"></b>
+    <input type="range" id="max-volume"><b class="val" id="max-volumeVal"></b>
+    <label for="min-attack">Attack</label>
+    <input type="range" id="min-attack"><b class="val" id="min-attackVal"></b>
+    <input type="range" id="max-attack"><b class="val" id="max-attackVal"></b>
+    <label for="min-decay">Decay</label>
+    <input type="range" id="min-decay"><b class="val" id="min-decayVal"></b>
+    <input type="range" id="max-decay"><b class="val" id="max-decayVal"></b>
+    <label for="min-sustain">Sustain</label>
+    <input type="range" id="min-sustain"><b class="val" id="min-sustainVal"></b>
+    <input type="range" id="max-sustain"><b class="val" id="max-sustainVal"></b>
+    <label for="min-hold">Hold</label>
+    <input type="range" id="min-hold"><b class="val" id="min-holdVal"></b>
+    <input type="range" id="max-hold"><b class="val" id="max-holdVal"></b>
+    <label for="min-release">Release</label>
+    <input type="range" id="min-release"><b class="val" id="min-releaseVal"></b>
+    <input type="range" id="max-release"><b class="val" id="max-releaseVal"></b>
   </div>
   <button id="clear">Clear trees 🍂</button>
   <button id="testSound">▶ Play test</button>
 </div>
 
 <canvas id="scene"></canvas>
-<div id="panZone" title="Drag to pan">⇄</div>
-<div id="vertZone" title="Drag to move up/down">↕</div>
+<button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 
 <script>
 /* ============================================================
    CLICK-TO-GROW TREES
 
-   SIZE vs DEPTH: each tree first rolls an intrinsic "size" (how big
-   a tree it wants to be). That roll biases its scene depth so that
-   BIGGER trees tend to grow further BACK (near the horizon) and
-   SMALLER trees tend to grow up FRONT — with a bit of random scatter
-   so it never looks too perfect. Perspective scaling is kept mild so
-   a large far-back tree still reads as genuinely large.
+   SIZE: each tree's size comes entirely from the gesture that created it —
+   the time from the beginning of the note's attack to the beginning of its
+   release (attack + decay + hold). A very short gesture grows a small, low
+   shrub; a long one grows a tall, full tree. The wood, leaves and fruit all
+   animate together across that whole window and are complete exactly when
+   the release begins.
+
+   GESTURE: one gesture can be several vectors. Pause ~1s to end a line and
+   start a new one from that point (up to 3 vectors). Each vector's X and Y
+   length map to the note's six qualities — volume, attack, decay, sustain,
+   hold, release — with the axis→quality assignment, each quality's px
+   sensitivity, and each quality's [min, max] clamp chosen in settings (the
+   clamp ranges themselves are bounded). A quality falls back to its settings
+   default whenever it isn't assigned to a vector or its vector isn't drawn.
 
    DEPTH ORDER: everything shares ONE canvas and is drawn in a single
    depth-sorted pass each frame (far -> near), so background trees can
@@ -236,7 +319,6 @@ let W, H, HORIZON;
 let treeCount = 0;
 const countEl = document.getElementById('count');
 
-const seeds = [];          // falling seeds
 const liveTrees = [];      // trees still growing (full redraw each frame)
 const bakedTrees = [];     // finished trees, cached as bitmaps
 
@@ -278,41 +360,6 @@ const BARK = [
 
 const HAZE_L = 86, HAZE_S = 18;   // sky/haze color distant things fade toward
 
-/* ---------- Seed ---------- */
-class Seed {
-  constructor(x, depth, sizeRoll, sound) {
-    this.x = x;
-    this.depth = depth;
-    this.sizeRoll = sizeRoll;
-    this.sound = sound || null;
-    this.groundY = groundYFor(depth);
-    this.y = -10;
-    this.vy = 0;
-    this.landed = false;
-    this.r = mix(3, 5, Math.min(1, depth));
-  }
-  update() {
-    if (this.landed) return;
-    this.vy += 0.6;
-    this.y += this.vy;
-    if (this.y >= this.groundY) {
-      this.y = this.groundY;
-      this.landed = true;
-      chime('start', this.sound);
-      const tree = new Tree(this.x, this.groundY, this.depth, this.sizeRoll);
-      liveTrees.push(tree);
-      treeCount++;
-      countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
-    }
-  }
-  draw(ctx) {
-    ctx.fillStyle = '#6b4423';
-    ctx.beginPath();
-    ctx.ellipse(this.x, this.y, this.r * 0.8, this.r, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
 /* ---------- Branch ---------- */
 class Branch {
   constructor(x, y, angle, length, thickness, depth) {
@@ -329,24 +376,22 @@ class Branch {
     this.spawned = false;
     this.leaves = [];
     this.fruit = null;
-    this.done = false;
   }
 
   get endX() { return this.x + Math.cos(this.angle) * this.length * this.grown; }
   get endY() { return this.y + Math.sin(this.angle) * this.length * this.grown; }
 
-  update(tree) {
-    if (this.done) return true;
-
-    if (this.grown < 1) {
-      this.grown += 0.015;
-      if (this.grown > 1) this.grown = 1;
-      return false;
+  update(tree, now, dt) {
+    // Wood grows for exactly the animation window (attack -> release start).
+    // The cascade rate is set so the whole structure completes at the end.
+    if (tree.phase === 'grow' && this.grown < 1) {
+      this.grown = Math.min(1, this.grown + tree.woodRate * dt);
     }
 
-    if (!this.spawned) {
+    if (this.grown >= 1 && !this.spawned) {
       this.spawned = true;
-      if (this.depth < tree.maxDepth) {
+      const tip = this.depth >= tree.maxDepth;
+      if (!tip) {
         const n = 1 + Math.floor(Math.random() * 3);
         for (let i = 0; i < n; i++) {
           const spread = (Math.random() - 0.5) * 1.4;
@@ -356,48 +401,60 @@ class Branch {
           this.children.push(new Branch(this.endX, this.endY, newAngle,
                                         newLen, newThick, this.depth + 1));
         }
-      } else {
-        const sp = tree.species;
-        const [hMin, hMax] = sp.leafHue;
-        const leafCount = 3 + Math.floor(Math.random() * 4);
-        for (let i = 0; i < leafCount; i++) {
-          this.leaves.push({
-            x: this.endX + (Math.random() - 0.5) * 18 * tree.scale,
-            y: this.endY + (Math.random() - 0.5) * 18 * tree.scale,
-            size: 0,
-            target: (4 + Math.random() * 4) * Math.max(0.6, tree.scale),
-            hue: hMin + Math.random() * (hMax - hMin),
-            sat: 50 + Math.random() * 25,
-            light: 38 + Math.random() * 14,
-            rot: Math.random() * 0.4,
-          });
-        }
-        if (sp.fruit && Math.random() < sp.fruit.chance) {
-          this.fruit = {
-            x: this.endX + (Math.random() - 0.5) * 10,
-            y: this.endY + 4 + Math.random() * 6,
-            size: 0,
-            target: (sp.fruit.r + Math.random() * 2) * Math.max(0.6, tree.scale),
-            color: sp.fruit.color,
-          };
-        }
+      }
+
+      // Foliage appears as each branch completes: leaves start small and grow
+      // fast enough to reach full size exactly when the animation window ends,
+      // so wood and leaves/fruit bloom together in one smooth motion.
+      const remainSec = Math.max(0.001, (tree.growDur - (now - tree.born)) / 1000);
+      const growRate = 1 / remainSec;
+
+      const sp = tree.species;
+      const [hMin, hMax] = sp.leafHue;
+      let leafCount = 0;
+      if (tip) {
+        leafCount = 3 + Math.floor(Math.random() * 4);
+      } else if (this.depth === tree.maxDepth - 1 && Math.random() < 0.6) {
+        leafCount = 1 + Math.floor(Math.random() * 2);
+      }
+      const leafScale = tip ? 1 : 0.6;
+      for (let i = 0; i < leafCount; i++) {
+        this.leaves.push({
+          x: this.endX + (Math.random() - 0.5) * 18 * tree.scale,
+          y: this.endY + (Math.random() - 0.5) * 18 * tree.scale,
+          size: 0,
+          target: (4 + Math.random() * 4) * Math.max(0.6, tree.scale) * leafScale,
+          rate: growRate,
+          hue: hMin + Math.random() * (hMax - hMin),
+          sat: 50 + Math.random() * 25,
+          light: 38 + Math.random() * 14,
+          rot: Math.random() * 0.4,
+        });
+      }
+      if (tip && sp.fruit && Math.random() < sp.fruit.chance) {
+        this.fruit = {
+          x: this.endX + (Math.random() - 0.5) * 10,
+          y: this.endY + 4 + Math.random() * 6,
+          size: 0,
+          target: (sp.fruit.r + Math.random() * 2) * Math.max(0.6, tree.scale),
+          rate: growRate,
+          color: sp.fruit.color,
+        };
       }
     }
 
-    let allDone = true;
-    for (const c of this.children) if (!c.update(tree)) allDone = false;
+    for (const c of this.children) c.update(tree, now, dt);
 
-    let leavesDone = true;
-    for (const l of this.leaves) {
-      if (l.size < l.target) { l.size += 0.15; leavesDone = false; }
+    // Leaves & fruit bloom in step with the wood: each grows at its own rate
+    // so everything reaches full size right when the release begins.
+    if (tree.phase === 'grow') {
+      for (const l of this.leaves) {
+        if (l.size < l.target) l.size = Math.min(l.target, l.size + l.target * l.rate * dt);
+      }
+      if (this.fruit && this.fruit.size < this.fruit.target) {
+        this.fruit.size = Math.min(this.fruit.target, this.fruit.size + this.fruit.target * this.fruit.rate * dt);
+      }
     }
-    let fruitDone = true;
-    if (this.fruit && this.fruit.size < this.fruit.target) {
-      this.fruit.size += 0.08; fruitDone = false;
-    }
-
-    this.done = allDone && leavesDone && fruitDone;
-    return this.done;
   }
 
   bounds(box) {
@@ -510,7 +567,7 @@ class Branch {
 
 /* ---------- Tree ---------- */
 class Tree {
-  constructor(x, y, sceneDepth, sizeRoll) {
+  constructor(x, y, sceneDepth, growDur, sustainLevel) {
     this.x = x;                                   // world position (used for chords)
     this.depth = sceneDepth;                      // 0 far .. 1 near
     this.hazeAmt = Math.max(0, (1 - sceneDepth) * 0.4);
@@ -522,26 +579,51 @@ class Tree {
       l: base.l + (Math.random() * 8 - 4),
     };
 
-    // ---- SIZE ----
-    // Intrinsic size comes from the roll (0 small .. 1 big). This is the
-    // "kind" of tree. Perspective is kept MILD so a big far-back tree
-    // still reads as big rather than being shrunk away.
-    const intrinsic   = 0.55 + sizeRoll * 1.15;      // ~0.55 .. 1.70
-    const perspective = 0.85 + sceneDepth * 0.30;    // far 0.85 .. near 1.15
-    this.scale = intrinsic * perspective;
+    // ---- ANIMATION WINDOW ----
+    // The whole tree — wood, leaves and fruit — animates for exactly the time
+    // from the beginning of the note's attack to the beginning of its release
+    // (attack + decay + hold). The note keeps ringing through its release, but
+    // the tree is fully grown the moment the release begins. (Total sound time
+    // is attack + decay + hold + release.)
+    const FULL_GROW_MS = 6000;                  // animation window for a full-size tree
+    this.growDur = Math.max(120, growDur);      // ms of animation (attack -> release start)
+    this.born    = performance.now();
+    this.phase   = 'grow';
 
-    // Bigger trees also branch more (bushier), small ones stay sparse.
-    this.maxDepth = 4 + Math.round(sizeRoll * 4);    // 4 .. 8 levels
+    // ---- SIZE from GESTURE ----
+    // Size comes only from how long the animation window lasts: a very short
+    // gesture makes a tiny shrub; a long gesture makes a tall, full tree.
+    // Where you plant it has no effect on size.
+    const sizeFactor = clamp01(this.growDur / FULL_GROW_MS) *
+                       (0.35 + 0.65 * clamp01(sustainLevel));
+    const trunkHeight = 0.35 + 0.65 * Math.pow(sizeFactor, 0.5);
 
-    const trunkLen = (55 + Math.random() * 45) * this.scale;
-    const trunkThick = Math.max(4, 12 * this.scale);
+    // Branch/footprint scale from the gesture alone (no depth perspective).
+    this.scale = 0.7 + 1.3 * sizeFactor;
+
+    // Bigger trees branch more (bushier), small shrubs stay sparse.
+    this.maxDepth = 2 + Math.round(sizeFactor * 6);    // 2 .. 8 levels
+
+    const trunkLen = (55 + Math.random() * 45) * this.scale * trunkHeight;
+    const trunkThick = Math.max(3, 12 * this.scale * (0.5 + 0.5 * sizeFactor));
     this.trunk = new Branch(x, y, -Math.PI / 2 + (Math.random() - 0.5) * 0.2,
                             trunkLen, trunkThick, 0);
-    this.done = false;
 
     this.bmp = null; this.bx = 0; this.by = 0;
+
+    // Wood runs the full cascade (maxDepth+2 level slots, leaving one level
+    // of headroom so the deepest branches always finish and spawn leaves)
+    // across the whole animation window. Leaves then bloom at a per-leaf rate
+    // that lands them at full size exactly when the window ends.
+    this.woodRate = (this.maxDepth + 2) / (this.growDur / 1000);
   }
-  update() { this.done = this.trunk.update(this); return this.done; }
+
+  update(now, dt) {
+    const t = now - this.born;
+    if (t >= this.growDur) this.phase = 'done';
+    this.trunk.update(this, now, dt);
+    return this.phase === 'done';
+  }
   draw(ctx) { this.trunk.draw(ctx, this); }
 
   bake() {
@@ -589,51 +671,43 @@ function zoomAt(sx, sy, factor) {
 }
 
 function plantAt(sx, sy, sound) {
-  // Land the seed exactly where you touched the ground: the touch Y picks
-  // the scene depth (near bottom .. far horizon), so the seed drops right
-  // at your fingertip. Bigger trees still grow further back.
+  // The tree starts growing right where you touched the ground: the touch Y
+  // picks the scene depth (near bottom .. far horizon), so it sprouts at your
+  // fingertip. Size comes only from the gesture/sustain, not from depth.
   const w = toWorld(sx, sy);
-  const depth    = Math.max(0, (w.y - HORIZON) / (H * 0.42));
-  const scatter  = (Math.random() - 0.5) * 0.45;     // some randomness
-  const sizeRoll = clamp01(1 - depth + scatter);
+  const depth = Math.max(0, (w.y - HORIZON) / (H * 0.42));
 
-  seeds.push(new Seed(w.x, depth, sizeRoll, sound));
+  const s = Object.assign({}, CHIME_SETTINGS.start, sound || {});
+  // Pitch comes from the tree's vertical position (scene depth), not the
+  // gesture: the skyline (depth 0) plays the key root two octaves up, and the
+  // deepest point you can scroll down to plays the key root itself, snapped
+  // to the chosen scale. Trees at different heights layer into a melody/chord.
+  const SCALE = [0, 2, 4, 7, 9];                  // major pentatonic semitone offsets
+  const maxDepth = 1 / (0.42 * cam.zoom);         // deepest scrollable ground depth
+  const p = clamp01(1 - depth / maxDepth);        // 0 at deepest scrollable .. 1 at sky
+  const degree = Math.round(p * SCALE.length * 2);  // 0..10 across 2 octaves
+  const octaveOffset = Math.floor(degree / SCALE.length);
+  const semitone = SCALE[Math.min(SCALE.length - 1, degree % SCALE.length)] + 12 * octaveOffset;
+  s.note = midiToName(noteToMidi(s.note) + semitone);
+  chime('start', s);
+  // The tree animates for exactly the time from the beginning of the attack
+  // to the beginning of the release (attack + decay + hold). That window is
+  // also what sizes the tree — short gesture = small shrub, long = big tree.
+  const animDur = s.attack + s.decay + s.hold;
+  liveTrees.push(new Tree(w.x, groundYFor(depth), depth, animDur, s.sustain / 100));
+  treeCount++;
+  countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
   document.getElementById('hint').style.opacity = '0';
 }
 
 const pointers = new Map();
-let panState = null;   // drag in the pan slider -> move camera horizontally
-let vertState = null;  // drag in the vertical slider -> move camera vertically
-let dragState = null;  // drag on the ground -> plant gesture
-let pinchState = null; // { dist } last finger-spacing; two-finger pinch in the pan slider -> zoom
+let mode = 'plant';      // 'plant' | 'nav'
+let navState = null;     // single-finger pan drag in nav mode
+let dragState = null;    // plant gesture in plant mode
+let pinchState = null;   // { dist } two-finger pinch in nav mode
 
-const GAP_X = 0;            // gap from the right edge (fraction of W)
-const GAP_Y = 0;            // gap from the bottom edge (fraction of H)
-const PAN_LEN = 0.90;       // pan slider length (fraction of W)
-const PAN_TH = 0.12;        // pan slider thickness (fraction of H)
-const SLIDER_W = 0.14;      // right-side slider width (fraction of W)
-const SLIDER_TOP = 0.10;    // vertical slider starts 10% down the screen
-const SLIDER_BOTTOM = 0.90; // ... and ends 90% down
-const PAN_SENS = 2;         // camera movement multiplier
-const PINCH_SENS = 0.4;     // pinch zoom dampening (<1 = less sensitive)
-
-// A gesture only registers when it BEGINS inside one of the sliders.
-function inPanSlider(x, y) {
-  const w = PAN_LEN * W, h = PAN_TH * H;
-  const y1 = H - GAP_Y * H;
-  return x >= (W - w) / 2 && x <= (W + w) / 2 &&
-         y >= y1 - h && y <= y1;
-}
-function inVertSlider(x, y) {
-  const rw = SLIDER_W * W, x1 = W - GAP_X * W;
-  return x >= x1 - rw && x <= x1 &&
-         y >= H * SLIDER_TOP && y <= H * SLIDER_BOTTOM;
-}
-function zoneFor(x, y) {
-  if (inPanSlider(x, y)) return 'pan';
-  if (inVertSlider(x, y)) return 'vert';
-  return 'plant';
-}
+const PAN_SENS = 2;          // camera movement multiplier
+const PINCH_SENS = 0.4;      // pinch zoom dampening (<1 = less sensitive)
 
 // Keep the horizon visible: its screen position (HORIZON * zoom - cam.y)
 // stays within [0, H].
@@ -644,40 +718,160 @@ function clampCamY() {
 }
 
 const TAP_THRESHOLD = 8;      // px of total movement before a drag counts
-const MAX_ATTACK = 200;       // ms — 1 vertical px = 1ms of attack
-const HOLD_PER_PX = 4;        // ms per horizontal px of sustain hold
-const MAX_HOLD = 10000;       // ms cap for sustain hold (10s)
 
-function gestureSound(sx, sy, cx, cy) {
-  return {
-    attack: Math.min(MAX_ATTACK, Math.round(Math.abs(cy - sy))),
-    hold:   Math.min(MAX_HOLD,   Math.round(Math.abs(cx - sx) * HOLD_PER_PX)),
-  };
+/* ---- Gesture -> sound mapping ---- */
+const QUALITIES = ['volume', 'attack', 'decay', 'sustain', 'hold', 'release'];
+
+// A gesture can be up to maxVectors vectors. Pausing for `pause` ms ends a
+// line and starts a new one from that point. Each vector's X and Y length map
+// to one of the six sound qualities (assigned in settings, no duplicates) and
+// is scaled by that quality's sensitivity (units per 100px of line), then
+// clamped to that quality's configurable [min, max] range.
+const GESTURE = {
+  pause: 1000,
+  maxVectors: 3,
+  assign: { v1x: 'hold', v1y: 'attack', v2x: null, v2y: null, v3x: null, v3y: null },
+  sens:  { volume: 8, attack: 100, decay: 200, sustain: 50, hold: 1200, release: 400 },
+  min:   { volume: 0.02, attack: 5, decay: 50, sustain: 20, hold: 0, release: 100 },
+  max:   { volume: 0.25, attack: 200, decay: 1000, sustain: 100, hold: 10000, release: 2000 },
+  unit:  { volume: '', attack: 'ms', decay: 'ms', sustain: '%', hold: 'ms', release: 'ms' },
+};
+
+// Hard limits for the per-quality min/max settings the player can choose.
+// The slider value is an integer; /scale converts it to the real figure.
+const QUALITY_BOUNDS = {
+  volume:  { min: 0,    max: 50,    step: 1,   scale: 0.01 },  // 0 .. 0.5
+  attack:  { min: 0,    max: 1000,  step: 5,   scale: 1 },
+  decay:   { min: 0,    max: 3000,  step: 10,  scale: 1 },
+  sustain: { min: 0,    max: 100,   step: 1,   scale: 1 },
+  hold:    { min: 0,    max: 30000, step: 100, scale: 1 },
+  release: { min: 0,    max: 5000,  step: 10,  scale: 1 },
+};
+
+// Sensitivity slider ranges. The slider value is an integer; /div converts it
+// to the actual units-per-100px figure the player sees.
+const SENS_UI = {
+  volume:  { min: 0,   max: 30,    step: 1,   div: 100 },
+  attack:  { min: 10,  max: 400,   step: 10,  div: 1 },
+  decay:   { min: 20,  max: 1000,  step: 10,  div: 1 },
+  sustain: { min: 5,   max: 200,   step: 5,   div: 1 },
+  hold:    { min: 100, max: 4000,  step: 100, div: 1 },
+  release: { min: 50,  max: 1000,  step: 10,  div: 1 },
+};
+
+// The six assignment slots (vector + axis) in order: V1 X, V1 Y, V2 X, ...
+const ASSIGN_SLOTS = ['v1x', 'v1y', 'v2x', 'v2y', 'v3x', 'v3y'];
+
+function axisPx(seg, axis) {
+  return axis === 'x' ? Math.abs(seg.x1 - seg.x0) : Math.abs(seg.y1 - seg.y0);
+}
+
+// Compute the sound from the committed vector segments. Each quality comes
+// from exactly one assigned axis; qualities that are unassigned or whose line
+// wasn't drawn are omitted so chime() falls back to its defaults.
+function gestureSound(segments) {
+  const out = {};
+  const owner = {};
+  for (const slot of ASSIGN_SLOTS) {
+    const q = GESTURE.assign[slot];
+    if (q) owner[q] = { vec: +slot[1] - 1, axis: slot[2] };
+  }
+  for (const q of QUALITIES) {
+    const o = owner[q];
+    if (!o || o.vec >= segments.length) continue;
+    const px = axisPx(segments[o.vec], o.axis);
+    const value = Math.min(GESTURE.max[q], Math.max(GESTURE.min[q], (px * GESTURE.sens[q]) / 100));
+    out[q] = q === 'volume' ? value : Math.round(value);
+  }
+  return out;
+}
+
+// Contributions of a single vector (by 0-based index) from its assigned X/Y.
+function vectorSound(seg, vecIndex) {
+  const out = {};
+  for (const ax of ['x', 'y']) {
+    const q = GESTURE.assign[ASSIGN_SLOTS[vecIndex * 2 + (ax === 'x' ? 0 : 1)]];
+    if (!q) continue;
+    const value = Math.min(GESTURE.max[q], Math.max(GESTURE.min[q], (axisPx(seg, ax) * GESTURE.sens[q]) / 100));
+    out[q] = q === 'volume' ? value : Math.round(value);
+  }
+  return out;
+}
+
+const SHORT_QL = { volume: 'vol', attack: 'atk', decay: 'dec', sustain: 'sus', hold: 'hld', release: 'rel' };
+
+// Small label showing a vector's own contributions near the middle of its line.
+function drawVectorLabel(seg, idx, isLive) {
+  const snd = vectorSound(seg, idx);
+  const parts = [];
+  for (const q of QUALITIES) {
+    if (snd[q] == null) continue;
+    parts.push(`${SHORT_QL[q]} ${q === 'volume' ? snd[q].toFixed(2) : snd[q]}${GESTURE.unit[q]}`);
+  }
+  if (!parts.length) return;
+  const label = parts.join(' · ');
+  const mx = (seg.x0 + seg.x1) / 2, my = (seg.y0 + seg.y1) / 2;
+  const dx = seg.x1 - seg.x0, dy = seg.y1 - seg.y0;
+  const len = Math.hypot(dx, dy) || 1;
+  const ox = (-dy / len) * 16, oy = (dx / len) * 16;
+  const tw = ctx.measureText(label).width;
+  let lx = mx + ox + 4, ly = my + oy + 3;
+  if (lx + tw + 4 > W) lx = W - tw - 6;
+  if (lx < 4) lx = 4;
+  if (ly < 10) ly = 14;
+  if (ly > H - 4) ly = H - 8;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.roundRect(lx - 3, ly - 10, tw + 6, 13, 4);
+  ctx.fill();
+  ctx.fillStyle = isLive ? '#3a5ba0' : '#2e5d34';
+  ctx.fillText(label, lx, ly);
 }
 
 function gestureMoved(g) {
-  return Math.abs(g.curX - g.startX) + Math.abs(g.curY - g.startY) > TAP_THRESHOLD;
+  if (Math.abs(g.curX - g.segX) + Math.abs(g.curY - g.segY) > TAP_THRESHOLD) return true;
+  for (const s of g.segments) {
+    if (Math.abs(s.x1 - s.x0) + Math.abs(s.y1 - s.y0) > TAP_THRESHOLD) return true;
+  }
+  return false;
 }
+
+const modeBtn = document.getElementById('modeBtn');
+function updateModeBtn() {
+  modeBtn.textContent = mode === 'plant' ? '🌱 Planting' : '🧭 Navigating';
+  modeBtn.classList.toggle('nav', mode === 'nav');
+}
+modeBtn.addEventListener('click', () => {
+  mode = mode === 'plant' ? 'nav' : 'plant';
+  updateModeBtn();
+  document.getElementById('hint').style.opacity = '0';
+});
 
 canvas.addEventListener('pointerdown', e => {
   initAudio();
   resumeAudio();
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 1) {
-    panState = null; vertState = null; dragState = null;
-    const g = { startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY };
-    const zone = zoneFor(e.clientX, e.clientY);
-    if (zone === 'pan') panState = { ...g };
-    else if (zone === 'vert') vertState = { ...g };
-    else dragState = g;
-  } else if (pointers.size === 2) {
-    const [a, b] = [...pointers.values()];
-    panState = null; vertState = null; dragState = null;
-    // Pinch zoom only when BOTH fingers begin inside the pan slider.
-    pinchState = (inPanSlider(a.x, a.y) && inPanSlider(b.x, b.y))
-      ? { dist: Math.hypot(a.x - b.x, a.y - b.y) }
-      : null;
+
+  if (mode === 'plant') {
+    if (pointers.size === 1) {
+      dragState = {
+        startX: e.clientX, startY: e.clientY,   // where the tree is planted
+        segX: e.clientX, segY: e.clientY,       // start of the current line
+        curX: e.clientX, curY: e.clientY,
+        segments: [],
+        lastMove: performance.now(),
+      };
+    } else {
+      dragState = null;  // a second finger cancels the plant gesture
+    }
+  } else {
+    if (pointers.size === 1) {
+      navState = { startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY };
+    } else if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinchState = { dist: Math.hypot(a.x - b.x, a.y - b.y) };
+    }
   }
 });
 
@@ -687,7 +881,12 @@ canvas.addEventListener('pointermove', e => {
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
 
-  if (pointers.size === 2 && pinchState) {
+  if (mode === 'plant') {
+    if (pointers.size === 1 && dragState) {
+      dragState.curX = e.clientX; dragState.curY = e.clientY;
+      dragState.lastMove = performance.now();
+    }
+  } else if (pointers.size === 2 && pinchState) {
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -697,46 +896,51 @@ canvas.addEventListener('pointermove', e => {
     pinchState.dist = dist;
     zoomAt(mx, my, factor);
     clampCamY();
-  } else if (pointers.size === 1 && panState) {
-    panState.curX = e.clientX; panState.curY = e.clientY;
+  } else if (pointers.size === 1 && navState) {
+    navState.curX = e.clientX; navState.curY = e.clientY;
     cam.x -= dx * PAN_SENS;
-  } else if (pointers.size === 1 && vertState) {
     cam.y -= dy * PAN_SENS;
     clampCamY();
-  } else if (pointers.size === 1 && dragState) {
-    dragState.curX = e.clientX; dragState.curY = e.clientY;
   }
 });
 
 canvas.addEventListener('pointerup', e => {
   pointers.delete(e.pointerId);
-  pinchState = null;
-  if (pointers.size === 1) {
-    const p = [...pointers.values()][0];
-    panState = null; vertState = null; dragState = null;
-    const g = { startX: p.x, startY: p.y, curX: p.x, curY: p.y };
-    const zone = zoneFor(p.x, p.y);
-    if (zone === 'pan') panState = { ...g };
-    else if (zone === 'vert') vertState = { ...g };
-    else dragState = g;
-  } else if (pointers.size === 0) {
-    if (dragState) {
-      const sound = gestureMoved(dragState)
-        ? gestureSound(dragState.startX, dragState.startY, dragState.curX, dragState.curY)
-        : null;
-      plantAt(dragState.startX, dragState.startY, sound);
+
+  if (mode === 'plant') {
+    if (pointers.size === 0) {
+      if (dragState) {
+        // Commit the final live segment, then plant.
+        if (dragState.segments.length < GESTURE.maxVectors &&
+            Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD) {
+          dragState.segments.push({ x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY });
+        }
+        const sound = gestureMoved(dragState) ? gestureSound(dragState.segments) : null;
+        plantAt(dragState.startX, dragState.startY, sound);
+      }
+      dragState = null;
     }
-    panState = null;
-    vertState = null;
-    dragState = null;
+  } else {
+    pinchState = null;
+    if (pointers.size === 1) {
+      const p = [...pointers.values()][0];
+      navState = { startX: p.x, startY: p.y, curX: p.x, curY: p.y };
+    } else if (pointers.size === 0) {
+      navState = null;
+    }
   }
 });
 
 canvas.addEventListener('pointercancel', e => {
   pointers.delete(e.pointerId);
   pinchState = null;
-  if (pointers.size === 0) {
-    panState = null; vertState = null; dragState = null;
+  if (mode === 'plant') {
+    if (pointers.size === 0) dragState = null;
+  } else if (pointers.size === 1) {
+    const p = [...pointers.values()][0];
+    navState = { startX: p.x, startY: p.y, curX: p.x, curY: p.y };
+  } else if (pointers.size === 0) {
+    navState = null;
   }
 });
 
@@ -746,12 +950,45 @@ let masterGain = null;
 
 const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
 
-// Per-level chime settings: note (pitch), wave type, and ADSR envelope.
-// The drag gesture can override attack/hold for individual drops.
+// Per-level chime settings: key/root note (pitch), wave type, and ADSR
+// envelope. A tree's pitch is derived from its position (bottom = key root,
+// sky = two octaves higher, snapped to the scale), so the key here only sets
+// the root. The drag gesture can override attack/hold for individual drops.
 const CHIME_SETTINGS = {
-  start:  { note: 'C4', wave: 'sine', attack: 5,   decay: 100, sustain: 90, hold: 0,   release: 810 },
-  finish: { note: 'C4', wave: 'sine', attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
+  start:  { note: 'C4', wave: 'sine', blend: 0, volume: 0.12, attack: 5,   decay: 100, sustain: 90, hold: 0,   release: 810 },
+  finish: { note: 'C4', wave: 'sine', blend: 0, attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
 };
+
+// Wave morphing: periodic waves are built from Fourier coefficients, so a
+// blend between two types is a per-harmonic linear interpolation of their
+// coefficients. `blend` (0..1) mixes the chosen wave toward the NEXT shape in
+// the cycle, e.g. 50% sine + 50% triangle.
+const WAVE_ORDER = ['sine', 'triangle', 'square', 'sawtooth'];
+const HARMONICS = 64;
+
+function waveCoeffs(type) {
+  const imag = new Float32Array(HARMONICS + 1);
+  for (let n = 1; n <= HARMONICS; n++) {
+    if (type === 'sine') {
+      if (n === 1) imag[n] = 1;
+    } else if (type === 'triangle') {
+      if (n % 2 === 1) imag[n] = (8 / (Math.PI * Math.PI)) * (n % 4 === 1 ? 1 : -1) / (n * n);
+    } else if (type === 'square') {
+      if (n % 2 === 1) imag[n] = (4 / Math.PI) / n;
+    } else if (type === 'sawtooth') {
+      imag[n] = (2 / Math.PI) * (n % 2 === 1 ? 1 : -1) / n;
+    }
+  }
+  return imag;
+}
+
+function buildBlendWave(ctx, typeA, typeB, t) {
+  const a = waveCoeffs(typeA), b = waveCoeffs(typeB);
+  const real = new Float32Array(HARMONICS + 1);
+  const imag = new Float32Array(HARMONICS + 1);
+  for (let n = 0; n <= HARMONICS; n++) imag[n] = (1 - t) * a[n] + t * b[n];
+  return ctx.createPeriodicWave(real, imag);
+}
 
 function chime(level, overrides) {
   initAudio();
@@ -759,7 +996,7 @@ function chime(level, overrides) {
   if (!audioCtx || !masterGain) return;
   const s = Object.assign({}, CHIME_SETTINGS[level], overrides || {});
   const t0 = audioCtx.currentTime;
-  const peak = 0.12;
+  const peak = s.volume != null ? s.volume : 0.12;
 
   const atk = s.attack / 1000;
   const dec = s.decay / 1000;
@@ -783,7 +1020,13 @@ function chime(level, overrides) {
   gain.connect(masterGain);
 
   const osc = audioCtx.createOscillator();
-  osc.type = s.wave;
+  if (s.blend > 0) {
+    const idx = WAVE_ORDER.indexOf(s.wave);
+    const next = WAVE_ORDER[(idx + 1) % WAVE_ORDER.length];
+    osc.setPeriodicWave(buildBlendWave(audioCtx, s.wave, next, Math.min(1, s.blend)));
+  } else {
+    osc.type = s.wave;
+  }
   osc.frequency.value = noteToFreq(s.note);
   osc.connect(gain);
   osc.start(t0);
@@ -821,8 +1064,16 @@ const NOTE_OFFSETS = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 
 const NOTE_OCTAVE = 4;
 
 function noteToFreq(name) {
+  return midiFreq(noteToMidi(name));
+}
+
+function noteToMidi(name) {
   const m = name.match(/^([A-G]#?)(\d)$/);
-  return midiFreq((+m[2] + 1) * 12 + NOTE_OFFSETS[m[1]]);
+  return (+m[2] + 1) * 12 + NOTE_OFFSETS[m[1]];
+}
+
+function midiToName(m) {
+  return NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
 }
 
 const settingsBtn = document.getElementById('settingsBtn');
@@ -830,20 +1081,35 @@ const settingsPanel = document.getElementById('settingsPanel');
 const noteSel = document.getElementById('note');
 const waveSel = document.getElementById('wave');
 const tabs = document.querySelectorAll('.tab');
-const ENV_FIELDS = ['decay', 'sustain', 'release'];
 let currentLevel = 'start';
+
+// Defaults for the six qualities, used whenever a quality isn't assigned to a
+// vector or its vector isn't drawn in a gesture. volume's slider is ×100.
+const SETTINGS_META = {
+  volume:  { min: 0, max: 25, step: 1,   scale: 0.01, unit: '' },
+  attack:  { min: 0, max: 200,   step: 5,   scale: 1, unit: 'ms' },
+  decay:   { min: 0, max: 1000,  step: 10,  scale: 1, unit: 'ms' },
+  sustain: { min: 0, max: 100,   step: 1,   scale: 1, unit: '%' },
+  hold:    { min: 0, max: 10000, step: 100, scale: 1, unit: 'ms' },
+  release: { min: 0, max: 2000,  step: 10,  scale: 1, unit: 'ms' },
+};
+const ENV_FIELDS = Object.keys(SETTINGS_META);
 
 for (const n of NOTE_NAMES) noteSel.add(new Option(n, n));
 
-function fmt(f, v) { return f === 'sustain' ? v + '%' : v + 'ms'; }
+function fmt(f, v) { return f === 'volume' ? v.toFixed(2) : v + SETTINGS_META[f].unit; }
 
 function loadLevelUI(level) {
   const s = CHIME_SETTINGS[level];
   noteSel.value = s.note.slice(0, -1);
   waveSel.value = s.wave;
+  document.getElementById('blend').value = Math.round((s.blend || 0) * 100);
+  document.getElementById('blendVal').textContent = Math.round((s.blend || 0) * 100) + '%';
   for (const f of ENV_FIELDS) {
+    const meta = SETTINGS_META[f];
     const el = document.getElementById(f);
-    el.value = s[f];
+    el.min = meta.min; el.max = meta.max; el.step = meta.step;
+    el.value = s[f] / meta.scale;
     document.getElementById(f + 'Val').textContent = fmt(f, s[f]);
   }
 }
@@ -862,11 +1128,19 @@ waveSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].wave = waveSel.value;
   previewChime();
 });
+const blendEl = document.getElementById('blend');
+blendEl.addEventListener('input', () => {
+  CHIME_SETTINGS[currentLevel].blend = +blendEl.value / 100;
+  document.getElementById('blendVal').textContent = blendEl.value + '%';
+});
+blendEl.addEventListener('change', () => previewChime());
 for (const f of ENV_FIELDS) {
   const el = document.getElementById(f);
   el.addEventListener('input', () => {
-    CHIME_SETTINGS[currentLevel][f] = +el.value;
-    document.getElementById(f + 'Val').textContent = fmt(f, +el.value);
+    const raw = +el.value * SETTINGS_META[f].scale;
+    const v = f === 'volume' ? Math.round(raw * 1000) / 1000 : Math.round(raw);
+    CHIME_SETTINGS[currentLevel][f] = v;
+    document.getElementById(f + 'Val').textContent = fmt(f, v);
   });
   el.addEventListener('change', () => previewChime());
 }
@@ -879,11 +1153,122 @@ for (const tab of tabs) {
   });
 }
 
+/* ---- Gesture mapping UI ---- */
+const QUALITY_LABELS = { volume: 'Volume', attack: 'Attack', decay: 'Decay', sustain: 'Sustain', hold: 'Hold', release: 'Release' };
+const vecSels = {};
+
+// Vectors must be assigned in order: no vector N can have a quality if an
+// earlier vector has none. Gaps (empty vectors) are only allowed at the tail.
+function vectorActive(assign, v) {
+  return assign['v' + v + 'x'] != null || assign['v' + v + 'y'] != null;
+}
+function orderedAssignmentsValid(assign) {
+  let gap = false;
+  for (let i = 1; i <= GESTURE.maxVectors; i++) {
+    if (!vectorActive(assign, i)) gap = true;
+    else if (gap) return false;
+  }
+  return true;
+}
+function flashSlot(slot) {
+  const el = document.getElementById(slot);
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 600);
+}
+
+for (const slot of ASSIGN_SLOTS) {
+  const el = document.getElementById(slot);
+  el.add(new Option('(none)', ''));
+  for (const q of QUALITIES) el.add(new Option(QUALITY_LABELS[q], q));
+  el.addEventListener('change', () => {
+    const next = el.value || null;
+    const prev = GESTURE.assign[slot];
+    if (next === prev) return;
+    const pending = Object.assign({}, GESTURE.assign);
+    pending[slot] = next;
+    if (next) {
+      // Keep each quality assigned to only one axis: swap with the slot that
+      // currently owns `next` instead of creating a duplicate.
+      const other = ASSIGN_SLOTS.find(s => s !== slot && pending[s] === next);
+      if (other) pending[other] = prev;
+    }
+    if (!orderedAssignmentsValid(pending)) {
+      loadGestureUI();
+      flashSlot(slot);
+      return;
+    }
+    GESTURE.assign = pending;
+    loadGestureUI();
+  });
+  vecSels[slot] = el;
+}
+
+function sensLabel(q, raw) {
+  return (raw / SENS_UI[q].div) + GESTURE.unit[q] + '/100px';
+}
+
+for (const q of QUALITIES) {
+  const el = document.getElementById('sens-' + q);
+  const meta = SENS_UI[q];
+  el.min = meta.min; el.max = meta.max; el.step = meta.step;
+  el.value = GESTURE.sens[q];
+  document.getElementById('sens-' + q + 'Val').textContent = sensLabel(q, GESTURE.sens[q]);
+  el.addEventListener('input', () => {
+    GESTURE.sens[q] = +el.value;
+    document.getElementById('sens-' + q + 'Val').textContent = sensLabel(q, GESTURE.sens[q]);
+  });
+}
+
+const pauseEl = document.getElementById('pause');
+pauseEl.value = GESTURE.pause;
+document.getElementById('pauseVal').textContent = GESTURE.pause + 'ms';
+pauseEl.addEventListener('input', () => {
+  GESTURE.pause = +pauseEl.value;
+  document.getElementById('pauseVal').textContent = GESTURE.pause + 'ms';
+});
+
+/* ---- Min / Max per quality ---- */
+function mmLabel(q, v) { return q === 'volume' ? v.toFixed(2) : v + GESTURE.unit[q]; }
+
+for (const q of QUALITIES) {
+  const b = QUALITY_BOUNDS[q];
+  const minEl = document.getElementById('min-' + q);
+  const maxEl = document.getElementById('max-' + q);
+  const minValEl = document.getElementById('min-' + q + 'Val');
+  const maxValEl = document.getElementById('max-' + q + 'Val');
+  minEl.min = b.min; minEl.max = b.max; minEl.step = b.step;
+  maxEl.min = b.min; maxEl.max = b.max; maxEl.step = b.step;
+  minEl.value = GESTURE.min[q] / b.scale;
+  maxEl.value = GESTURE.max[q] / b.scale;
+  minValEl.textContent = mmLabel(q, GESTURE.min[q]);
+  maxValEl.textContent = mmLabel(q, GESTURE.max[q]);
+  minEl.addEventListener('input', () => {
+    let v = Math.min(+minEl.value * b.scale, GESTURE.max[q]);   // min can't exceed max
+    GESTURE.min[q] = q === 'volume' ? Math.round(v * 1000) / 1000 : Math.round(v);
+    minEl.value = GESTURE.min[q] / b.scale;
+    minValEl.textContent = mmLabel(q, GESTURE.min[q]);
+  });
+  maxEl.addEventListener('input', () => {
+    let v = Math.max(+maxEl.value * b.scale, GESTURE.min[q]);   // max can't drop below min
+    GESTURE.max[q] = q === 'volume' ? Math.round(v * 1000) / 1000 : Math.round(v);
+    maxEl.value = GESTURE.max[q] / b.scale;
+    maxValEl.textContent = mmLabel(q, GESTURE.max[q]);
+  });
+}
+
+function loadGestureUI() {
+  for (const slot of ASSIGN_SLOTS) vecSels[slot].value = GESTURE.assign[slot] || '';
+}
+loadGestureUI();
+
 settingsBtn.addEventListener('click', () => {
   initAudio();
   resumeAudio();
   settingsPanel.classList.toggle('hidden');
-  if (!settingsPanel.classList.contains('hidden')) loadLevelUI(currentLevel);
+  if (!settingsPanel.classList.contains('hidden')) {
+    loadLevelUI(currentLevel);
+    loadGestureUI();
+  }
 });
 document.getElementById('closeSettings').addEventListener('click', () => {
   settingsPanel.classList.add('hidden');
@@ -891,7 +1276,6 @@ document.getElementById('closeSettings').addEventListener('click', () => {
 document.getElementById('testSound').addEventListener('click', previewChime);
 
 document.getElementById('clear').addEventListener('click', () => {
-  seeds.length = 0;
   liveTrees.length = 0;
   bakedTrees.length = 0;
   treeCount = 0;
@@ -899,7 +1283,10 @@ document.getElementById('clear').addEventListener('click', () => {
 });
 
 /* ---------- Main loop ---------- */
-function loop() {
+let lastT = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000);
+  lastT = now;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, W, H);
   ctx.setTransform(cam.zoom, 0, 0, cam.zoom, -cam.x, -cam.y);
@@ -919,15 +1306,9 @@ function loop() {
   ctx.fillStyle = grad;
   ctx.fillRect(vx0, vy0, vw, vh);
 
-  for (let i = seeds.length - 1; i >= 0; i--) {
-    const s = seeds[i];
-    s.update();
-    if (s.landed) seeds.splice(i, 1);
-  }
-
   for (let i = liveTrees.length - 1; i >= 0; i--) {
     const t = liveTrees[i];
-    if (t.update()) {
+    if (t.update(now, dt)) {
       t.bake();
       bakedTrees.push(t);
       liveTrees.splice(i, 1);
@@ -945,38 +1326,84 @@ function loop() {
     else       t.draw(ctx);
   }
 
-  for (const s of seeds) s.draw(ctx);
+  // plant gesture: commit a new line when the finger pauses, then draw feedback
+  if (dragState && mode === 'plant') {
+    if (now - dragState.lastMove > GESTURE.pause) {
+      const moved = Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD;
+      if (moved && dragState.segments.length < GESTURE.maxVectors) {
+        dragState.segments.push({ x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY });
+        dragState.segX = dragState.curX; dragState.segY = dragState.curY;
+      }
+      dragState.lastMove = now;
+    }
 
-  // drag feedback: guide line + live attack/hold readout for the plant gesture
-  if (dragState && gestureMoved(dragState)) {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const snd = gestureSound(dragState.startX, dragState.startY, dragState.curX, dragState.curY);
+    if (gestureMoved(dragState)) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    ctx.strokeStyle = 'rgba(46,93,52,0.6)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
-    ctx.beginPath();
-    ctx.moveTo(dragState.startX, dragState.startY);
-    ctx.lineTo(dragState.curX, dragState.curY);
-    ctx.stroke();
-    ctx.setLineDash([]);
+      // committed lines (solid) and the live line (dashed)
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(46,93,52,0.7)';
+      ctx.beginPath();
+      for (const s of dragState.segments) {
+        ctx.moveTo(s.x0, s.y0);
+        ctx.lineTo(s.x1, s.y1);
+      }
+      ctx.stroke();
 
-    ctx.fillStyle = 'rgba(46,93,52,0.85)';
-    ctx.beginPath();
-    ctx.arc(dragState.startX, dragState.startY, 4, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.strokeStyle = 'rgba(46,93,52,0.5)';
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(dragState.segX, dragState.segY);
+      ctx.lineTo(dragState.curX, dragState.curY);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-    const label = `attack ${snd.attack}ms · hold ${snd.hold}ms`;
-    ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
-    const tw = ctx.measureText(label).width;
-    let lx = dragState.curX + 12, ly = dragState.curY - 12;
-    if (lx + tw + 12 > W) lx = dragState.curX - tw - 20;
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.beginPath();
-    ctx.roundRect(lx, ly - 22, tw + 16, 28, 8);
-    ctx.fill();
-    ctx.fillStyle = '#2e5d34';
-    ctx.fillText(label, lx + 8, ly - 2);
+      // anchor dots at line joints
+      ctx.fillStyle = 'rgba(46,93,52,0.85)';
+      let ax = dragState.startX, ay = dragState.startY;
+      for (const s of dragState.segments) {
+        ctx.beginPath();
+        ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ax = s.x1; ay = s.y1;
+      }
+      ctx.beginPath();
+      ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // pause ring around the finger: fills as idle time nears the threshold
+      const idleFrac = Math.min(1, (now - dragState.lastMove) / GESTURE.pause);
+      ctx.strokeStyle = 'rgba(58,91,160,0.7)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(dragState.curX, dragState.curY, 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * idleFrac);
+      ctx.stroke();
+
+      // per-vector value labels as the lines are drawn
+      const liveMoved = Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD;
+      const live = dragState.segments.concat(liveMoved ? [{ x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY }] : []);
+      ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
+      for (let i = 0; i < dragState.segments.length; i++) drawVectorLabel(dragState.segments[i], i, false);
+      if (liveMoved) drawVectorLabel(live[dragState.segments.length], dragState.segments.length, true);
+
+      // live readout of the sound this gesture will produce (defaults where a
+      // quality is unassigned or its vector wasn't drawn)
+      const snd = Object.assign({}, CHIME_SETTINGS.start, gestureSound(live));
+      const vol = snd.volume != null ? snd.volume : 0.12;
+      const line1 = `vol ${vol.toFixed(2)} · atk ${snd.attack}ms · dec ${snd.decay}ms`;
+      const line2 = `sus ${snd.sustain}% · hold ${snd.hold}ms · rel ${snd.release}ms`;
+      ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+      let lx = dragState.curX + 16, ly = dragState.curY - 16;
+      const tw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width);
+      if (lx + tw + 12 > W) lx = dragState.curX - tw - 24;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.beginPath();
+      ctx.roundRect(lx, ly - 34, tw + 16, 46, 8);
+      ctx.fill();
+      ctx.fillStyle = '#2e5d34';
+      ctx.fillText(line1, lx + 8, ly - 12);
+      ctx.fillText(line2, lx + 8, ly + 2);
+    }
   }
 
   requestAnimationFrame(loop);
