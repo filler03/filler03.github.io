@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Don't cache: always revalidate so phones pick up the latest version. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Click to Grow a Tree 🌳</title>
 <style>
   html, body {
@@ -13,6 +17,34 @@
     background: linear-gradient(#87ceeb 0%, #a9d6e8 45%, #bfe3f0 55%, #cdeab3 56%, #b7dd93 78%, #a6d17e 100%);
     font-family: 'Segoe UI', system-ui, sans-serif;
     cursor: crosshair;
+  }
+  /* Force landscape: while held upright, a rotate prompt covers the game, so
+     it only plays in landscape. No transforms are applied to the page, which
+     keeps every control's hit area intact. */
+  #rotateOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(#87ceeb 0%, #a9d6e8 45%, #bfe3f0 55%, #cdeab3 56%, #b7dd93 78%, #a6d17e 100%);
+    color: #2e5d34;
+    text-align: center;
+    padding: 24px;
+  }
+  #rotateOverlay .rotate-msg {
+    background: rgba(255,255,255,0.88);
+    border-radius: 18px;
+    padding: 26px 30px;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.5;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+  }
+  #rotateOverlay .rotate-msg .rot { font-size: 42px; display: block; margin-bottom: 8px; }
+  @media (orientation: portrait) {
+    #rotateOverlay { display: flex; }
   }
   canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; touch-action: none; }
   #hint {
@@ -33,8 +65,8 @@
   }
   #count {
     position: fixed;
-    top: 16px;
-    left: 16px;
+    top: calc(16px + env(safe-area-inset-top));
+    left: calc(16px + env(safe-area-inset-left));
     color: #2e5d34;
     font-size: 13px;
     font-weight: 600;
@@ -45,8 +77,8 @@
   }
   #statHud {
     position: fixed;
-    top: 48px;
-    left: 16px;
+    top: calc(48px + env(safe-area-inset-top));
+    left: calc(16px + env(safe-area-inset-left));
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -92,35 +124,54 @@
   }
   #settingsBtn {
     position: fixed;
-    top: 16px;
-    right: 16px;
-    width: 42px;
-    height: 42px;
+    top: calc(16px + env(safe-area-inset-top));
+    right: calc(16px + env(safe-area-inset-right));
+    width: 48px;
+    height: 48px;
     background: rgba(255,255,255,0.85);
     border: none;
     border-radius: 50%;
-    font-size: 20px;
+    font-size: 22px;
     cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    z-index: 20;
+    z-index: 40;
   }
   #settingsBtn:hover { background: #fff; }
   #settingsPanel {
     position: fixed;
-    top: 66px;
-    right: 16px;
-    bottom: 16px;
-    width: 300px;
-    max-width: calc(100vw - 32px);
-    background: rgba(255,255,255,0.96);
-    border-radius: 14px;
-    padding: 14px 16px 16px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    inset: 0;
+    box-sizing: border-box;
+    background: rgba(255,255,255,0.97);
+    padding: calc(16px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+             calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
     color: #2e5d34;
     font-size: 13px;
-    z-index: 30;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-cols {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 28px;
+    align-items: start;
     overflow-y: auto;
   }
+  .panel-col { min-width: 0; }
+  .panel-col.actions { align-self: stretch; display: flex; flex-direction: column; }
+  .panel-col.actions .panel-actions { margin-top: auto; }
+  .fx-section { grid-column: 1 / -1; min-width: 0; }
+  .panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .panel-actions button { margin-bottom: 0; }
   #settingsPanel.hidden { display: none; }
   #settingsPanel::-webkit-scrollbar { width: 10px; }
   #settingsPanel::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
@@ -151,7 +202,13 @@
   }
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
-  .fx-block { margin-bottom: 12px; }
+  .fx-block {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: start;
+    margin-bottom: 12px;
+  }
   .fx-item {
     margin-bottom: 10px;
     padding: 8px 10px;
@@ -193,9 +250,9 @@
   .grid.mm { grid-template-columns: 78px 1fr 52px 1fr 52px; }
   #modeBtn {
     position: fixed;
-    right: 16px;
-    bottom: 16px;
-    padding: 11px 18px;
+    left: calc(16px + env(safe-area-inset-left));
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    padding: 13px 20px;
     border: none;
     border-radius: 26px;
     background: #2e5d34;
@@ -204,16 +261,38 @@
     font-weight: 700;
     cursor: pointer;
     touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
     box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-    z-index: 20;
+    z-index: 40;
   }
   #modeBtn:hover { background: #3c7a45; }
   #modeBtn.nav { background: #3a5ba0; }
   #modeBtn.nav:hover { background: #4a6db0; }
+  #waitBtn {
+    position: fixed;
+    left: calc(16px + env(safe-area-inset-left));
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    padding: 11px 16px;
+    border: none;
+    border-radius: 22px;
+    background: rgba(255,255,255,0.9);
+    color: #2e5d34;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    z-index: 40;
+  }
+  #waitBtn:hover { background: #fff; }
+  #waitBtn.on { background: #b3462c; color: #fff; }
   #version {
     position: fixed;
-    left: 16px;
-    bottom: 16px;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(16px + env(safe-area-inset-bottom));
     color: rgba(46,93,52,0.75);
     font-size: 12px;
     font-weight: 600;
@@ -260,7 +339,8 @@
 </style>
 </head>
 <body>
-<div id="hint">🌱 Planting: tap or drag the ground to grow a tree • turn sharply mid-drag to start a new line (up to 4 lines set the note's envelope: length = time, Y change = volume) • the trunk grows during attack, branches during decay+hold, leaves & fruit during release • tap the button (bottom-right) to switch to 🧭 Navigating</div>
+<div id="rotateOverlay"><div class="rotate-msg"><span class="rot">📱🔄</span>Please rotate your device to landscape</div></div>
+<div id="hint">🌱 Planting: tap or drag the ground to grow a tree • turn sharply mid-drag to start a new line (up to 4 lines set the note's envelope: length = time, Y change = volume) • the trunk grows during attack, branches during decay+hold, leaves & fruit during release • tap the buttons (bottom-left) to switch to 🧭 Navigating or to make the sound wait for the whole gesture</div>
 <div id="count">🌳 0 trees</div>
 <div id="statHud"></div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
@@ -269,6 +349,8 @@
     <span>Sound settings</span>
     <button id="closeSettings">✕</button>
   </div>
+  <div class="panel-cols">
+  <div class="panel-col">
   <div class="vec-head">Default values</div>
   <div class="grid">
     <label for="startMode">Start mode</label>
@@ -337,48 +419,50 @@
     <label for="growSpeed">Growth speed <b class="val" id="growSpeedVal"></b></label>
     <input type="range" id="growSpeed" min="0.25" max="4" step="0.05">
   </div>
-  <div class="vec-head">Fixed values (tick to skip that gesture line) · Max caps gesture lines</div>
+  </div>
+  <div class="panel-col actions">
+  <div class="panel-actions">
+    <button id="clear">Clear trees 🍂</button>
+    <button id="testSound">▶ Play test</button>
+    <button id="resetDefaults">↺ Reset defaults</button>
+  </div>
+  </div>
+  <div class="fx-section">
+  <div class="vec-head">Fixed values (tick to skip that gesture line) · Max = value of a full-width line (time); full-height = full volume</div>
   <div class="fx-block">
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-attack"> Attack</label><b class="val" id="fx-attackTVal"></b> ms</div>
       <input type="range" id="fx-attackT" min="1" max="5000" step="10">
-      <div class="fx-head"><span>End vol</span><b class="val" id="fx-attackVolVal"></b></div>
-      <input type="range" id="fx-attackVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max</span><b class="val" id="fx-attackMaxVal"></b> ms</div>
+      <div class="fx-head"><span>End vol</span><b class="val">100%</b></div>
+      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-attackMaxVal"></b> ms</div>
       <input type="range" id="fx-attackMax" min="50" max="5000" step="10">
-      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-attackVal"></b></div>
-      <input type="range" id="tpp-attack" min="1" max="40" step="1">
     </div>
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-decay"> Decay</label><b class="val" id="fx-decayTVal"></b> ms</div>
       <input type="range" id="fx-decayT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-decayVolVal"></b></div>
       <input type="range" id="fx-decayVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max</span><b class="val" id="fx-decayMaxVal"></b> ms</div>
+      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-decayMaxVal"></b> ms</div>
       <input type="range" id="fx-decayMax" min="50" max="5000" step="10">
-      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-decayVal"></b></div>
-      <input type="range" id="tpp-decay" min="1" max="40" step="1">
     </div>
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-hold"> Hold</label><b class="val" id="fx-holdTVal"></b> ms</div>
       <input type="range" id="fx-holdT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-holdVolVal"></b></div>
       <input type="range" id="fx-holdVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max</span><b class="val" id="fx-holdMaxVal"></b> ms</div>
+      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-holdMaxVal"></b> ms</div>
       <input type="range" id="fx-holdMax" min="100" max="5000" step="10">
-      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-holdVal"></b></div>
-      <input type="range" id="tpp-hold" min="1" max="40" step="1">
     </div>
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-release"> Release</label><b class="val" id="fx-releaseTVal"></b> ms</div>
       <input type="range" id="fx-releaseT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-releaseVolVal"></b></div>
       <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max</span><b class="val" id="fx-releaseMaxVal"></b> ms</div>
+      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-releaseMaxVal"></b> ms</div>
       <input type="range" id="fx-releaseMax" min="100" max="5000" step="10">
-      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-releaseVal"></b></div>
-      <input type="range" id="tpp-release" min="1" max="40" step="1">
     </div>
+  </div>
+  </div>
   </div>
   <!-- COMMENTED OUT - sensitivity is now hardcoded.
   <div class="vec-head">Sensitivity (units per 100px)</div>
@@ -423,14 +507,12 @@
     <input type="range" id="max-release"><b class="val" id="max-releaseVal"></b>
   </div>
   -->
-  <button id="clear">Clear trees 🍂</button>
-  <button id="testSound">▶ Play test</button>
-  <button id="resetDefaults">↺ Reset defaults</button>
 </div>
 
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
-<div id="version">v1.1.29</div>
+<button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
+<div id="version">v1.1.52</div>
 
 <script>
 /* ============================================================
@@ -478,9 +560,20 @@ const bakedTrees = [];     // finished trees, cached as bitmaps
 const lineIndicators = []; // rings at each registered line's start point
 const statHud = document.getElementById('statHud');
 
+// Stage coordinates match the viewport directly; landscape orientation is
+// enforced by the rotate prompt, so no swapping or rotation is needed.
+const stageX = e => e.clientX;
+const stageY = e => e.clientY;
+
 function resize() {
-  W = canvas.width  = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+  // iOS can fire resize with transient/degenerate sizes while overlays and
+  // toolbars are settling — keep the last good size instead of corrupting the
+  // canvas backing store (which would squish the scene's background).
+  const w = window.innerWidth, h = window.innerHeight;
+  if (!w || !h || !isFinite(w) || !isFinite(h)) return;
+  if (w === W && h === H) return;
+  W = canvas.width  = w;
+  H = canvas.height = h;
   HORIZON = H * 0.56;              // where ground meets sky (matches CSS)
 }
 window.addEventListener('resize', resize);
@@ -596,8 +689,16 @@ class Branch {
     // shorter than one frame still grows to its cap. Trunk grows across the
     // attack window; every other branch grows across decay + hold.
     if (this.depth === 0) {
-      const local = Math.max(0, Math.min(t, tree.tTrunkEnd));
-      this.grown = Math.min(tree.trunkCap, local * tree.trunkRate);
+      // Trunk: fast growth during the attack, then a slow additional increase
+      // in size across the decay + hold window so it animates in and keeps
+      // thickening/tallening as the branches grow. Final size is attack-based.
+      if (t < tree.tTrunkEnd) {
+        this.grown = Math.min(tree.trunkCap * TRUNK_ATTACK_FRAC, t * tree.trunkRate);
+      } else if (t < tree.tBranchEnd) {
+        this.grown = Math.min(tree.trunkCap, tree.trunkCap * TRUNK_ATTACK_FRAC + (t - tree.tTrunkEnd) * tree.trunkSlackRate);
+      } else {
+        this.grown = tree.trunkCap;
+      }
     } else if (t >= tree.tTrunkEnd && t < tree.tBranchEnd) {
       const local = Math.max(0, t - tree.tTrunkEnd);
       this.grown = Math.min(tree.branchCap, local * tree.branchRate);
@@ -645,10 +746,12 @@ class Branch {
     for (const c of this.children) c.bounds(box, ex, ey);
   }
 
-  drawWood(ctx, tree, x, y, ex, ey) {
+  drawWood(ctx, tree, x, y, ex, ey, woodGrow) {
+    // Width grows with the trunk so the whole tree thickens as it matures.
     const g  = this.grown;
-    const w0 = this.thickness;
-    const w1 = Math.max(0.7, this.thickness * 0.72);
+    const wg = woodGrow == null ? g : woodGrow;
+    const w0 = this.thickness * wg;
+    const w1 = Math.max(0.7, this.thickness * 0.72) * wg;
 
     const perp = this.angle + Math.PI / 2;
     const mx = (x + ex) / 2, my = (y + ey) / 2;
@@ -694,12 +797,13 @@ class Branch {
     ctx.fill();
   }
 
-  draw(ctx, tree, bx, by) {
+  draw(ctx, tree, bx, by, woodGrow) {
     const g  = this.grown;
+    const wg = woodGrow == null ? g : woodGrow;   // children share the trunk's width growth
     const ex = bx + Math.cos(this.angle) * this.length * g;
     const ey = by + Math.sin(this.angle) * this.length * g;
-    this.drawWood(ctx, tree, bx, by, ex, ey);
-    for (const c of this.children) c.draw(ctx, tree, ex, ey);
+    this.drawWood(ctx, tree, bx, by, ex, ey, wg);
+    for (const c of this.children) c.draw(ctx, tree, ex, ey, wg);
 
     const haze = tree.hazeAmt;
     for (const l of this.leaves) {
@@ -748,17 +852,23 @@ class Tree {
     // ---- GROWTH (fixed speed, the note decides how MUCH) ----
     // Trunk grows across the attack, branches across decay + hold, and leaves
     // & fruit across the release — each at the fixed growth speed setting, so
-    // longer note segments grow a part further, never faster.
+    // longer note segments grow a part further, never faster. The trunk keeps
+    // thickening slowly through the branch window so it animates in and then
+    // fattens like a real trunk while the branches spread.
     const speed = Math.max(0.01, GESTURE.growSpeed);
     this.trunkCap   = clamp01(note.attack / (GROW_TRUNK_FULL_MS / speed));
     this.branchCap  = clamp01((note.decay + note.hold) / (GROW_BRANCH_FULL_MS / speed));
     this.foliageCap = clamp01(note.release / (GROW_FOLIAGE_FULL_MS / speed));
-    this.trunkRate   = speed / GROW_TRUNK_FULL_MS;    // fraction of full per ms
     this.branchRate  = speed / GROW_BRANCH_FULL_MS;
     this.foliageRate = speed / GROW_FOLIAGE_FULL_MS;
     this.tTrunkEnd  = Math.max(1, note.attack);
     this.tBranchEnd = this.tTrunkEnd + note.decay + note.hold;
     this.tTotal     = this.tBranchEnd + note.release;
+    // Most of the trunk's size arrives during the attack; the remainder grows
+    // in slowly across the decay + hold window.
+    const trunkFrac = this.trunkCap * TRUNK_ATTACK_FRAC;
+    this.trunkRate      = trunkFrac / this.tTrunkEnd;                                   // attack phase (per ms)
+    this.trunkSlackRate = (this.trunkCap - trunkFrac) / Math.max(0.001, this.tBranchEnd - this.tTrunkEnd);  // branch phase (per ms)
     this.born       = performance.now();
     this.phase      = 'grow';
 
@@ -793,7 +903,7 @@ class Tree {
     this.trunk.update(this, now, dt);
     return this.phase === 'done';
   }
-  draw(ctx) { this.trunk.draw(ctx, this, this.x, this.y); }
+  draw(ctx) { this.trunk.draw(ctx, this, this.x, this.y, this.trunk.grown); }
 
   bake() {
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
@@ -840,16 +950,13 @@ function zoomAt(sx, sy, factor) {
   cam.y = w.y * nz - sy;
 }
 
-// Pitch comes from the tree's vertical position (scene depth), not the
-// gesture: the skyline (depth 0) plays the key root two octaves up, and the
-// deepest point you can scroll down to plays the key root itself, snapped
-// to the chosen scale. Trees at different heights layer into a melody/chord.
+// Pitch comes from the tree's horizontal position (screen X), not the
+// gesture: far left plays the low end of the scale, far right the high end,
+// snapped to the chosen pentatonic scale. Trees at different horizontal
+// positions layer into a melody/chord.
 function pitchFor(sx, sy) {
-  const w = toWorld(sx, sy);
-  const depth = Math.max(0, (w.y - HORIZON) / (H * 0.42));
+  const p = clamp01(sx / W);                      // 0 far left .. 1 far right
   const SCALE = [0, 2, 4, 7, 9];                  // major pentatonic semitone offsets
-  const maxDepth = 1 / (0.42 * cam.zoom);         // deepest scrollable ground depth
-  const p = clamp01(1 - depth / maxDepth);        // 0 at deepest scrollable .. 1 at sky
   const degree = Math.round(p * SCALE.length * 2);  // 0..10 across 2 octaves
   const octaveOffset = Math.floor(degree / SCALE.length);
   const semitone = SCALE[Math.min(SCALE.length - 1, degree % SCALE.length)] + 12 * octaveOffset;
@@ -864,9 +971,9 @@ function plantAt(sx, sy, segments, sound, env) {
   const depth = Math.max(0, (w.y - HORIZON) / (H * 0.42));
 
   const s = Object.assign({}, CHIME_SETTINGS.start, sound || {});
-  // Volume comes from the horizontal position where the gesture starts:
-  // far left = quiet, far right = loud.
-  s.volume = volumeFromStartX(sx);
+  // Volume comes from the vertical position where the gesture starts:
+  // near the top = loud, near the bottom = quiet.
+  s.volume = volumeFromStartY(sy);
   // Envelope values were built from the gesture lines as they registered.
   if (env) {
     if (env.attack != null) s.attack = env.attack;
@@ -926,7 +1033,7 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const DEFAULT_GESTURE = {
   pause: 1000,
   maxVectors: 4,
-  timePerPx: { attack: 12, decay: 12, hold: 12, release: 12 },  // ms of envelope time per px of line, per component
+  waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
   growSpeed: 1,    // tree growth multiplier (fixed speed the parts grow at)
   assign: { v1x: null, v1y: null, v2x: null, v2y: null, v3x: null, v3y: null },
   sens:  { volume: 8, attack: 150, decay: 200, sustain: 50, hold: 1200, release: 400 },
@@ -965,43 +1072,77 @@ function gestureLineLimit() {
   return SLOT_NAMES.filter(n => !FIXED[n].on).length;
 }
 
-// Volume (gain) comes from where the gesture starts on screen: far left is
-// quietest, far right is loudest. The range spans the former volume clamp
+// Volume (gain) comes from where the gesture starts vertically on screen: top
+// is loudest, bottom is quietest. The range spans the former volume clamp
 // (0.01 .. 0.5).
 const VOL_MIN = 0.01, VOL_MAX = 0.5;
-function volumeFromStartX(sx) {
-  return mix(VOL_MIN, VOL_MAX, clamp01(sx / W));
+function volumeFromStartY(sy) {
+  return mix(VOL_MIN, VOL_MAX, clamp01(1 - sy / H));
 }
 
-// SIMPLIFIED ENVELOPE: the first line's length (px) is its time in ms; every
-// later line uses only its X change (px) for time, so a line can stay short in
-// time while still sweeping a large volume. A line's Y change sets the volume
-// change across that duration (upward = louder, downward = quieter). Volume
-// never exceeds the gain chosen by the start position; the attack line
-// (line 1) always ramps up to that gain.
-function lineLengthPx(seg) {
-  return Math.hypot(seg.x1 - seg.x0, seg.y1 - seg.y0);
-}
-
-// Gesture line time: the first line uses its full length; every later line
-// uses the absolute X change (so time is decoupled from the Y volume sweep),
-// scaled by that component's own distance sensitivity (ms/px) and capped by
-// the component's Max setting.
+// SIMPLIFIED ENVELOPE: every line's time comes from its X change; a line can
+// stay short in time while still sweeping a large volume. A line's Y change
+// sets the volume change across that duration (upward = louder, downward =
+// quieter). Volume never exceeds the gain chosen by the start position; the
+// attack line (line 1) always ramps up to that gain.
+// Gesture line time: the X change as a FRACTION OF THE SCREEN WIDTH, scaled by
+// the component's Max setting and capped by it — a drag across the full width
+// gives the Max time on any device. Every line uses the X axis for time — the
+// attack included — so a line's Y change only ever sets its volume.
+// Volume change: the Y change as a FRACTION OF THE SCREEN HEIGHT — a drag
+// across the full height sweeps the whole gain range on any device.
 function lineTimeForSlot(seg, slot, lineIndex) {
-  const px = lineIndex === 0 ? lineLengthPx(seg) : Math.abs(seg.x1 - seg.x0);
-  const tpp = GESTURE.timePerPx[SLOT_NAMES[slot]];
-  return Math.min(Math.round(px * tpp), FIXED[SLOT_NAMES[slot]].max);
+  // The attack's time comes from the line's LENGTH (it can go in any
+  // direction); every other line's time comes from its X extent (a full
+  // screen width = its max).
+  const w = Math.abs(seg.x1 - seg.x0);
+  const len = Math.hypot(seg.x1 - seg.x0, seg.y1 - seg.y0);
+  const frac = (slot === 0 ? len : w) / Math.max(1, W);
+  const max = FIXED[SLOT_NAMES[slot]].max;
+  return Math.min(Math.round(frac * max), max);
 }
-const VOL_PX_REF = 400;   // px of Y change that sweeps the whole gain range
-const DEFAULT_TTP = 12;   // default ms/px; the baseline the volume sweep scales against
 const FADE_MS = 150;      // smooth fade-out to 0 when a sequence ends (no clip)
 const TAP_ATTACK_MS = 60; // quick attack for a tap with no line
 
-// The component's sensitivity (ms/px) scales its volume sweep too: a higher
-// sensitivity means the same Y change produces a larger volume change. The
-// reference is the number of px of Y change that sweeps the whole gain range.
-function volPxRef(slot) {
-  return VOL_PX_REF * (DEFAULT_TTP / GESTURE.timePerPx[SLOT_NAMES[slot]]);
+const GUIDE_RADIUS = 13;     // glowing max-circle radius (also sets the guard cone)
+const GUIDE_LOCK_PX = 15;    // px of line before the drag direction locks and the
+                             // guides (edge arrows + max circle + guard lines)
+                             // appear — the wiggle room you get to aim first
+
+// Guide for the live line being drawn: the point where the component reaches
+// its max — Max time at a full screen width, max volume at a full screen
+// height — so the max circle sits at the screen edge in the drag direction.
+// Returns the screen point plus the ms / % shown there and the committed drag
+// direction (angle) from the line's origin.
+function segmentGuide(seg, slot, lineIndex, radius) {
+  const dx = seg.x1 - seg.x0, dy = seg.y1 - seg.y0;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return null;
+  const r = radius || GUIDE_RADIUS;
+  const maxMs = FIXED[SLOT_NAMES[slot]].max;
+
+  // Max time = a full screen width, max volume = a full screen height, so the
+  // max circle sits at the screen edge in the drag direction (whichever edge
+  // the ray reaches first). The attack follows the same guide — it can go in
+  // any direction; only its TIME mapping differs (line length vs X extent).
+  const ux = dx / len, uy = dy / len;
+  const L_time = ux !== 0 ? (ux > 0 ? W - seg.x0 : seg.x0) / Math.abs(ux) : Infinity;
+  const L_vol  = uy !== 0 ? (uy > 0 ? H - seg.y0 : seg.y0) / Math.abs(uy) : Infinity;
+  const L = Math.min(L_time, L_vol);
+  if (!isFinite(L)) return null;
+  // For the attack, ms uses the ray LENGTH to the edge (full width = max);
+  // other lines use their X extent at that point.
+  const timeFrac = (slot === 0 ? L : Math.abs(ux) * L) / Math.max(1, W);
+  return {
+    px: Math.max(r, Math.min(W - r, seg.x0 + ux * L)),
+    py: Math.max(r, Math.min(H - r, seg.y0 + uy * L)),
+    ms: Math.min(maxMs, Math.round(timeFrac * maxMs)),
+    pct: slot === 0 ? 100 : Math.min(100, Math.round((Math.abs(uy) * L / Math.max(1, H)) * 100)),
+    angle: Math.atan2(dy, dx),             // committed drag direction
+    dist: L,                               // origin → circle center
+    R: r,
+    slot,
+  };
 }
 
 // Fixed tree growth: trunk grows during attack, branches during decay+hold,
@@ -1011,14 +1152,19 @@ function volPxRef(slot) {
 const GROW_TRUNK_FULL_MS = 20;    // attack ms for a full trunk at 1x
 const GROW_BRANCH_FULL_MS = 500;  // decay+hold ms for full branches at 1x
 const GROW_FOLIAGE_FULL_MS = 1200; // release ms for full foliage at 1x
+const TRUNK_ATTACK_FRAC = 0.6;    // trunk's attack-based size reached by end of attack; the rest grows in during branches
 
 // Stacked per-component readout in the top-left. One row per envelope slot
 // (attack, decay, hold, release) with a progress bar that fills while that
 // component's segment plays. Committed gesture lines keep their row; the
 // in-progress line updates its slot's value live.
 let hudRows = [];   // committed gesture rows: { slot, name, timeMs, dy }
+const EMOJI_TIME = '⏳';   // hourglass marks time values
+const EMOJI_VOL  = '🔊';   // speaker marks volume values
+const EDGE_INSET = 28;     // how far the time/volume side guides sit from the border
+
 function hudLineText(stat, timeMs, pct) {
-  return `${stat} · ${Math.round(timeMs)}ms · ${Math.round(pct)}%`;
+  return `${stat} · ${EMOJI_TIME} ${Math.round(timeMs)}ms · ${EMOJI_VOL} ${Math.round(pct)}%`;
 }
 
 // The level each slot's segment ends at, as a % of the gesture's gain ceiling
@@ -1036,7 +1182,7 @@ function slotEndPct(slot, live) {
       let dy = 0;
       if (row) dy = row.dy;
       else if (live && live.slot === s) dy = live.dy;
-      pct = Math.max(0, Math.min(100, pct + (dy / volPxRef(s)) * 100));
+      pct = Math.max(0, Math.min(100, pct + (dy / Math.max(1, H)) * 100));
     }
   }
   return pct;
@@ -1078,7 +1224,7 @@ function renderHud(now, live) {
     const fixed = FIXED[name].on;
     let text;
     if (fixed) {
-      text = `${name} · ${FIXED[name].value}ms · ${FIXED[name].vol}%`;
+      text = `${name} · ${EMOJI_TIME} ${FIXED[name].value}ms · ${EMOJI_VOL} ${FIXED[name].vol}%`;
     } else {
       const row = hudRows.find(r => r.slot === s);
       if (row) text = hudLineText(row.name, row.timeMs, slotEndPct(s, live));
@@ -1188,7 +1334,7 @@ function gestureMoved(g) {
 // committed line feeds the note's envelope in order: 1st = attack, 2nd =
 // decay, 3rd = hold, 4th = release. The first line starts the note; every
 // later line schedules its segment onto the running note.
-const TURN_DOT = 0.3;        // cos(angle); a sharper turn than ~72° ends a line
+const TURN_DOT = 0.5;        // cos(angle); a sharper turn than ~60° ends a line
 const TURN_MIN_LINE = 30;    // px the current line needs before a turn can end it
 
 function commitLine(ds, t1) {
@@ -1199,8 +1345,21 @@ function commitLine(ds, t1) {
   const index = ds.segments.length - 1;
   ds.segX = ds.curX; ds.segY = ds.curY;
   ds.segT0 = t1;
+  ds.guide = null;   // a new line gets a fresh (locked) guide
   applyLineToNote(ds, seg, index);
   return seg;
+}
+
+// The note is only started once the first line has been drawn. If the attack
+// is fixed (so the first drawn line maps to decay, hold, or release), begin
+// the note here: play the preset attack and any fixed components that come
+// before that line's slot, so the line's segment can chain onto the note.
+function ensureNoteStarted(ds, slot) {
+  if (activeNote || !FIXED.attack.on) return;
+  ds.attack = FIXED.attack.value;
+  ds.attackRegistered = true;
+  startGestureNote(ds.startX, ds.startY, FIXED.attack.value, FIXED.attack.vol);
+  scheduleFixedRun(1);
 }
 
 function applyLineToNote(ds, seg, index) {
@@ -1208,26 +1367,51 @@ function applyLineToNote(ds, seg, index) {
   if (slot == null) return;   // no gesture slot left (all remaining are fixed)
   const name = SLOT_NAMES[slot];
   const time = lineTimeForSlot(seg, slot, index);
+  ds[name] = time;
+  if (slot === 0) ds.attackRegistered = true;
+  pushLineIndicator(seg, slot, time);
+  commitHudLine(slot, name, time, seg.y0 - seg.y1);
+  if (!GESTURE.waitForGesture) scheduleLineToNote(ds, seg, index);
+}
+
+// Schedule a committed line's envelope segment. In live mode this runs as each
+// line is drawn; in wait-for-gesture mode it is replayed onto a note that
+// begins only once the whole gesture is complete.
+function scheduleLineToNote(ds, seg, index) {
+  const slot = lineSlotFor(index);
+  if (slot == null) return;
+  const name = SLOT_NAMES[slot];
+  const time = lineTimeForSlot(seg, slot, index);
   if (slot === 0) {
     // Attack: always ramps from silence up to the gain over the line's length.
-    ds.attackRegistered = true;
-    ds.attack = time;
     startGestureNote(ds.startX, ds.startY, ds.attack);
     scheduleFixedRun(1);
-    pushLineIndicator(seg, slot, ds.attack);
   } else {
+    if (!activeNote) ensureNoteStarted(ds, slot);
     ds[name] = time;
-    hudSlot(slot, time);
-    scheduleVolumeSegment(time, seg, slot === 3, slot);
+    // In live mode, if the sound already played through the scheduled segments
+    // while this line was being drawn, fold that idle gap into the line so the
+    // envelope catches back up to the gesture.
+    const idleMs = liveIdleGapMs();
+    hudSlot(slot, time + idleMs);
+    scheduleVolumeSegment(time, seg, slot === 3, slot, idleMs);
     scheduleFixedRun(slot + 1);
-    pushLineIndicator(seg, slot, time);
   }
-  commitHudLine(slot, name, time, seg.y0 - seg.y1);
+}
+
+// Play the whole gesture's envelope at once (deferred start): replay every
+// committed line's scheduling in order, chaining fixed and gesture slots the
+// same way live drawing does.
+function playDeferredEnvelope(ds) {
+  for (let i = 0; i < ds.segments.length; i++) {
+    scheduleLineToNote(ds, ds.segments[i], i);
+  }
 }
 
 // Ends the current line when the last movement sharply diverges from the
 // line's overall direction.
 function checkDirectionChange(ds) {
+  if (!ds.guide) return;   // direction not locked yet: you're still aiming, so turns don't end the line
   const limit = gestureLineLimit();
   if (limit === 0) return;   // no gesture lines exist, turns do nothing
   const ldx = ds.curX - ds.segX, ldy = ds.curY - ds.segY;
@@ -1253,13 +1437,22 @@ function checkDirectionChange(ds) {
 function finishPlantGesture() {
   if (!dragState) return;
   commitLine(dragState, dragState.lastMove);
-  // A tap (no line drawn) still registers a short attack and starts a note.
-  if (!dragState.attackRegistered) {
+  // A pure tap draws no line: still register an attack and start a note at the
+  // end of the gesture, using the preset attack if one is set.
+  if (dragState.segments.length === 0 && !dragState.attackRegistered) {
     dragState.attackRegistered = true;
-    dragState.attack = TAP_ATTACK_MS;
-    startGestureNote(dragState.startX, dragState.startY, dragState.attack);
+    if (FIXED.attack.on) {
+      dragState.attack = FIXED.attack.value;
+      startGestureNote(dragState.startX, dragState.startY, FIXED.attack.value, FIXED.attack.vol);
+    } else {
+      dragState.attack = TAP_ATTACK_MS;
+      startGestureNote(dragState.startX, dragState.startY, dragState.attack);
+    }
     scheduleFixedRun(1);
     commitHudLine(0, 'attack', dragState.attack, 0);
+  } else if (GESTURE.waitForGesture) {
+    // Sound waits until the whole gesture is complete, then plays it all.
+    playDeferredEnvelope(dragState);
   }
   const sound = gestureMoved(dragState) ? gestureSound(dragState.segments) : null;
   plantAt(dragState.startX, dragState.startY, dragState.segments, sound, {
@@ -1274,8 +1467,7 @@ function finishPlantGesture() {
 const modeBtn = document.getElementById('modeBtn');
 function updateModeBtn() {
   modeBtn.textContent = mode === 'plant' ? '🌱 Planting' : '🧭 Navigating';
-  modeBtn.classList.toggle('nav', mode === 'nav');
-}
+  modeBtn.classList.toggle('nav', mode === 'nav');}
 modeBtn.addEventListener('click', () => {
   if (mode === 'plant') { dragState = null; stopGestureNote(); }
   mode = mode === 'plant' ? 'nav' : 'plant';
@@ -1283,20 +1475,32 @@ modeBtn.addEventListener('click', () => {
   document.getElementById('hint').style.opacity = '0';
 });
 
+const waitBtn = document.getElementById('waitBtn');
+function syncWaitBtn() {
+  waitBtn.textContent = GESTURE.waitForGesture ? '⏳ Wait for gesture' : '🎵 Live sound';
+  waitBtn.classList.toggle('on', GESTURE.waitForGesture);
+}
+waitBtn.addEventListener('click', () => {
+  GESTURE.waitForGesture = !GESTURE.waitForGesture;
+  syncWaitBtn();
+  saveSettings();
+});
+syncWaitBtn();
+
 canvas.addEventListener('pointerdown', e => {
   initAudio();
   resumeAudio();
   canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
   if (mode === 'plant') {
     if (pointers.size === 1) {
       clearHud();
       dragState = {
-        startX: e.clientX, startY: e.clientY,   // where the tree is planted
-        segX: e.clientX, segY: e.clientY,       // start of the current line
-        curX: e.clientX, curY: e.clientY,
-        prevX: e.clientX, prevY: e.clientY,     // last pointer position (for turns)
+        startX: stageX(e), startY: stageY(e),   // where the tree is planted
+        segX: stageX(e), segY: stageY(e),       // start of the current line
+        curX: stageX(e), curY: stageY(e),
+        prevX: stageX(e), prevY: stageY(e),     // last pointer position (for turns)
         segments: [],
         lastMove: performance.now(),
         segT0: performance.now(),               // when the current line began
@@ -1304,16 +1508,12 @@ canvas.addEventListener('pointerdown', e => {
         decay: null,                            // set when line 2 ends
         hold: null,                             // set when line 3 ends
         release: null,                          // set when line 4 ends
+        guide: null,                            // locked max-guide for the current line
       };
-      // Fixed components play their preset and skip their gesture line. If the
-      // attack is fixed, the note begins now; gesture lines then fill the
-      // remaining unticked components in order.
-      if (FIXED.attack.on) {
-        dragState.attack = FIXED.attack.value;
-        dragState.attackRegistered = true;
-        startGestureNote(e.clientX, e.clientY, FIXED.attack.value, FIXED.attack.vol);
-        scheduleFixedRun(1);
-      }
+      // Fixed components play their preset and skip their gesture line. The
+      // note is NOT started on touch: it begins when the first line is drawn
+      // (the preset attack and fixed slots before that line are scheduled then).
+      if (FIXED.attack.on) dragState.attack = FIXED.attack.value;
       if (FIXED.decay.on) dragState.decay = FIXED.decay.value;
       if (FIXED.hold.on) dragState.hold = FIXED.hold.value;
       if (FIXED.release.on) dragState.release = FIXED.release.value;
@@ -1323,7 +1523,7 @@ canvas.addEventListener('pointerdown', e => {
     }
   } else {
     if (pointers.size === 1) {
-      navState = { startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY };
+      navState = { startX: stageX(e), startY: stageY(e), curX: stageX(e), curY: stageY(e) };
     } else if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinchState = { dist: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -1334,13 +1534,13 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('pointermove', e => {
   const p = pointers.get(e.pointerId);
   if (!p) return;
-  const dx = e.clientX - p.x, dy = e.clientY - p.y;
-  p.x = e.clientX; p.y = e.clientY;
+  const dx = stageX(e) - p.x, dy = stageY(e) - p.y;
+  p.x = stageX(e); p.y = stageY(e);
 
   if (mode === 'plant') {
     if (pointers.size === 1 && dragState) {
       dragState.prevX = dragState.curX; dragState.prevY = dragState.curY;
-      dragState.curX = e.clientX; dragState.curY = e.clientY;
+      dragState.curX = stageX(e); dragState.curY = stageY(e);
       dragState.lastMove = performance.now();
     }
   } else if (pointers.size === 2 && pinchState) {
@@ -1354,7 +1554,7 @@ canvas.addEventListener('pointermove', e => {
     zoomAt(mx, my, factor);
     clampCamY();
   } else if (pointers.size === 1 && navState) {
-    navState.curX = e.clientX; navState.curY = e.clientY;
+    navState.curX = stageX(e); navState.curY = stageY(e);
     cam.x -= dx * PAN_SENS;
     cam.y -= dy * PAN_SENS;
     clampCamY();
@@ -1390,6 +1590,17 @@ canvas.addEventListener('pointercancel', e => {
   } else if (pointers.size === 0) {
     navState = null;
   }
+});
+
+// If the pointer goes missing (window loses focus, browser steals the
+// gesture, etc.), drop all ghost pointers so a stuck plant gesture or a
+// phantom "down" finger can't freeze the game.
+window.addEventListener('blur', () => {
+  pointers.clear();
+  pinchState = null;
+  dragState = null;
+  navState = null;
+  stopGestureNote();
 });
 
 /* ---------- Synthesized audio ---------- */
@@ -1464,13 +1675,7 @@ function loadSavedSettings() {
     if (d.gesture) {
       if (d.gesture.pause != null) g.pause = d.gesture.pause;
       if (d.gesture.maxVectors != null) g.maxVectors = d.gesture.maxVectors;
-      if (d.gesture.timePerPx != null) {
-        if (typeof d.gesture.timePerPx === 'object') {
-          g.timePerPx = Object.assign({}, g.timePerPx, d.gesture.timePerPx);
-        } else {
-          g.timePerPx = { attack: d.gesture.timePerPx, decay: d.gesture.timePerPx, hold: d.gesture.timePerPx, release: d.gesture.timePerPx };
-        }
-      }
+      if (d.gesture.waitForGesture != null) g.waitForGesture = !!d.gesture.waitForGesture;
       if (d.gesture.growSpeed != null) g.growSpeed = d.gesture.growSpeed;
       for (const key of ['assign', 'sens', 'min', 'max']) {
         if (d.gesture[key]) g[key] = Object.assign({}, g[key], d.gesture[key]);
@@ -1489,6 +1694,7 @@ function loadSavedSettings() {
         if (d.fixed[name]) fx[name] = Object.assign({}, fx[name], d.fixed[name]);
       }
     }
+    fx.attack.vol = 100;   // the attack always ramps to full gain
     FIXED = fx;
     PREFERENCES = clone(DEFAULT_PREFERENCES);
     if (d.prefs) PREFERENCES.startMode = d.prefs.startMode === 'nav' ? 'nav' : 'plant';
@@ -1504,9 +1710,9 @@ function resetToDefaults() {
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
-  syncTimePerPxUI();
   syncGrowSpeedUI();
   syncFixedUI();
+  syncWaitBtn();
   document.getElementById('startMode').value = PREFERENCES.startMode;
 }
 
@@ -1514,6 +1720,7 @@ loadSavedSettings();
 // Apply the saved start mode (planting vs navigating) to this session.
 mode = PREFERENCES.startMode === 'nav' ? 'nav' : 'plant';
 updateModeBtn();
+syncWaitBtn();
 
 function chime(level, overrides) {
   initAudio();
@@ -1580,7 +1787,7 @@ function startGestureNote(sx, sy, atkMs, volPct) {
   hudState.on = true;
   hudState.noteStart = performance.now();
   const s = CHIME_SETTINGS.start;
-  const vol = volumeFromStartX(sx);
+  const vol = volumeFromStartY(sy);
   const atk = Math.max(0.005, (atkMs || TAP_ATTACK_MS) / 1000);
   hudSlot(0, Math.round(atk * 1000));
   const peak = vol * (volPct != null ? Math.max(0, Math.min(100, volPct)) / 100 : 1);
@@ -1601,20 +1808,30 @@ function startGestureNote(sx, sy, atkMs, volPct) {
   activeNote = { osc, gain, vol, level: peak, segEnd: t0 + atk, scheduledSlots: [true, false, false, false], cleanupTimer: null };
 }
 
+// ms the live sound has been idle since its last scheduled segment ended
+// (0 in wait-for-gesture mode, where the whole envelope plays back at once).
+function liveIdleGapMs() {
+  if (!activeNote || GESTURE.waitForGesture) return 0;
+  const now = audioCtx.currentTime;
+  return Math.max(0, now - (activeNote.segEnd || now)) * 1000;
+}
+
 // One line's volume segment: each segment chains from the END of the previous
 // one, so the slot after the attack ramps from full gain, and so on. The
 // ramp's change comes from the line's Y change, clamped to [0, vol]. If this
 // is the last line (release), the note fades out after the ramp.
-function scheduleVolumeSegment(durMs, seg, stopAtEnd, slot) {
+function scheduleVolumeSegment(durMs, seg, stopAtEnd, slot, idleMs) {
   if (!activeNote) return null;
   const now = audioCtx.currentTime;
   const g = activeNote.gain.gain;
   const startTime = Math.max(now, activeNote.segEnd || now);   // let the last ramp finish
   const startLevel = activeNote.level;                         // where the last segment ended
   const dy = seg.y0 - seg.y1;   // screen Y grows downward: - upward = louder, + downward = quieter
-  const delta = (dy / volPxRef(slot)) * activeNote.vol;
+  const delta = (dy / Math.max(1, H)) * activeNote.vol;   // full height = full gain range
   const target = Math.max(0, Math.min(activeNote.vol, startLevel + delta));
-  const end = startTime + Math.max(0.005, durMs / 1000);
+  // idleMs folds the catch-up time into this line, so its segment lasts long
+  // enough for the envelope to reach the gesture again.
+  const end = startTime + Math.max(0.005, (durMs + (idleMs || 0)) / 1000);
   g.setValueAtTime(startLevel, startTime);
   g.linearRampToValueAtTime(target, end);
   activeNote.level = target;
@@ -1951,31 +2168,7 @@ function syncSensUI() {
 syncSensUI();
 */
 
-/* ---- Distance -> time (per component) ---- */
-function sensLabel(tpp) {
-  // Same sensitivity drives the volume sweep: % of the gain range changed per
-  // 100px of Y = tpp * 10000 / (VOL_PX_REF * DEFAULT_TTP).
-  const pct = (tpp * 10000) / (VOL_PX_REF * DEFAULT_TTP);
-  const rounded = Math.round(pct * 10) / 10;
-  const pctStr = rounded % 1 === 0 ? String(rounded) : rounded.toFixed(1);
-  return `${tpp} ms/px · ${pctStr}%/100px`;
-}
-for (const name of SLOT_NAMES) {
-  const el = document.getElementById('tpp-' + name);
-  el.addEventListener('input', () => {
-    GESTURE.timePerPx[name] = +el.value;
-    document.getElementById('tpp-' + name + 'Val').textContent = sensLabel(el.value);
-  });
-}
-function syncTimePerPxUI() {
-  for (const name of SLOT_NAMES) {
-    const el = document.getElementById('tpp-' + name);
-    el.value = GESTURE.timePerPx[name];
-    document.getElementById('tpp-' + name + 'Val').textContent = sensLabel(GESTURE.timePerPx[name]);
-  }
-}
-syncTimePerPxUI();
-
+/* ---- Gesture value mapping is pure screen proportions (see lineTimeForSlot) ---- */
 /* ---- Growth speed ---- */
 const growSpeedEl = document.getElementById('growSpeed');
 growSpeedEl.addEventListener('input', () => {
@@ -1992,17 +2185,24 @@ syncGrowSpeedUI();
 for (const name of SLOT_NAMES) {
   const cb = document.getElementById('fx-' + name);
   const tEl = document.getElementById('fx-' + name + 'T');
-  const volEl = document.getElementById('fx-' + name + 'Vol');
+  const volEl = name === 'attack' ? null : document.getElementById('fx-' + name + 'Vol');
   const maxEl = document.getElementById('fx-' + name + 'Max');
+  // Fixed-value sliders (preset time, end vol) only apply when the component
+  // is ticked to use its fixed value.
+  function syncFxEnabled() {
+    const fixed = FIXED[name].on;
+    tEl.disabled = !fixed;
+    if (volEl) volEl.disabled = !fixed;
+  }
   cb.addEventListener('change', () => {
     FIXED[name].on = cb.checked;
-    document.getElementById('tpp-' + name).disabled = cb.checked;
+    syncFxEnabled();
   });
   tEl.addEventListener('input', () => {
     FIXED[name].value = +tEl.value;
     document.getElementById('fx-' + name + 'TVal').textContent = tEl.value + 'ms';
   });
-  volEl.addEventListener('input', () => {
+  if (volEl) volEl.addEventListener('input', () => {
     FIXED[name].vol = +volEl.value;
     document.getElementById('fx-' + name + 'VolVal').textContent = volEl.value + '%';
   });
@@ -2017,13 +2217,17 @@ function syncFixedUI() {
     const tEl = document.getElementById('fx-' + name + 'T');
     tEl.value = FIXED[name].value = Math.max(1, Math.min(5000, FIXED[name].value));
     document.getElementById('fx-' + name + 'TVal').textContent = FIXED[name].value + 'ms';
-    const volEl = document.getElementById('fx-' + name + 'Vol');
-    volEl.value = FIXED[name].vol;
-    document.getElementById('fx-' + name + 'VolVal').textContent = FIXED[name].vol + '%';
+    if (name !== 'attack') {
+      const volEl = document.getElementById('fx-' + name + 'Vol');
+      volEl.value = FIXED[name].vol;
+      document.getElementById('fx-' + name + 'VolVal').textContent = FIXED[name].vol + '%';
+    }
     const maxEl = document.getElementById('fx-' + name + 'Max');
     maxEl.value = FIXED[name].max = Math.max(1, Math.min(5000, FIXED[name].max));
     document.getElementById('fx-' + name + 'MaxVal').textContent = FIXED[name].max + 'ms';
-    document.getElementById('tpp-' + name).disabled = FIXED[name].on;
+    const fixed = FIXED[name].on;
+    tEl.disabled = !fixed;
+    if (name !== 'attack') document.getElementById('fx-' + name + 'Vol').disabled = !fixed;
   }
 }
 syncFixedUI();
@@ -2086,23 +2290,28 @@ function loadGestureUI() {
 loadGestureUI();
 */
 
+function closeSettingsPanel() {
+  settingsPanel.classList.add('hidden');
+  saveSettings();
+  // Re-sync the canvas to the real window size: iOS can leave it sized to a
+  // stale value after the full-screen panel is dismissed, which squishes the
+  // scene's background. Resetting canvas.width also forces a clean repaint.
+  resize();
+  clampCamY();
+}
 settingsBtn.addEventListener('click', () => {
   initAudio();
   resumeAudio();
-  settingsPanel.classList.toggle('hidden');
   if (settingsPanel.classList.contains('hidden')) {
-    saveSettings();
-  } else {
+    settingsPanel.classList.remove('hidden');
     loadLevelUI(currentLevel);
     /* loadGestureUI(); */
-    syncTimePerPxUI();
     syncFixedUI();
+  } else {
+    closeSettingsPanel();
   }
 });
-document.getElementById('closeSettings').addEventListener('click', () => {
-  settingsPanel.classList.add('hidden');
-  saveSettings();
-});
+document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);
 document.getElementById('testSound').addEventListener('click', previewChime);
 
 document.getElementById('resetDefaults').addEventListener('click', () => {
@@ -2124,6 +2333,7 @@ document.getElementById('clear').addEventListener('click', () => {
 /* ---------- Main loop ---------- */
 let lastT = performance.now();
 function loop(now) {
+  try {
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2231,11 +2441,192 @@ function loop(now) {
         ctx.beginPath();
         ctx.arc(ax, ay, 4, 0, Math.PI * 2);
         ctx.fill();
+
+        // All directional guides (time/volume edge arrows, max circle, guard
+        // lines) only appear once the drag direction is locked, so the wiggle
+        // room before that stays free of directional hints.
+        if (dragState.guide) {
+        // Time & volume guides: thick lines centered on the screen edges that
+        // wiggle back and forth. The bottom one (time, shown for every line
+        // including the attack) arrows the way the line moves horizontally; the
+        // right one (volume, skipped for the attack whose volume is always
+        // 100%) arrows the way it moves vertically.
+        {
+          const odx = dragState.curX - dragState.segX, ody = dragState.curY - dragState.segY;
+          if (Math.hypot(odx, ody) >= 1) {
+            ctx.lineCap = 'round';
+            const wig = Math.sin(performance.now() / 320);
+            // time guide: the attack's time is length-based, so its arrow
+            // points along the drag direction (any direction); every other
+            // line's time is horizontal, so their arrow stays horizontal.
+            if (Math.abs(odx) >= 1) {
+              const dragAngle = Math.atan2(ody, odx);
+              const a = nextSlot === 0 ? dragAngle : (odx > 0 ? 0 : Math.PI);
+              const gx = W / 2 + wig * 12, gy = H - EDGE_INSET;
+              const LEN = 90;
+              const tailX = gx - Math.cos(a) * LEN / 2, tailY = gy - Math.sin(a) * LEN / 2;
+              const headX = gx + Math.cos(a) * LEN / 2, headY = gy + Math.sin(a) * LEN / 2;
+              ctx.strokeStyle = 'rgba(58,91,160,0.8)';
+              ctx.lineWidth = 7;
+              ctx.beginPath();
+              ctx.moveTo(tailX, tailY);
+              ctx.lineTo(headX, headY);
+              ctx.stroke();
+              // arrowhead pointing along `a`
+              ctx.fillStyle = 'rgba(58,91,160,0.9)';
+              ctx.beginPath();
+              ctx.moveTo(headX + Math.cos(a) * 13, headY + Math.sin(a) * 13);
+              ctx.lineTo(headX - Math.cos(a) * 5 - Math.sin(a) * 8, headY - Math.sin(a) * 5 + Math.cos(a) * 8);
+              ctx.lineTo(headX - Math.cos(a) * 5 + Math.sin(a) * 8, headY - Math.sin(a) * 5 - Math.cos(a) * 8);
+              ctx.closePath();
+              ctx.fill();
+              ctx.font = '15px "Segoe UI", system-ui, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = '#3a5ba0';
+              ctx.fillText(EMOJI_TIME, headX + Math.cos(a) * 26, headY + Math.sin(a) * 26 - 15);
+              ctx.textBaseline = 'alphabetic';
+              ctx.textAlign = 'start';
+            }
+            // volume guide centered on the right edge (not for the attack)
+            if (nextSlot !== 0 && Math.abs(ody) >= 1) {
+              const up = ody < 0;               // screen Y grows downward
+              const dirY = up ? -1 : 1;
+              const gx = W - EDGE_INSET;
+              const gy = H / 2 + wig * 12;
+              const LEN = 90;
+              const tailY = gy - dirY * LEN / 2, headY = gy + dirY * LEN / 2;
+              ctx.strokeStyle = 'rgba(58,91,160,0.8)';
+              ctx.lineWidth = 7;
+              ctx.beginPath();
+              ctx.moveTo(gx, tailY);
+              ctx.lineTo(gx, headY);
+              ctx.stroke();
+              ctx.fillStyle = 'rgba(58,91,160,0.9)';
+              ctx.beginPath();
+              ctx.moveTo(gx, headY + dirY * 13);
+              ctx.lineTo(gx - 8, headY - dirY * 5);
+              ctx.lineTo(gx + 8, headY - dirY * 5);
+              ctx.closePath();
+              ctx.fill();
+              ctx.font = '15px "Segoe UI", system-ui, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = '#3a5ba0';
+              ctx.fillText(EMOJI_VOL, gx - 15, headY + dirY * 26);
+              ctx.textBaseline = 'alphabetic';
+              ctx.textAlign = 'start';
+            }
+            ctx.lineCap = 'butt';
+          }
+        }
+        }
+
+        // Lock the guide (max circle + guard lines) the first time the line's
+        // direction is committed; it never moves after that.
+        if (!dragState.guide) {
+          const ll = Math.hypot(dragState.curX - dragState.segX, dragState.curY - dragState.segY);
+          if (ll >= GUIDE_LOCK_PX) {
+            dragState.guide = segmentGuide(
+              { x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY },
+              nextSlot, dragState.segments.length, GUIDE_RADIUS);
+          }
+        }
+
+        // Crossing a guard line (leaving the corridor between the two circles),
+        // dragging through the max circle, or drifting backward past the
+        // forward-moving start circle ends the line.
+        if (dragState.guide) {
+          const g = dragState.guide;
+          const vx = dragState.curX - dragState.segX, vy = dragState.curY - dragState.segY;
+          const dirX = Math.cos(g.angle), dirY = Math.sin(g.angle);
+          const prog = vx * dirX + vy * dirY;                  // forward progress along the path
+          const perp = Math.abs(vx * dirY - vy * dirX);        // lateral distance from the drag line
+          g.startProg = Math.max(g.startProg || 0, prog);      // the start circle advances, never retreats
+          if (perp > g.R || prog >= g.dist || prog < g.startProg - g.R) {
+            const limit = gestureLineLimit();
+            if (dragState.segments.length >= limit - 1) finishPlantGesture();
+            else commitLine(dragState, dragState.lastMove);
+          }
+        }
+
+        if (dragState && dragState.guide) {
+          const g = dragState.guide;
+          const ox = dragState.segX, oy = dragState.segY;
+
+          // Guard lines: the two parallel tangents shared by the moving start
+          // circle and the max circle, so they never meet.
+          const perpX = -Math.sin(g.angle), perpY = Math.cos(g.angle);
+          ctx.strokeStyle = 'rgba(58,91,160,0.35)';
+          ctx.setLineDash([4, 6]);
+          ctx.lineWidth = 1.5;
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.moveTo(ox + perpX * s * g.R, oy + perpY * s * g.R);
+            ctx.lineTo(g.px + perpX * s * g.R, g.py + perpY * s * g.R);
+            ctx.stroke();
+          }
+          // The start circle rides forward with the drag (never backward),
+          // drawn a circle-width behind the thumb so it stays visible; going
+          // back past it ends the line.
+          const back = (g.startProg || 0) - g.R;
+          const sx = ox + Math.cos(g.angle) * back;
+          const sy = oy + Math.sin(g.angle) * back;
+          ctx.fillStyle = 'rgba(58,91,160,0.18)';
+          ctx.beginPath();
+          ctx.arc(sx, sy, g.R, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(58,91,160,0.85)';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(sx, sy, g.R, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Guide circle + label at the locked max point.
+          const pulse = 1 + 0.12 * Math.sin(performance.now() / 260);
+          const rad = g.R * pulse;
+          const glow = ctx.createRadialGradient(g.px, g.py, rad * 0.15, g.px, g.py, rad * 1.6);
+          glow.addColorStop(0, 'rgba(58,91,160,0.4)');
+          glow.addColorStop(1, 'rgba(58,91,160,0)');
+          ctx.fillStyle = glow;
+          ctx.beginPath();
+          ctx.arc(g.px, g.py, rad * 1.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(58,91,160,0.8)';
+          ctx.setLineDash([5, 5]);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(g.px, g.py, rad, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const label = `${EMOJI_TIME} ${g.ms}ms · ${EMOJI_VOL} ${g.pct}%`;
+          ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+          const tw = ctx.measureText(label).width;
+          let lx = g.px + rad + 6, ly = g.py - rad - 6;
+          if (lx + tw + 6 > W) lx = g.px - tw - rad - 6;
+          if (lx < 4) lx = 4;
+          if (ly < 12) ly = g.py + rad + 14;
+          if (ly > H - 4) ly = H - 8;
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fillRect(lx - 3, ly - 11, tw + 6, 15);
+          ctx.fillStyle = '#3a5ba0';
+          ctx.fillText(label, lx, ly);
+        }
       }
     }
   }
 
   refreshHud(now);
+  } catch (err) {
+    // Never let a single bad frame brick the game: clear transient gesture
+    // state so the next frame recovers, and keep the loop alive.
+    console.error(err);
+    dragState = null; navState = null; pinchState = null;
+    pointers.clear();
+    stopGestureNote();
+  }
 
   requestAnimationFrame(loop);
 }
