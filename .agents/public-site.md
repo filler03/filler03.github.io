@@ -19,10 +19,19 @@ Self-contained single-file HTML games using the Canvas API:
 | `games/basketball/basketball.html` | Basketball | Single-player (the original, pre-multiplayer version) |
 | `games/soccer/soccer.html` | Soccer | Single-player |
 | `games/football.html` | Football | Single-player, lives directly in `games/` |
+| `games/growing_trees.html` | Growing Trees | Gesture → synthesized note + tree growth (see guide below) |
 | `games/orbit/orbit.html` | Orbit | Orbital mechanics game |
 | `games/worms/worms.html` | Worms | Slither.io-style game with chunk-based exploration |
 
 > **Known issue:** The homepage "Worms" link incorrectly points to `games/orbit/orbit.html` instead of `games/worms/worms.html`.
+
+## Game Guides
+
+Detailed, indexed write-ups for individual games live in [`.agents/games/`](games/):
+
+| Game | Guide |
+|------|-------|
+| Growing Trees | [`.agents/games/growing-trees.md`](games/growing-trees.md) — gesture→envelope model, fixed values & Max caps, tree growth phases, HUD, settings, architecture index |
 
 ## Test Builds (`public/test/`)
 

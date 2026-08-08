@@ -43,6 +43,53 @@
     border-radius: 14px;
     z-index: 10;
   }
+  #statHud {
+    position: fixed;
+    top: 48px;
+    left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #statHud > div {
+    color: #2e5d34;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.75);
+    padding: 5px 12px;
+    border-radius: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    width: fit-content;
+  }
+  .hud-bar {
+    height: 5px;
+    margin-top: 5px;
+    background: rgba(46,93,52,0.15);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .hud-fill {
+    height: 100%;
+    width: 0;
+    background: #2e5d34;
+    border-radius: 3px;
+    transition: width 0.1s linear;
+  }
+  #statHud > div.live {
+    background: rgba(255,255,255,0.92);
+    outline: 1px dashed #3a5ba0;
+  }
+  #statHud > div.hud-fixed {
+    background: rgba(252, 232, 178, 0.92);
+    color: #8a6d1f;
+    outline: 1px solid rgba(138,109,31,0.4);
+  }
+  #statHud > div.hud-fixed .hud-fill {
+    background: #8a6d1f;
+  }
   #settingsBtn {
     position: fixed;
     top: 16px;
@@ -104,6 +151,26 @@
   }
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
+  .fx-block { margin-bottom: 12px; }
+  .fx-item {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f7fdf0;
+  }
+  .fx-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2e5d34;
+    margin-bottom: 4px;
+  }
+  .fx-head label { display: flex; align-items: center; gap: 6px; }
+  .fx-head input[type=checkbox] { accent-color: #2e5d34; }
+  .fx-item input[type=range] { width: 100%; margin-bottom: 6px; }
   .val { font-weight: 700; }
   .vec-head {
     font-weight: 700;
@@ -143,6 +210,18 @@
   #modeBtn:hover { background: #3c7a45; }
   #modeBtn.nav { background: #3a5ba0; }
   #modeBtn.nav:hover { background: #4a6db0; }
+  #version {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    color: rgba(46,93,52,0.75);
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.6);
+    padding: 4px 10px;
+    border-radius: 10px;
+    z-index: 10;
+  }
   #clear {
     width: 100%;
     padding: 9px;
@@ -181,8 +260,9 @@
 </style>
 </head>
 <body>
-<div id="hint">🌱 Planting: tap or drag the ground to grow a tree • pause ~1s mid-drag to start another line (up to 3 vectors set the note's volume/attack/decay/sustain/hold/release) • tap the button (bottom-right) to switch to 🧭 Navigating</div>
+<div id="hint">🌱 Planting: tap or drag the ground to grow a tree • turn sharply mid-drag to start a new line (up to 4 lines set the note's envelope: length = time, Y change = volume) • the trunk grows during attack, branches during decay+hold, leaves & fruit during release • tap the button (bottom-right) to switch to 🧭 Navigating</div>
 <div id="count">🌳 0 trees</div>
+<div id="statHud"></div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
 <div id="settingsPanel" class="hidden">
   <div class="panel-head">
@@ -198,6 +278,9 @@
     </select>
     <label for="note">Key</label>
     <select id="note"></select>
+    <!-- COMMENTED OUT - the gesture now determines the sound's wave, blend,
+         volume, attack, decay, sustain, hold, and release. Only the key
+         (root pitch) and start mode stay manual.
     <label for="wave">Wave</label>
     <select id="wave">
       <option value="sine">Sine</option>
@@ -226,9 +309,11 @@
     <input type="range" id="hold">
     <label for="release">Release <b class="val" id="releaseVal"></b></label>
     <input type="range" id="release" min="0" max="2000" step="10">
+    -->
   </div>
-  <div class="vec-head">Gesture → Sound (each line's X/Y, in order)</div>
+  <div class="vec-head">Gesture</div>
   <div class="grid">
+    <!-- COMMENTED OUT - the gesture now determines the sound qualities itself.
     <label for="v1x">V1 X →</label>
     <select id="v1x" class="vec-sel"></select>
     <label for="v1y">V1 Y →</label>
@@ -241,9 +326,61 @@
     <select id="v3x" class="vec-sel"></select>
     <label for="v3y">V3 Y →</label>
     <select id="v3y" class="vec-sel"></select>
+    -->
+    <!-- COMMENTED OUT - new lines are started by a direction change only.
     <label for="pause">New line <b class="val" id="pauseVal"></b></label>
     <input type="range" id="pause" min="300" max="2000" step="50">
+    -->
   </div>
+  <div class="vec-head">Gesture timing</div>
+  <div class="grid">
+    <label for="growSpeed">Growth speed <b class="val" id="growSpeedVal"></b></label>
+    <input type="range" id="growSpeed" min="0.25" max="4" step="0.05">
+  </div>
+  <div class="vec-head">Fixed values (tick to skip that gesture line) · Max caps gesture lines</div>
+  <div class="fx-block">
+    <div class="fx-item">
+      <div class="fx-head"><label><input type="checkbox" id="fx-attack"> Attack</label><b class="val" id="fx-attackTVal"></b> ms</div>
+      <input type="range" id="fx-attackT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-attackVolVal"></b></div>
+      <input type="range" id="fx-attackVol" min="0" max="100" step="1">
+      <div class="fx-head"><span>Max</span><b class="val" id="fx-attackMaxVal"></b> ms</div>
+      <input type="range" id="fx-attackMax" min="50" max="5000" step="10">
+      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-attackVal"></b></div>
+      <input type="range" id="tpp-attack" min="1" max="40" step="1">
+    </div>
+    <div class="fx-item">
+      <div class="fx-head"><label><input type="checkbox" id="fx-decay"> Decay</label><b class="val" id="fx-decayTVal"></b> ms</div>
+      <input type="range" id="fx-decayT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-decayVolVal"></b></div>
+      <input type="range" id="fx-decayVol" min="0" max="100" step="1">
+      <div class="fx-head"><span>Max</span><b class="val" id="fx-decayMaxVal"></b> ms</div>
+      <input type="range" id="fx-decayMax" min="50" max="5000" step="10">
+      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-decayVal"></b></div>
+      <input type="range" id="tpp-decay" min="1" max="40" step="1">
+    </div>
+    <div class="fx-item">
+      <div class="fx-head"><label><input type="checkbox" id="fx-hold"> Hold</label><b class="val" id="fx-holdTVal"></b> ms</div>
+      <input type="range" id="fx-holdT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-holdVolVal"></b></div>
+      <input type="range" id="fx-holdVol" min="0" max="100" step="1">
+      <div class="fx-head"><span>Max</span><b class="val" id="fx-holdMaxVal"></b> ms</div>
+      <input type="range" id="fx-holdMax" min="100" max="5000" step="10">
+      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-holdVal"></b></div>
+      <input type="range" id="tpp-hold" min="1" max="40" step="1">
+    </div>
+    <div class="fx-item">
+      <div class="fx-head"><label><input type="checkbox" id="fx-release"> Release</label><b class="val" id="fx-releaseTVal"></b> ms</div>
+      <input type="range" id="fx-releaseT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-releaseVolVal"></b></div>
+      <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
+      <div class="fx-head"><span>Max</span><b class="val" id="fx-releaseMaxVal"></b> ms</div>
+      <input type="range" id="fx-releaseMax" min="100" max="5000" step="10">
+      <div class="fx-head"><span>Sens</span><b class="val" id="tpp-releaseVal"></b></div>
+      <input type="range" id="tpp-release" min="1" max="40" step="1">
+    </div>
+  </div>
+  <!-- COMMENTED OUT - sensitivity is now hardcoded.
   <div class="vec-head">Sensitivity (units per 100px)</div>
   <div class="grid">
     <label for="sens-volume">Volume <b class="val" id="sens-volumeVal"></b></label>
@@ -259,6 +396,8 @@
     <label for="sens-release">Release <b class="val" id="sens-releaseVal"></b></label>
     <input type="range" id="sens-release">
   </div>
+  -->
+  <!-- COMMENTED OUT - gesture values are clamped to sensible built-in ranges.
   <div class="vec-head">Min / Max per quality (gesture values clamp here)</div>
   <div class="mm-legend">
     <span></span><span>Min</span><span></span><span>Max</span><span></span>
@@ -283,6 +422,7 @@
     <input type="range" id="min-release"><b class="val" id="min-releaseVal"></b>
     <input type="range" id="max-release"><b class="val" id="max-releaseVal"></b>
   </div>
+  -->
   <button id="clear">Clear trees 🍂</button>
   <button id="testSound">▶ Play test</button>
   <button id="resetDefaults">↺ Reset defaults</button>
@@ -290,17 +430,21 @@
 
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
+<div id="version">v1.1.29</div>
 
 <script>
 /* ============================================================
    CLICK-TO-GROW TREES
 
-   SIZE: each tree's size comes entirely from the gesture that created it —
-   the time from the beginning of the note's attack to the beginning of its
-   release (attack + decay + hold). A very short gesture grows a small, low
-   shrub; a long one grows a tall, full tree. The wood, leaves and fruit all
-   animate together across that whole window and are complete exactly when
-   the release begins.
+   SIZE: each tree's size comes from the gesture that created it — the woody
+   window from the beginning of the attack to the beginning of the release
+   (attack + decay + hold). A very short gesture grows a small, low shrub; a
+   long one grows a tall, full tree.
+
+   GROWTH: the parts grow at a fixed speed (settings → growth speed). The
+   note's durations decide how MUCH each part grows, not how fast: the trunk
+   grows during the attack, the branches during decay + hold, and the leaves
+   & fruit during the release.
 
    GESTURE: one gesture can be several vectors. Pause ~1s to end a line and
    start a new one from that point (up to 3 vectors). Each vector's X and Y
@@ -331,6 +475,8 @@ const countEl = document.getElementById('count');
 
 const liveTrees = [];      // trees still growing (full redraw each frame)
 const bakedTrees = [];     // finished trees, cached as bitmaps
+const lineIndicators = []; // rings at each registered line's start point
+const statHud = document.getElementById('statHud');
 
 function resize() {
   W = canvas.width  = window.innerWidth;
@@ -383,92 +529,98 @@ class Branch {
     this.bend = (Math.random() - 0.5) * length * 0.30;
     this.lightJitter = Math.max(-6, (Math.random() * 8) - 3 - depth * 1.5);
     this.children = [];
-    this.spawned = false;
     this.leaves = [];
     this.fruit = null;
   }
 
-  get endX() { return this.x + Math.cos(this.angle) * this.length * this.grown; }
-  get endY() { return this.y + Math.sin(this.angle) * this.length * this.grown; }
+  // Nominal end with the whole structure fully grown (build-time reference;
+  // per-frame positions are recomputed from the parent's current tip in draw).
+  get fullEndX() { return this.x + Math.cos(this.angle) * this.length; }
+  get fullEndY() { return this.y + Math.sin(this.angle) * this.length; }
 
-  update(tree, now, dt) {
-    // Wood grows for exactly the animation window (attack -> release start).
-    // The cascade rate is set so the whole structure completes at the end.
-    if (tree.phase === 'grow' && this.grown < 1) {
-      this.grown = Math.min(1, this.grown + tree.woodRate * dt);
+  // Pre-build the whole branch network up front so each part can grow over its
+  // own note segment: trunk during attack, branches during decay + hold, and
+  // leaves & fruit during release. Leaves sit at offsets around the branch tip
+  // so they ride on it as it grows.
+  build(tree) {
+    const tip = this.depth >= tree.maxDepth;
+    if (!tip) {
+      const n = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) {
+        const spread = (Math.random() - 0.5) * 1.4;
+        const newAngle = this.angle + spread;
+        const newLen = this.length * (0.62 + Math.random() * 0.22);
+        const newThick = Math.max(1.0, this.thickness * 0.72);
+        const c = new Branch(this.fullEndX, this.fullEndY, newAngle,
+                             newLen, newThick, this.depth + 1);
+        this.children.push(c);
+        c.build(tree);
+      }
     }
 
-    if (this.grown >= 1 && !this.spawned) {
-      this.spawned = true;
-      const tip = this.depth >= tree.maxDepth;
-      if (!tip) {
-        const n = 1 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < n; i++) {
-          const spread = (Math.random() - 0.5) * 1.4;
-          const newAngle = this.angle + spread;
-          const newLen = this.length * (0.62 + Math.random() * 0.22);
-          const newThick = Math.max(1.0, this.thickness * 0.72);
-          this.children.push(new Branch(this.endX, this.endY, newAngle,
-                                        newLen, newThick, this.depth + 1));
-        }
-      }
+    const sp = tree.species;
+    const [hMin, hMax] = sp.leafHue;
+    let leafCount = 0;
+    if (tip) {
+      leafCount = 3 + Math.floor(Math.random() * 4);
+    } else if (this.depth === tree.maxDepth - 1 && Math.random() < 0.6) {
+      leafCount = 1 + Math.floor(Math.random() * 2);
+    }
+    const leafScale = tip ? 1 : 0.6;
+    for (let i = 0; i < leafCount; i++) {
+      this.leaves.push({
+        dx: (Math.random() - 0.5) * 18 * tree.scale,
+        dy: (Math.random() - 0.5) * 18 * tree.scale,
+        size: 0,
+        target: (4 + Math.random() * 4) * Math.max(0.6, tree.scale) * leafScale,
+        hue: hMin + Math.random() * (hMax - hMin),
+        sat: 50 + Math.random() * 25,
+        light: 38 + Math.random() * 14,
+        rot: Math.random() * 0.4,
+      });
+    }
+    if (tip && sp.fruit && Math.random() < sp.fruit.chance) {
+      this.fruit = {
+        dx: (Math.random() - 0.5) * 10,
+        dy: 4 + Math.random() * 6,
+        size: 0,
+        target: (sp.fruit.r + Math.random() * 2) * Math.max(0.6, tree.scale),
+        color: sp.fruit.color,
+      };
+    }
+  }
 
-      // Foliage appears as each branch completes: leaves start small and grow
-      // fast enough to reach full size exactly when the animation window ends,
-      // so wood and leaves/fruit bloom together in one smooth motion.
-      const remainSec = Math.max(0.001, (tree.growDur - (now - tree.born)) / 1000);
-      const growRate = 1 / remainSec;
-
-      const sp = tree.species;
-      const [hMin, hMax] = sp.leafHue;
-      let leafCount = 0;
-      if (tip) {
-        leafCount = 3 + Math.floor(Math.random() * 4);
-      } else if (this.depth === tree.maxDepth - 1 && Math.random() < 0.6) {
-        leafCount = 1 + Math.floor(Math.random() * 2);
-      }
-      const leafScale = tip ? 1 : 0.6;
-      for (let i = 0; i < leafCount; i++) {
-        this.leaves.push({
-          x: this.endX + (Math.random() - 0.5) * 18 * tree.scale,
-          y: this.endY + (Math.random() - 0.5) * 18 * tree.scale,
-          size: 0,
-          target: (4 + Math.random() * 4) * Math.max(0.6, tree.scale) * leafScale,
-          rate: growRate,
-          hue: hMin + Math.random() * (hMax - hMin),
-          sat: 50 + Math.random() * 25,
-          light: 38 + Math.random() * 14,
-          rot: Math.random() * 0.4,
-        });
-      }
-      if (tip && sp.fruit && Math.random() < sp.fruit.chance) {
-        this.fruit = {
-          x: this.endX + (Math.random() - 0.5) * 10,
-          y: this.endY + 4 + Math.random() * 6,
-          size: 0,
-          target: (sp.fruit.r + Math.random() * 2) * Math.max(0.6, tree.scale),
-          rate: growRate,
-          color: sp.fruit.color,
-        };
-      }
+  update(tree, now, dt) {
+    const t = now - tree.born;
+    // Growth is computed from elapsed time (not per-frame steps) so a segment
+    // shorter than one frame still grows to its cap. Trunk grows across the
+    // attack window; every other branch grows across decay + hold.
+    if (this.depth === 0) {
+      const local = Math.max(0, Math.min(t, tree.tTrunkEnd));
+      this.grown = Math.min(tree.trunkCap, local * tree.trunkRate);
+    } else if (t >= tree.tTrunkEnd && t < tree.tBranchEnd) {
+      const local = Math.max(0, t - tree.tTrunkEnd);
+      this.grown = Math.min(tree.branchCap, local * tree.branchRate);
     }
 
     for (const c of this.children) c.update(tree, now, dt);
 
-    // Leaves & fruit bloom in step with the wood: each grows at its own rate
-    // so everything reaches full size right when the release begins.
-    if (tree.phase === 'grow') {
+    // Leaves & fruit bloom during the release window, capped at foliageCap.
+    if (t >= tree.tBranchEnd && t < tree.tTotal) {
+      const local = t - tree.tBranchEnd;
       for (const l of this.leaves) {
-        if (l.size < l.target) l.size = Math.min(l.target, l.size + l.target * l.rate * dt);
+        l.size = Math.min(l.target * tree.foliageCap, local * tree.foliageRate * l.target);
       }
-      if (this.fruit && this.fruit.size < this.fruit.target) {
-        this.fruit.size = Math.min(this.fruit.target, this.fruit.size + this.fruit.target * this.fruit.rate * dt);
+      if (this.fruit) {
+        this.fruit.size = Math.min(this.fruit.target * tree.foliageCap, local * tree.foliageRate * this.fruit.target);
       }
     }
   }
 
-  bounds(box) {
-    const pts = [[this.x, this.y], [this.endX, this.endY]];
+  bounds(box, bx, by) {
+    const ex = bx + Math.cos(this.angle) * this.length * this.grown;
+    const ey = by + Math.sin(this.angle) * this.length * this.grown;
+    const pts = [[bx, by], [ex, ey]];
     for (const [px, py] of pts) {
       const t = this.thickness;
       if (px - t < box.minX) box.minX = px - t;
@@ -478,29 +630,28 @@ class Branch {
     }
     for (const l of this.leaves) {
       const s = l.target * 1.5;
-      if (l.x - s < box.minX) box.minX = l.x - s;
-      if (l.x + s > box.maxX) box.maxX = l.x + s;
-      if (l.y - s < box.minY) box.minY = l.y - s;
-      if (l.y + s > box.maxY) box.maxY = l.y + s;
+      if (ex + l.dx - s < box.minX) box.minX = ex + l.dx - s;
+      if (ex + l.dx + s > box.maxX) box.maxX = ex + l.dx + s;
+      if (ey + l.dy - s < box.minY) box.minY = ey + l.dy - s;
+      if (ey + l.dy + s > box.maxY) box.maxY = ey + l.dy + s;
     }
     if (this.fruit) {
       const f = this.fruit, s = f.target + 2;
-      if (f.x - s < box.minX) box.minX = f.x - s;
-      if (f.x + s > box.maxX) box.maxX = f.x + s;
-      if (f.y - s < box.minY) box.minY = f.y - s;
-      if (f.y + s > box.maxY) box.maxY = f.y + s;
+      if (ex + f.dx - s < box.minX) box.minX = ex + f.dx - s;
+      if (ex + f.dx + s > box.maxX) box.maxX = ex + f.dx + s;
+      if (ey + f.dy - s < box.minY) box.minY = ey + f.dy - s;
+      if (ey + f.dy + s > box.maxY) box.maxY = ey + f.dy + s;
     }
-    for (const c of this.children) c.bounds(box);
+    for (const c of this.children) c.bounds(box, ex, ey);
   }
 
-  drawWood(ctx, tree) {
+  drawWood(ctx, tree, x, y, ex, ey) {
     const g  = this.grown;
-    const ex = this.endX, ey = this.endY;
     const w0 = this.thickness;
     const w1 = Math.max(0.7, this.thickness * 0.72);
 
     const perp = this.angle + Math.PI / 2;
-    const mx = (this.x + ex) / 2, my = (this.y + ey) / 2;
+    const mx = (x + ex) / 2, my = (y + ey) / 2;
     const cpx = mx + Math.cos(perp) * this.bend * g;
     const cpy = my + Math.sin(perp) * this.bend * g;
 
@@ -508,10 +659,10 @@ class Branch {
     const left = [], right = [];
     for (let i = 0; i <= N; i++) {
       const t = i / N, it = 1 - t;
-      const px = it * it * this.x + 2 * it * t * cpx + t * t * ex;
-      const py = it * it * this.y + 2 * it * t * cpy + t * t * ey;
-      const tx = 2 * it * (cpx - this.x) + 2 * t * (ex - cpx);
-      const ty = 2 * it * (cpy - this.y) + 2 * t * (ey - cpy);
+      const px = it * it * x + 2 * it * t * cpx + t * t * ex;
+      const py = it * it * y + 2 * it * t * cpy + t * t * ey;
+      const tx = 2 * it * (cpx - x) + 2 * t * (ex - cpx);
+      const ty = 2 * it * (cpy - y) + 2 * t * (ey - cpy);
       const len = Math.hypot(tx, ty) || 1;
       const nx = -ty / len, ny = tx / len;
       const w = (w0 * (1 - t) + w1 * t) / 2;
@@ -525,10 +676,10 @@ class Branch {
     const shadL = mix(baseL - 10, HAZE_L, haze);
     const S     = mix(b.s, HAZE_S, haze);
 
-    const gx0 = this.x + Math.cos(perp) * w0 / 2;
-    const gy0 = this.y + Math.sin(perp) * w0 / 2;
-    const gx1 = this.x - Math.cos(perp) * w0 / 2;
-    const gy1 = this.y - Math.sin(perp) * w0 / 2;
+    const gx0 = x + Math.cos(perp) * w0 / 2;
+    const gy0 = y + Math.sin(perp) * w0 / 2;
+    const gx1 = x - Math.cos(perp) * w0 / 2;
+    const gy1 = y - Math.sin(perp) * w0 / 2;
     const grad = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
     grad.addColorStop(0.0, `hsl(${b.h}, ${S}%, ${shadL}%)`);
     grad.addColorStop(0.45,`hsl(${b.h}, ${S}%, ${litL}%)`);
@@ -543,17 +694,21 @@ class Branch {
     ctx.fill();
   }
 
-  draw(ctx, tree) {
-    this.drawWood(ctx, tree);
-    for (const c of this.children) c.draw(ctx, tree);
+  draw(ctx, tree, bx, by) {
+    const g  = this.grown;
+    const ex = bx + Math.cos(this.angle) * this.length * g;
+    const ey = by + Math.sin(this.angle) * this.length * g;
+    this.drawWood(ctx, tree, bx, by, ex, ey);
+    for (const c of this.children) c.draw(ctx, tree, ex, ey);
 
     const haze = tree.hazeAmt;
     for (const l of this.leaves) {
+      if (l.size <= 0) continue;
       const L = mix(l.light, HAZE_L, haze);
       const S = mix(l.sat,   HAZE_S, haze);
       ctx.fillStyle = `hsl(${l.hue}, ${S}%, ${L}%)`;
       ctx.beginPath();
-      ctx.ellipse(l.x, l.y, l.size, l.size * 1.4, l.rot, 0, Math.PI * 2);
+      ctx.ellipse(ex + l.dx, ey + l.dy, l.size, l.size * 1.4, l.rot, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -565,11 +720,11 @@ class Branch {
       const bb = Math.round(mix(bl,232, haze));
       ctx.fillStyle = `rgb(${rr},${gg},${bb})`;
       ctx.beginPath();
-      ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+      ctx.arc(ex + f.dx, ey + f.dy, f.size, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = `rgba(255,255,255,${0.45 * (1 - haze)})`;
       ctx.beginPath();
-      ctx.arc(f.x - f.size * 0.3, f.y - f.size * 0.3, f.size * 0.3, 0, Math.PI * 2);
+      ctx.arc(ex + f.dx - f.size * 0.3, ey + f.dy - f.size * 0.3, f.size * 0.3, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -577,8 +732,9 @@ class Branch {
 
 /* ---------- Tree ---------- */
 class Tree {
-  constructor(x, y, sceneDepth, growDur, sustainLevel) {
+  constructor(x, y, sceneDepth, growDur, sustainLevel, note) {
     this.x = x;                                   // world position (used for chords)
+    this.y = y;                                   // ground point (trunk base)
     this.depth = sceneDepth;                      // 0 far .. 1 near
     this.hazeAmt = Math.max(0, (1 - sceneDepth) * 0.4);
     this.species = SPECIES[Math.floor(Math.random() * SPECIES.length)];
@@ -589,21 +745,29 @@ class Tree {
       l: base.l + (Math.random() * 8 - 4),
     };
 
-    // ---- ANIMATION WINDOW ----
-    // The whole tree — wood, leaves and fruit — animates for exactly the time
-    // from the beginning of the note's attack to the beginning of its release
-    // (attack + decay + hold). The note keeps ringing through its release, but
-    // the tree is fully grown the moment the release begins. (Total sound time
-    // is attack + decay + hold + release.)
-    const FULL_GROW_MS = 6000;                  // animation window for a full-size tree
-    this.growDur = Math.max(120, growDur);      // ms of animation (attack -> release start)
-    this.born    = performance.now();
-    this.phase   = 'grow';
+    // ---- GROWTH (fixed speed, the note decides how MUCH) ----
+    // Trunk grows across the attack, branches across decay + hold, and leaves
+    // & fruit across the release — each at the fixed growth speed setting, so
+    // longer note segments grow a part further, never faster.
+    const speed = Math.max(0.01, GESTURE.growSpeed);
+    this.trunkCap   = clamp01(note.attack / (GROW_TRUNK_FULL_MS / speed));
+    this.branchCap  = clamp01((note.decay + note.hold) / (GROW_BRANCH_FULL_MS / speed));
+    this.foliageCap = clamp01(note.release / (GROW_FOLIAGE_FULL_MS / speed));
+    this.trunkRate   = speed / GROW_TRUNK_FULL_MS;    // fraction of full per ms
+    this.branchRate  = speed / GROW_BRANCH_FULL_MS;
+    this.foliageRate = speed / GROW_FOLIAGE_FULL_MS;
+    this.tTrunkEnd  = Math.max(1, note.attack);
+    this.tBranchEnd = this.tTrunkEnd + note.decay + note.hold;
+    this.tTotal     = this.tBranchEnd + note.release;
+    this.born       = performance.now();
+    this.phase      = 'grow';
 
     // ---- SIZE from GESTURE ----
-    // Size comes only from how long the animation window lasts: a very short
-    // gesture makes a tiny shrub; a long gesture makes a tall, full tree.
-    // Where you plant it has no effect on size.
+    // Size comes only from how long the woody window lasts (attack -> release
+    // start): a very short gesture makes a tiny shrub; a long gesture makes a
+    // tall, full tree. Where you plant it has no effect on size.
+    const FULL_GROW_MS = 6000;                  // woody window for a full-size tree
+    this.growDur = Math.max(120, growDur);
     const sizeFactor = clamp01(this.growDur / FULL_GROW_MS) *
                        (0.35 + 0.65 * clamp01(sustainLevel));
     const trunkHeight = 0.35 + 0.65 * Math.pow(sizeFactor, 0.5);
@@ -618,27 +782,22 @@ class Tree {
     const trunkThick = Math.max(3, 12 * this.scale * (0.5 + 0.5 * sizeFactor));
     this.trunk = new Branch(x, y, -Math.PI / 2 + (Math.random() - 0.5) * 0.2,
                             trunkLen, trunkThick, 0);
+    this.trunk.build(this);
 
     this.bmp = null; this.bx = 0; this.by = 0;
-
-    // Wood runs the full cascade (maxDepth+2 level slots, leaving one level
-    // of headroom so the deepest branches always finish and spawn leaves)
-    // across the whole animation window. Leaves then bloom at a per-leaf rate
-    // that lands them at full size exactly when the window ends.
-    this.woodRate = (this.maxDepth + 2) / (this.growDur / 1000);
   }
 
   update(now, dt) {
     const t = now - this.born;
-    if (t >= this.growDur) this.phase = 'done';
+    if (t >= this.tTotal) this.phase = 'done';
     this.trunk.update(this, now, dt);
     return this.phase === 'done';
   }
-  draw(ctx) { this.trunk.draw(ctx, this); }
+  draw(ctx) { this.trunk.draw(ctx, this, this.x, this.y); }
 
   bake() {
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    this.trunk.bounds(box);
+    this.trunk.bounds(box, this.x, this.y);
     const pad = 4;
     this.bx = Math.floor(box.minX - pad);
     this.by = Math.floor(box.minY - pad);
@@ -663,7 +822,8 @@ const MIN_ZOOM = 0.3, MAX_ZOOM = 3.0;
 // cam is a screen-space translation: screen = world * zoom - cam.
 // The pan slider pans cam.x, the vertical slider pans cam.y, and a
 // pinch inside the pan slider changes cam.zoom.
-const cam = { x: 0, y: 0, zoom: 1 };
+// Start zoomed all the way out and panned all the way down (foreground view).
+const cam = { x: 0, y: HORIZON * MIN_ZOOM, zoom: MIN_ZOOM };
 
 function toWorld(sx, sy) {
   return {
@@ -680,7 +840,23 @@ function zoomAt(sx, sy, factor) {
   cam.y = w.y * nz - sy;
 }
 
-function plantAt(sx, sy, sound) {
+// Pitch comes from the tree's vertical position (scene depth), not the
+// gesture: the skyline (depth 0) plays the key root two octaves up, and the
+// deepest point you can scroll down to plays the key root itself, snapped
+// to the chosen scale. Trees at different heights layer into a melody/chord.
+function pitchFor(sx, sy) {
+  const w = toWorld(sx, sy);
+  const depth = Math.max(0, (w.y - HORIZON) / (H * 0.42));
+  const SCALE = [0, 2, 4, 7, 9];                  // major pentatonic semitone offsets
+  const maxDepth = 1 / (0.42 * cam.zoom);         // deepest scrollable ground depth
+  const p = clamp01(1 - depth / maxDepth);        // 0 at deepest scrollable .. 1 at sky
+  const degree = Math.round(p * SCALE.length * 2);  // 0..10 across 2 octaves
+  const octaveOffset = Math.floor(degree / SCALE.length);
+  const semitone = SCALE[Math.min(SCALE.length - 1, degree % SCALE.length)] + 12 * octaveOffset;
+  return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone - 12);   // an octave lower
+}
+
+function plantAt(sx, sy, segments, sound, env) {
   // The tree starts growing right where you touched the ground: the touch Y
   // picks the scene depth (near bottom .. far horizon), so it sprouts at your
   // fingertip. Size comes only from the gesture/sustain, not from depth.
@@ -688,23 +864,28 @@ function plantAt(sx, sy, sound) {
   const depth = Math.max(0, (w.y - HORIZON) / (H * 0.42));
 
   const s = Object.assign({}, CHIME_SETTINGS.start, sound || {});
-  // Pitch comes from the tree's vertical position (scene depth), not the
-  // gesture: the skyline (depth 0) plays the key root two octaves up, and the
-  // deepest point you can scroll down to plays the key root itself, snapped
-  // to the chosen scale. Trees at different heights layer into a melody/chord.
-  const SCALE = [0, 2, 4, 7, 9];                  // major pentatonic semitone offsets
-  const maxDepth = 1 / (0.42 * cam.zoom);         // deepest scrollable ground depth
-  const p = clamp01(1 - depth / maxDepth);        // 0 at deepest scrollable .. 1 at sky
-  const degree = Math.round(p * SCALE.length * 2);  // 0..10 across 2 octaves
-  const octaveOffset = Math.floor(degree / SCALE.length);
-  const semitone = SCALE[Math.min(SCALE.length - 1, degree % SCALE.length)] + 12 * octaveOffset;
-  s.note = midiToName(noteToMidi(s.note) + semitone);
-  chime('start', s);
-  // The tree animates for exactly the time from the beginning of the attack
-  // to the beginning of the release (attack + decay + hold). That window is
-  // also what sizes the tree — short gesture = small shrub, long = big tree.
+  // Volume comes from the horizontal position where the gesture starts:
+  // far left = quiet, far right = loud.
+  s.volume = volumeFromStartX(sx);
+  // Envelope values were built from the gesture lines as they registered.
+  if (env) {
+    if (env.attack != null) s.attack = env.attack;
+    s.decay = env.decay != null ? env.decay : 40;   // quick dropoff if no line 2
+    s.hold  = env.hold  != null ? env.hold  : 0;    // none if no line 3
+    if (env.release != null) s.release = env.release;
+  }
+  s.note = pitchFor(sx, sy);
+  // The envelope was scheduled as each line registered; finish now with a
+  // quick smoothed dropoff if the release line (4th) was never drawn.
+  endGestureNote();
+  // The tree's woody window (attack -> release start) sizes it — short gesture
+  // = small shrub, long = big tree. The note's individual durations drive the
+  // growth animation: trunk during attack, branches during decay+hold, leaves
+  // & fruit during release, all at the fixed growth speed.
   const animDur = s.attack + s.decay + s.hold;
-  liveTrees.push(new Tree(w.x, groundYFor(depth), depth, animDur, s.sustain / 100));
+  const rootY = groundYFor(depth);
+  const note = { attack: s.attack, decay: s.decay, hold: s.hold, release: s.release };
+  liveTrees.push(new Tree(w.x, rootY, depth, animDur, s.sustain / 100, note));
   treeCount++;
   countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
   document.getElementById('hint').style.opacity = '0';
@@ -719,11 +900,15 @@ let pinchState = null;   // { dist } two-finger pinch in nav mode
 const PAN_SENS = 2;          // camera movement multiplier
 const PINCH_SENS = 0.4;      // pinch zoom dampening (<1 = less sensitive)
 
-// Keep the horizon visible: its screen position (HORIZON * zoom - cam.y)
-// stays within [0, H].
+// The ground scrolls down to the same absolute bottom at any zoom: the
+// deepest world point visible when fully zoomed out (WORLD_BOTTOM). The
+// horizon may drift off the top of the screen while zoomed in so the ground
+// can be panned right to the bottom; minY still keeps the horizon from going
+// below the screen bottom when panning up.
+const WORLD_BOTTOM = HORIZON + H / MIN_ZOOM;
 function clampCamY() {
   const minY = HORIZON * cam.zoom - H;
-  const maxY = HORIZON * cam.zoom;
+  const maxY = WORLD_BOTTOM * cam.zoom - H;
   cam.y = Math.max(minY, Math.min(maxY, cam.y));
 }
 
@@ -740,14 +925,205 @@ const QUALITIES = ['volume', 'attack', 'decay', 'sustain', 'hold', 'release'];
 const clone = o => JSON.parse(JSON.stringify(o));
 const DEFAULT_GESTURE = {
   pause: 1000,
-  maxVectors: 3,
-  assign: { v1x: 'hold', v1y: 'attack', v2x: null, v2y: null, v3x: null, v3y: null },
-  sens:  { volume: 8, attack: 100, decay: 200, sustain: 50, hold: 1200, release: 400 },
-  min:   { volume: 0.02, attack: 5, decay: 50, sustain: 20, hold: 100, release: 100 },
-  max:   { volume: 0.25, attack: 200, decay: 1000, sustain: 100, hold: 10000, release: 2000 },
+  maxVectors: 4,
+  timePerPx: { attack: 12, decay: 12, hold: 12, release: 12 },  // ms of envelope time per px of line, per component
+  growSpeed: 1,    // tree growth multiplier (fixed speed the parts grow at)
+  assign: { v1x: null, v1y: null, v2x: null, v2y: null, v3x: null, v3y: null },
+  sens:  { volume: 8, attack: 150, decay: 200, sustain: 50, hold: 1200, release: 400 },
+  min:   { volume: 0.02, attack: 30, decay: 50, sustain: 20, hold: 100, release: 100 },
+  max:   { volume: 0.25, attack: 600, decay: 1000, sustain: 100, hold: 10000, release: 2000 },
   unit:  { volume: '', attack: 'ms', decay: 'ms', sustain: '%', hold: 'ms', release: 'ms' },
 };
 let GESTURE = clone(DEFAULT_GESTURE);
+
+// Fixed values for the four envelope components. When a component is ticked
+// ("on"), it uses this preset value and its gesture line is skipped, so the
+// remaining lines shift up to fill the unticked components.
+const SLOT_NAMES = ['attack', 'decay', 'hold', 'release'];
+const DEFAULT_FIXED = {
+  attack:  { on: true,  value: 5,    vol: 100, max: 2000 },
+  decay:   { on: true,  value: 120,  vol: 60,  max: 3000 },
+  hold:    { on: true,  value: 250,  vol: 60,  max: 5000 },
+  release: { on: true,  value: 1200, vol: 0,   max: 5000 },
+};
+let FIXED = clone(DEFAULT_FIXED);
+
+// Which envelope slot (0-3) the index-th gesture line fills, skipping fixed
+// components in order.
+function lineSlotFor(lineIndex) {
+  let li = 0;
+  for (let slot = 0; slot < 4; slot++) {
+    if (FIXED[SLOT_NAMES[slot]].on) continue;
+    if (li === lineIndex) return slot;
+    li++;
+  }
+  return null;
+}
+
+// Only as many gesture lines as there are unticked (gesture-driven) slots.
+function gestureLineLimit() {
+  return SLOT_NAMES.filter(n => !FIXED[n].on).length;
+}
+
+// Volume (gain) comes from where the gesture starts on screen: far left is
+// quietest, far right is loudest. The range spans the former volume clamp
+// (0.01 .. 0.5).
+const VOL_MIN = 0.01, VOL_MAX = 0.5;
+function volumeFromStartX(sx) {
+  return mix(VOL_MIN, VOL_MAX, clamp01(sx / W));
+}
+
+// SIMPLIFIED ENVELOPE: the first line's length (px) is its time in ms; every
+// later line uses only its X change (px) for time, so a line can stay short in
+// time while still sweeping a large volume. A line's Y change sets the volume
+// change across that duration (upward = louder, downward = quieter). Volume
+// never exceeds the gain chosen by the start position; the attack line
+// (line 1) always ramps up to that gain.
+function lineLengthPx(seg) {
+  return Math.hypot(seg.x1 - seg.x0, seg.y1 - seg.y0);
+}
+
+// Gesture line time: the first line uses its full length; every later line
+// uses the absolute X change (so time is decoupled from the Y volume sweep),
+// scaled by that component's own distance sensitivity (ms/px) and capped by
+// the component's Max setting.
+function lineTimeForSlot(seg, slot, lineIndex) {
+  const px = lineIndex === 0 ? lineLengthPx(seg) : Math.abs(seg.x1 - seg.x0);
+  const tpp = GESTURE.timePerPx[SLOT_NAMES[slot]];
+  return Math.min(Math.round(px * tpp), FIXED[SLOT_NAMES[slot]].max);
+}
+const VOL_PX_REF = 400;   // px of Y change that sweeps the whole gain range
+const DEFAULT_TTP = 12;   // default ms/px; the baseline the volume sweep scales against
+const FADE_MS = 150;      // smooth fade-out to 0 when a sequence ends (no clip)
+const TAP_ATTACK_MS = 60; // quick attack for a tap with no line
+
+// The component's sensitivity (ms/px) scales its volume sweep too: a higher
+// sensitivity means the same Y change produces a larger volume change. The
+// reference is the number of px of Y change that sweeps the whole gain range.
+function volPxRef(slot) {
+  return VOL_PX_REF * (DEFAULT_TTP / GESTURE.timePerPx[SLOT_NAMES[slot]]);
+}
+
+// Fixed tree growth: trunk grows during attack, branches during decay+hold,
+// leaves & fruit during release — each at GESTURE.growSpeed. These are the
+// note durations that fully grow each part at 1x speed, so longer note
+// segments grow more, not faster.
+const GROW_TRUNK_FULL_MS = 20;    // attack ms for a full trunk at 1x
+const GROW_BRANCH_FULL_MS = 500;  // decay+hold ms for full branches at 1x
+const GROW_FOLIAGE_FULL_MS = 1200; // release ms for full foliage at 1x
+
+// Stacked per-component readout in the top-left. One row per envelope slot
+// (attack, decay, hold, release) with a progress bar that fills while that
+// component's segment plays. Committed gesture lines keep their row; the
+// in-progress line updates its slot's value live.
+let hudRows = [];   // committed gesture rows: { slot, name, timeMs, dy }
+function hudLineText(stat, timeMs, pct) {
+  return `${stat} · ${Math.round(timeMs)}ms · ${Math.round(pct)}%`;
+}
+
+// The level each slot's segment ends at, as a % of the gesture's gain ceiling
+// (same meaning as the fixed "End vol" setting). Gesture slots chain from the
+// previous slot's end level; the attack always ramps to full gain.
+function slotEndPct(slot, live) {
+  let pct = 0;
+  for (let s = 0; s <= slot; s++) {
+    if (s === 0) {
+      pct = FIXED.attack.on ? FIXED.attack.vol : 100;
+    } else if (FIXED[SLOT_NAMES[s]].on) {
+      pct = FIXED[SLOT_NAMES[s]].vol;
+    } else {
+      const row = hudRows.find(r => r.slot === s);
+      let dy = 0;
+      if (row) dy = row.dy;
+      else if (live && live.slot === s) dy = live.dy;
+      pct = Math.max(0, Math.min(100, pct + (dy / volPxRef(s)) * 100));
+    }
+  }
+  return pct;
+}
+
+// Playback timing for the progress bars. Slots are scheduled in order (they
+// chain), so each slot's window is [noteStart + elapsed, ... + dur].
+const hudState = {
+  on: false,                  // a note is playing
+  noteStart: 0,               // performance.now() when the note started
+  elapsed: 0,                 // cumulative ms of slots scheduled so far
+  startOff: [0, 0, 0, 0],     // ms from note start each slot begins
+  dur: [null, null, null, null],  // duration of each slot (null = not scheduled yet)
+};
+function hudReset() {
+  hudState.on = false;
+  hudState.elapsed = 0;
+  hudState.startOff = [0, 0, 0, 0];
+  hudState.dur = [null, null, null, null];
+}
+function hudSlot(slot, durMs) {
+  if (slot < 0 || slot > 3 || hudState.dur[slot] != null) return;
+  hudState.startOff[slot] = hudState.elapsed;
+  hudState.dur[slot] = durMs;
+  hudState.elapsed += durMs;
+}
+
+function hudProgress(slot, now) {
+  if (!hudState.on || hudState.dur[slot] == null) return 0;
+  return clamp01((now - hudState.noteStart - hudState.startOff[slot]) / hudState.dur[slot]);
+}
+
+function renderHud(now, live) {
+  now = typeof now === 'number' ? now : performance.now();
+  let html = '';
+  let show = hudState.on || hudRows.length > 0 || !!live;
+  for (let s = 0; s < 4; s++) {
+    const name = SLOT_NAMES[s];
+    const fixed = FIXED[name].on;
+    let text;
+    if (fixed) {
+      text = `${name} · ${FIXED[name].value}ms · ${FIXED[name].vol}%`;
+    } else {
+      const row = hudRows.find(r => r.slot === s);
+      if (row) text = hudLineText(row.name, row.timeMs, slotEndPct(s, live));
+      else if (live && live.slot === s) text = hudLineText(live.name, live.timeMs, slotEndPct(s, live));
+      else text = `${name} · —`;
+    }
+    const p = hudProgress(s, now);
+    html += `<div${fixed ? ' class="hud-fixed"' : ''}>${text}<div class="hud-bar"><div class="hud-fill" style="width:${(p * 100).toFixed(1)}%"></div></div></div>`;
+  }
+  statHud.innerHTML = html;
+  statHud.style.opacity = show ? '1' : '0';
+}
+
+function commitHudLine(slot, name, timeMs, dy) {
+  hudRows.push({ slot, name, timeMs, dy });
+}
+function clearHud() {
+  hudRows = [];
+  hudReset();
+  renderHud(performance.now(), null);
+}
+
+// Refresh the top-left display each frame: keeps the progress bars in sync
+// with the playing envelope and shows the value of the line being drawn.
+function refreshHud(now) {
+  let live = null;
+  if (dragState && mode === 'plant') {
+    const nextSlot = lineSlotFor(dragState.segments.length);
+    if (nextSlot != null) {
+      const moved = Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD;
+      if (moved) {
+        const seg = { x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY };
+        live = { slot: nextSlot, name: SLOT_NAMES[nextSlot], timeMs: lineTimeForSlot(seg, nextSlot, dragState.segments.length), dy: seg.y0 - seg.y1 };
+      }
+    }
+  }
+  renderHud(now, live);
+}
+
+// Ring colors per line (attack, decay, hold, release).
+const LINE_COLORS = ['#2e5d34', '#d97706', '#3a5ba0', '#b3462c'];
+function pushLineIndicator(seg, index, statMs) {
+  const dur = Math.min(1000, Math.max(250, statMs || 600));
+  lineIndicators.push({ x: seg.x0, y: seg.y0, born: performance.now(), dur, color: LINE_COLORS[index] });
+}
 
 // Hard limits for the per-quality min/max settings the player can choose.
 // Min can never be 0, so each quality's floor is a small positive value.
@@ -800,49 +1176,6 @@ function gestureSound(segments) {
   return out;
 }
 
-// Contributions of a single vector (by 0-based index) from its assigned X/Y.
-function vectorSound(seg, vecIndex) {
-  const out = {};
-  for (const ax of ['x', 'y']) {
-    const q = GESTURE.assign[ASSIGN_SLOTS[vecIndex * 2 + (ax === 'x' ? 0 : 1)]];
-    if (!q) continue;
-    const per100 = GESTURE.sens[q] / SENS_UI[q].div;   // real units per 100px
-    const value = Math.min(GESTURE.max[q], Math.max(GESTURE.min[q], (axisPx(seg, ax) * per100) / 100));
-    out[q] = q === 'volume' ? value : Math.round(value);
-  }
-  return out;
-}
-
-const SHORT_QL = { volume: 'vol', attack: 'atk', decay: 'dec', sustain: 'sus', hold: 'hld', release: 'rel' };
-
-// Small label showing a vector's own contributions near the middle of its line.
-function drawVectorLabel(seg, idx, isLive) {
-  const snd = vectorSound(seg, idx);
-  const parts = [];
-  for (const q of QUALITIES) {
-    if (snd[q] == null) continue;
-    parts.push(`${SHORT_QL[q]} ${q === 'volume' ? snd[q].toFixed(2) : snd[q]}${GESTURE.unit[q]}`);
-  }
-  if (!parts.length) return;
-  const label = parts.join(' · ');
-  const mx = (seg.x0 + seg.x1) / 2, my = (seg.y0 + seg.y1) / 2;
-  const dx = seg.x1 - seg.x0, dy = seg.y1 - seg.y0;
-  const len = Math.hypot(dx, dy) || 1;
-  const ox = (-dy / len) * 16, oy = (dx / len) * 16;
-  const tw = ctx.measureText(label).width;
-  let lx = mx + ox + 4, ly = my + oy + 3;
-  if (lx + tw + 4 > W) lx = W - tw - 6;
-  if (lx < 4) lx = 4;
-  if (ly < 10) ly = 14;
-  if (ly > H - 4) ly = H - 8;
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.beginPath();
-  ctx.roundRect(lx - 3, ly - 10, tw + 6, 13, 4);
-  ctx.fill();
-  ctx.fillStyle = isLive ? '#3a5ba0' : '#2e5d34';
-  ctx.fillText(label, lx, ly);
-}
-
 function gestureMoved(g) {
   if (Math.abs(g.curX - g.segX) + Math.abs(g.curY - g.segY) > TAP_THRESHOLD) return true;
   for (const s of g.segments) {
@@ -851,12 +1184,100 @@ function gestureMoved(g) {
   return false;
 }
 
+// A line is done when the finger lifts or the gesture turns sharply. Each
+// committed line feeds the note's envelope in order: 1st = attack, 2nd =
+// decay, 3rd = hold, 4th = release. The first line starts the note; every
+// later line schedules its segment onto the running note.
+const TURN_DOT = 0.3;        // cos(angle); a sharper turn than ~72° ends a line
+const TURN_MIN_LINE = 30;    // px the current line needs before a turn can end it
+
+function commitLine(ds, t1) {
+  if (ds.segments.length >= gestureLineLimit()) return null;
+  if (Math.abs(ds.curX - ds.segX) + Math.abs(ds.curY - ds.segY) <= TAP_THRESHOLD) return null;
+  const seg = { x0: ds.segX, y0: ds.segY, x1: ds.curX, y1: ds.curY, t0: ds.segT0, t1 };
+  ds.segments.push(seg);
+  const index = ds.segments.length - 1;
+  ds.segX = ds.curX; ds.segY = ds.curY;
+  ds.segT0 = t1;
+  applyLineToNote(ds, seg, index);
+  return seg;
+}
+
+function applyLineToNote(ds, seg, index) {
+  const slot = lineSlotFor(index);
+  if (slot == null) return;   // no gesture slot left (all remaining are fixed)
+  const name = SLOT_NAMES[slot];
+  const time = lineTimeForSlot(seg, slot, index);
+  if (slot === 0) {
+    // Attack: always ramps from silence up to the gain over the line's length.
+    ds.attackRegistered = true;
+    ds.attack = time;
+    startGestureNote(ds.startX, ds.startY, ds.attack);
+    scheduleFixedRun(1);
+    pushLineIndicator(seg, slot, ds.attack);
+  } else {
+    ds[name] = time;
+    hudSlot(slot, time);
+    scheduleVolumeSegment(time, seg, slot === 3, slot);
+    scheduleFixedRun(slot + 1);
+    pushLineIndicator(seg, slot, time);
+  }
+  commitHudLine(slot, name, time, seg.y0 - seg.y1);
+}
+
+// Ends the current line when the last movement sharply diverges from the
+// line's overall direction.
+function checkDirectionChange(ds) {
+  const limit = gestureLineLimit();
+  if (limit === 0) return;   // no gesture lines exist, turns do nothing
+  const ldx = ds.curX - ds.segX, ldy = ds.curY - ds.segY;
+  const ll = Math.hypot(ldx, ldy);
+  const mdx = ds.curX - ds.prevX, mdy = ds.curY - ds.prevY;
+  const ml = Math.hypot(mdx, mdy);
+  if (ll < TURN_MIN_LINE || ml < 4) return;
+  const dot = (ldx * mdx + ldy * mdy) / (ll * ml);
+  if (dot < TURN_DOT) {
+    // A sharp turn ends the current line. On the last line there is nothing to
+    // start next, so the turn counts as releasing the gesture: commit the line
+    // and plant the tree.
+    if (ds.segments.length >= limit - 1) {
+      finishPlantGesture();
+    } else {
+      commitLine(ds, ds.lastMove);
+    }
+  }
+}
+
+// End a plant gesture the same way a finger lift does: commit the final live
+// line, register a tap-attack if nothing was drawn, then plant the tree.
+function finishPlantGesture() {
+  if (!dragState) return;
+  commitLine(dragState, dragState.lastMove);
+  // A tap (no line drawn) still registers a short attack and starts a note.
+  if (!dragState.attackRegistered) {
+    dragState.attackRegistered = true;
+    dragState.attack = TAP_ATTACK_MS;
+    startGestureNote(dragState.startX, dragState.startY, dragState.attack);
+    scheduleFixedRun(1);
+    commitHudLine(0, 'attack', dragState.attack, 0);
+  }
+  const sound = gestureMoved(dragState) ? gestureSound(dragState.segments) : null;
+  plantAt(dragState.startX, dragState.startY, dragState.segments, sound, {
+    attack: dragState.attack,
+    decay: dragState.decay,
+    hold: dragState.hold,
+    release: dragState.release,
+  });
+  dragState = null;
+}
+
 const modeBtn = document.getElementById('modeBtn');
 function updateModeBtn() {
   modeBtn.textContent = mode === 'plant' ? '🌱 Planting' : '🧭 Navigating';
   modeBtn.classList.toggle('nav', mode === 'nav');
 }
 modeBtn.addEventListener('click', () => {
+  if (mode === 'plant') { dragState = null; stopGestureNote(); }
   mode = mode === 'plant' ? 'nav' : 'plant';
   updateModeBtn();
   document.getElementById('hint').style.opacity = '0';
@@ -870,15 +1291,35 @@ canvas.addEventListener('pointerdown', e => {
 
   if (mode === 'plant') {
     if (pointers.size === 1) {
+      clearHud();
       dragState = {
         startX: e.clientX, startY: e.clientY,   // where the tree is planted
         segX: e.clientX, segY: e.clientY,       // start of the current line
         curX: e.clientX, curY: e.clientY,
+        prevX: e.clientX, prevY: e.clientY,     // last pointer position (for turns)
         segments: [],
         lastMove: performance.now(),
+        segT0: performance.now(),               // when the current line began
+        attack: null, attackRegistered: false,  // set when line 1 ends
+        decay: null,                            // set when line 2 ends
+        hold: null,                             // set when line 3 ends
+        release: null,                          // set when line 4 ends
       };
+      // Fixed components play their preset and skip their gesture line. If the
+      // attack is fixed, the note begins now; gesture lines then fill the
+      // remaining unticked components in order.
+      if (FIXED.attack.on) {
+        dragState.attack = FIXED.attack.value;
+        dragState.attackRegistered = true;
+        startGestureNote(e.clientX, e.clientY, FIXED.attack.value, FIXED.attack.vol);
+        scheduleFixedRun(1);
+      }
+      if (FIXED.decay.on) dragState.decay = FIXED.decay.value;
+      if (FIXED.hold.on) dragState.hold = FIXED.hold.value;
+      if (FIXED.release.on) dragState.release = FIXED.release.value;
     } else {
       dragState = null;  // a second finger cancels the plant gesture
+      stopGestureNote();
     }
   } else {
     if (pointers.size === 1) {
@@ -898,6 +1339,7 @@ canvas.addEventListener('pointermove', e => {
 
   if (mode === 'plant') {
     if (pointers.size === 1 && dragState) {
+      dragState.prevX = dragState.curX; dragState.prevY = dragState.curY;
       dragState.curX = e.clientX; dragState.curY = e.clientY;
       dragState.lastMove = performance.now();
     }
@@ -924,16 +1366,7 @@ canvas.addEventListener('pointerup', e => {
 
   if (mode === 'plant') {
     if (pointers.size === 0) {
-      if (dragState) {
-        // Commit the final live segment, then plant.
-        if (dragState.segments.length < GESTURE.maxVectors &&
-            Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD) {
-          dragState.segments.push({ x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY });
-        }
-        const sound = gestureMoved(dragState) ? gestureSound(dragState.segments) : null;
-        plantAt(dragState.startX, dragState.startY, sound);
-      }
-      dragState = null;
+      finishPlantGesture();
     }
   } else {
     pinchState = null;
@@ -950,7 +1383,7 @@ canvas.addEventListener('pointercancel', e => {
   pointers.delete(e.pointerId);
   pinchState = null;
   if (mode === 'plant') {
-    if (pointers.size === 0) dragState = null;
+    if (pointers.size === 0) { dragState = null; stopGestureNote(); }
   } else if (pointers.size === 1) {
     const p = [...pointers.values()][0];
     navState = { startX: p.x, startY: p.y, curX: p.x, curY: p.y };
@@ -970,7 +1403,7 @@ const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
 // sky = two octaves higher, snapped to the scale), so the key here only sets
 // the root. The drag gesture can override attack/hold for individual drops.
 const DEFAULT_CHIME = {
-  start:  { note: 'C4', wave: 'sine', blend: 0, blendTo: null, volume: 0.12, attack: 5,   decay: 100, sustain: 90, hold: 0,   release: 810 },
+  start:  { note: 'C4', wave: 'sine', blend: 0.5, blendTo: 'triangle', volume: 0.12, attack: 5,   decay: 100, sustain: 90, hold: 0,   release: 810 },
   finish: { note: 'C4', wave: 'sine', blend: 0, blendTo: null, attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
 };
 let CHIME_SETTINGS = clone(DEFAULT_CHIME);
@@ -1007,13 +1440,13 @@ function buildBlendWave(ctx, typeA, typeB, t) {
 }
 
 /* ---------- Persistence ---------- */
-const STORAGE_KEY = 'growingTrees.settings.v1';
+const STORAGE_KEY = 'growingTrees.settings.v4';
 const DEFAULT_PREFERENCES = { startMode: 'plant' };
 let PREFERENCES = clone(DEFAULT_PREFERENCES);
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, prefs: PREFERENCES }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, fixed: FIXED, prefs: PREFERENCES }));
     return true;
   } catch (e) { return false; }
 }
@@ -1031,6 +1464,14 @@ function loadSavedSettings() {
     if (d.gesture) {
       if (d.gesture.pause != null) g.pause = d.gesture.pause;
       if (d.gesture.maxVectors != null) g.maxVectors = d.gesture.maxVectors;
+      if (d.gesture.timePerPx != null) {
+        if (typeof d.gesture.timePerPx === 'object') {
+          g.timePerPx = Object.assign({}, g.timePerPx, d.gesture.timePerPx);
+        } else {
+          g.timePerPx = { attack: d.gesture.timePerPx, decay: d.gesture.timePerPx, hold: d.gesture.timePerPx, release: d.gesture.timePerPx };
+        }
+      }
+      if (d.gesture.growSpeed != null) g.growSpeed = d.gesture.growSpeed;
       for (const key of ['assign', 'sens', 'min', 'max']) {
         if (d.gesture[key]) g[key] = Object.assign({}, g[key], d.gesture[key]);
       }
@@ -1042,6 +1483,13 @@ function loadSavedSettings() {
       }
     }
     GESTURE = g;
+    const fx = clone(DEFAULT_FIXED);
+    if (d.fixed) {
+      for (const name of SLOT_NAMES) {
+        if (d.fixed[name]) fx[name] = Object.assign({}, fx[name], d.fixed[name]);
+      }
+    }
+    FIXED = fx;
     PREFERENCES = clone(DEFAULT_PREFERENCES);
     if (d.prefs) PREFERENCES.startMode = d.prefs.startMode === 'nav' ? 'nav' : 'plant';
     return true;
@@ -1051,13 +1499,14 @@ function loadSavedSettings() {
 function resetToDefaults() {
   CHIME_SETTINGS = clone(DEFAULT_CHIME);
   GESTURE = clone(DEFAULT_GESTURE);
+  FIXED = clone(DEFAULT_FIXED);
   PREFERENCES = clone(DEFAULT_PREFERENCES);
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   loadLevelUI(currentLevel);
-  loadGestureUI();
-  syncSensUI();
-  syncPauseUI();
-  syncMinMaxUI();
+  /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
+  syncTimePerPxUI();
+  syncGrowSpeedUI();
+  syncFixedUI();
   document.getElementById('startMode').value = PREFERENCES.startMode;
 }
 
@@ -1096,13 +1545,7 @@ function chime(level, overrides) {
   gain.connect(masterGain);
 
   const osc = audioCtx.createOscillator();
-  if (s.blend > 0) {
-    const idx = WAVE_ORDER.indexOf(s.wave);
-    const next = WAVE_ORDER.includes(s.blendTo) ? s.blendTo : WAVE_ORDER[(idx + 1) % WAVE_ORDER.length];
-    osc.setPeriodicWave(buildBlendWave(audioCtx, s.wave, next, Math.min(1, s.blend)));
-  } else {
-    osc.type = s.wave;
-  }
+  setOscWave(osc, s);
   osc.frequency.value = noteToFreq(s.note);
   osc.connect(gain);
   osc.start(t0);
@@ -1111,6 +1554,192 @@ function chime(level, overrides) {
   setTimeout(() => {
     try { osc.disconnect(); gain.disconnect(); } catch (e) {}
   }, (tEnd - t0 + 0.5) * 1000);
+}
+
+function setOscWave(osc, s) {
+  if (s.blend > 0) {
+    const idx = WAVE_ORDER.indexOf(s.wave);
+    const next = WAVE_ORDER.includes(s.blendTo) ? s.blendTo : WAVE_ORDER[(idx + 1) % WAVE_ORDER.length];
+    osc.setPeriodicWave(buildBlendWave(audioCtx, s.wave, next, Math.min(1, s.blend)));
+  } else {
+    osc.type = s.wave;
+  }
+}
+
+/* ---- Gesture note: starts when the first line registers, then each line
+   schedules a volume segment onto the running note. Line length = time (ms),
+   Y change = volume change, clamped to never exceed the start gain. ---- */
+let activeNote = null;   // { osc, gain, vol, level, cleanupTimer }
+
+function startGestureNote(sx, sy, atkMs, volPct) {
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return;
+  stopGestureNote();
+  hudReset();
+  hudState.on = true;
+  hudState.noteStart = performance.now();
+  const s = CHIME_SETTINGS.start;
+  const vol = volumeFromStartX(sx);
+  const atk = Math.max(0.005, (atkMs || TAP_ATTACK_MS) / 1000);
+  hudSlot(0, Math.round(atk * 1000));
+  const peak = vol * (volPct != null ? Math.max(0, Math.min(100, volPct)) / 100 : 1);
+  const t0 = audioCtx.currentTime;
+  const gain = audioCtx.createGain();
+  const g = gain.gain;
+  // The note begins with the attack ramping from silence up to its peak level.
+  g.setValueAtTime(0, t0);
+  g.linearRampToValueAtTime(peak, t0 + atk);
+  gain.connect(masterGain);
+
+  const osc = audioCtx.createOscillator();
+  setOscWave(osc, s);
+  osc.frequency.value = noteToFreq(pitchFor(sx, sy));
+  osc.connect(gain);
+  osc.start(t0);
+
+  activeNote = { osc, gain, vol, level: peak, segEnd: t0 + atk, scheduledSlots: [true, false, false, false], cleanupTimer: null };
+}
+
+// One line's volume segment: each segment chains from the END of the previous
+// one, so the slot after the attack ramps from full gain, and so on. The
+// ramp's change comes from the line's Y change, clamped to [0, vol]. If this
+// is the last line (release), the note fades out after the ramp.
+function scheduleVolumeSegment(durMs, seg, stopAtEnd, slot) {
+  if (!activeNote) return null;
+  const now = audioCtx.currentTime;
+  const g = activeNote.gain.gain;
+  const startTime = Math.max(now, activeNote.segEnd || now);   // let the last ramp finish
+  const startLevel = activeNote.level;                         // where the last segment ended
+  const dy = seg.y0 - seg.y1;   // screen Y grows downward: - upward = louder, + downward = quieter
+  const delta = (dy / volPxRef(slot)) * activeNote.vol;
+  const target = Math.max(0, Math.min(activeNote.vol, startLevel + delta));
+  const end = startTime + Math.max(0.005, durMs / 1000);
+  g.setValueAtTime(startLevel, startTime);
+  g.linearRampToValueAtTime(target, end);
+  activeNote.level = target;
+  activeNote.segEnd = end;
+  if (stopAtEnd) fadeOutAndStop(end);
+  return { target, delta };
+}
+
+// Fixed segments: a generic ramp to a target level, a hold, and a fade-out,
+// all chained onto the running note.
+function scheduleRampTo(target, durMs) {
+  if (!activeNote) return;
+  const now = audioCtx.currentTime;
+  const g = activeNote.gain.gain;
+  const startTime = Math.max(now, activeNote.segEnd || now);
+  const startLevel = activeNote.level;
+  const end = startTime + Math.max(0.005, durMs / 1000);
+  g.setValueAtTime(startLevel, startTime);
+  g.linearRampToValueAtTime(target, end);
+  activeNote.level = target;
+  activeNote.segEnd = end;
+}
+
+// Schedule any run of fixed slots starting at fromSlot, stopping when a
+// gesture slot is reached (it waits for its line).
+function scheduleFixedRun(fromSlot) {
+  if (!activeNote) return;
+  for (let slot = fromSlot; slot < 4; slot++) {
+    if (activeNote.scheduledSlots[slot]) continue;
+    if (!FIXED[SLOT_NAMES[slot]].on) return;
+    scheduleFixedSlot(slot);
+    activeNote.scheduledSlots[slot] = true;
+  }
+}
+
+function scheduleFixedSlot(slot) {
+  const name = SLOT_NAMES[slot];
+  const f = FIXED[name];
+  const vol = activeNote.vol * (f.vol / 100);   // target level, as % of gain
+  hudSlot(slot, f.value);
+  if (name === 'decay') {
+    scheduleRampTo(vol, f.value);
+  } else if (name === 'hold') {
+    scheduleRampTo(vol, f.value);
+  } else if (name === 'release') {
+    scheduleRampTo(vol, f.value);
+    fadeOutAndStop(activeNote.segEnd);
+  }
+}
+
+// Always end on a smooth fade to 0 so the note never clips when the sequence
+// finishes.
+function fadeOutAndStop(fromTime) {
+  if (!activeNote) return;
+  const g = activeNote.gain.gain;
+  const end = fromTime + FADE_MS / 1000;
+  g.linearRampToValueAtTime(0, end);
+  scheduleStop(end);
+}
+
+// Quick (but smoothed) dropoff used when a later line was never drawn. It
+// waits for the currently-scheduled ramp to finish, so the attack (or last
+// segment) plays out in full before the note fades.
+function quickDropoff() {
+  if (!activeNote) return;
+  const now = audioCtx.currentTime;
+  const g = activeNote.gain.gain;
+  const segEnd = activeNote.segEnd && activeNote.segEnd > now ? activeNote.segEnd : now;
+  g.setValueAtTime(activeNote.level, segEnd);
+  fadeOutAndStop(segEnd);
+}
+
+// A gesture is complete: if any component slot was left unfilled (no line was
+// drawn for a gesture slot, or a fixed run was cut off by a gap), jump straight
+// to the release component when it has a preset value set, so the note still
+// ends with a proper release instead of a quick dropoff.
+function jumpToReleaseIfMissing() {
+  if (!activeNote) return false;
+  if (activeNote.scheduledSlots[3]) return false;
+  if (!FIXED.release.on) return false;
+  for (let slot = 1; slot < 3; slot++) {
+    if (!activeNote.scheduledSlots[slot]) {
+      scheduleFixedSlot(3);
+      activeNote.scheduledSlots[3] = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Gesture end (finger lift): the release line schedules its own stop; without
+// it, jump to a preset release when a component was missed, else drop off
+// quickly from the current level.
+function endGestureNote() {
+  if (!activeNote) return;
+  if (!activeNote.releaseScheduled && !jumpToReleaseIfMissing()) quickDropoff();
+  activeNote = null;
+}
+
+function scheduleStop(end) {
+  if (!activeNote) return;
+  activeNote.releaseScheduled = true;
+  const { osc, gain } = activeNote;
+  try { osc.stop(end + 0.05); } catch (e) {}
+  clearTimeout(activeNote.cleanupTimer);
+  activeNote.cleanupTimer = setTimeout(() => {
+    try { osc.disconnect(); gain.disconnect(); } catch (e) {}
+  }, (end - audioCtx.currentTime + 0.5) * 1000);
+}
+
+// Cancel a gesture: quickly fade the note out instead of leaving it ringing.
+function stopGestureNote() {
+  if (!activeNote) return;
+  const { osc, gain } = activeNote;
+  clearTimeout(activeNote.cleanupTimer);
+  try {
+    const now = audioCtx.currentTime;
+    const g = gain.gain;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(0, now + 0.03);
+    osc.stop(now + 0.05);
+    setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} }, 200);
+  } catch (e) {}
+  activeNote = null;
 }
 
 function initAudio() {
@@ -1177,6 +1806,7 @@ function fmt(f, v) { return f === 'volume' ? v.toFixed(2) : v + SETTINGS_META[f]
 function loadLevelUI(level) {
   const s = CHIME_SETTINGS[level];
   noteSel.value = s.note.slice(0, -1);
+  /* COMMENTED OUT - wave/blend/ADSR defaults are gesture-driven now.
   waveSel.value = s.wave;
   document.getElementById('blend').value = Math.round((s.blend || 0) * 100);
   document.getElementById('blendVal').textContent = Math.round((s.blend || 0) * 100) + '%';
@@ -1190,6 +1820,7 @@ function loadLevelUI(level) {
     el.value = s[f] / meta.scale;
     document.getElementById(f + 'Val').textContent = fmt(f, s[f]);
   }
+  */
 }
 
 function previewChime() {
@@ -1202,6 +1833,7 @@ noteSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].note = noteSel.value + NOTE_OCTAVE;
   previewChime();
 });
+/* COMMENTED OUT - wave/blend/ADSR defaults are gesture-driven now.
 waveSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].wave = waveSel.value;
   // Keep the blend target sensible: if it's unset or now equals the base wave,
@@ -1224,11 +1856,13 @@ blendToSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].blendTo = blendToSel.value;
   previewChime();
 });
+*/
 const startModeSel = document.getElementById('startMode');
 startModeSel.value = PREFERENCES.startMode;
 startModeSel.addEventListener('change', () => {
   PREFERENCES.startMode = startModeSel.value;
 });
+/* COMMENTED OUT - ADSR defaults are gesture-driven now.
 for (const f of ENV_FIELDS) {
   const el = document.getElementById(f);
   el.addEventListener('input', () => {
@@ -1239,8 +1873,10 @@ for (const f of ENV_FIELDS) {
   });
   el.addEventListener('change', () => previewChime());
 }
+*/
 
-/* ---- Gesture mapping UI ---- */
+/* COMMENTED OUT - each vector now auto-maps to a sound quality.
+   ---- Gesture mapping UI ----
 const QUALITY_LABELS = { volume: 'Volume', attack: 'Attack', decay: 'Decay', sustain: 'Sustain', hold: 'Hold', release: 'Release' };
 const vecSels = {};
 
@@ -1289,7 +1925,9 @@ for (const slot of ASSIGN_SLOTS) {
   });
   vecSels[slot] = el;
 }
+*/
 
+/* COMMENTED OUT - sensitivity settings are removed; values are hardcoded.
 function sensLabel(q, raw) {
   return (raw / SENS_UI[q].div) + GESTURE.unit[q] + '/100px';
 }
@@ -1311,7 +1949,86 @@ function syncSensUI() {
   }
 }
 syncSensUI();
+*/
 
+/* ---- Distance -> time (per component) ---- */
+function sensLabel(tpp) {
+  // Same sensitivity drives the volume sweep: % of the gain range changed per
+  // 100px of Y = tpp * 10000 / (VOL_PX_REF * DEFAULT_TTP).
+  const pct = (tpp * 10000) / (VOL_PX_REF * DEFAULT_TTP);
+  const rounded = Math.round(pct * 10) / 10;
+  const pctStr = rounded % 1 === 0 ? String(rounded) : rounded.toFixed(1);
+  return `${tpp} ms/px · ${pctStr}%/100px`;
+}
+for (const name of SLOT_NAMES) {
+  const el = document.getElementById('tpp-' + name);
+  el.addEventListener('input', () => {
+    GESTURE.timePerPx[name] = +el.value;
+    document.getElementById('tpp-' + name + 'Val').textContent = sensLabel(el.value);
+  });
+}
+function syncTimePerPxUI() {
+  for (const name of SLOT_NAMES) {
+    const el = document.getElementById('tpp-' + name);
+    el.value = GESTURE.timePerPx[name];
+    document.getElementById('tpp-' + name + 'Val').textContent = sensLabel(GESTURE.timePerPx[name]);
+  }
+}
+syncTimePerPxUI();
+
+/* ---- Growth speed ---- */
+const growSpeedEl = document.getElementById('growSpeed');
+growSpeedEl.addEventListener('input', () => {
+  GESTURE.growSpeed = +growSpeedEl.value;
+  document.getElementById('growSpeedVal').textContent = (+growSpeedEl.value).toFixed(2) + 'x';
+});
+function syncGrowSpeedUI() {
+  growSpeedEl.value = GESTURE.growSpeed;
+  document.getElementById('growSpeedVal').textContent = GESTURE.growSpeed.toFixed(2) + 'x';
+}
+syncGrowSpeedUI();
+
+/* ---- Fixed values ---- */
+for (const name of SLOT_NAMES) {
+  const cb = document.getElementById('fx-' + name);
+  const tEl = document.getElementById('fx-' + name + 'T');
+  const volEl = document.getElementById('fx-' + name + 'Vol');
+  const maxEl = document.getElementById('fx-' + name + 'Max');
+  cb.addEventListener('change', () => {
+    FIXED[name].on = cb.checked;
+    document.getElementById('tpp-' + name).disabled = cb.checked;
+  });
+  tEl.addEventListener('input', () => {
+    FIXED[name].value = +tEl.value;
+    document.getElementById('fx-' + name + 'TVal').textContent = tEl.value + 'ms';
+  });
+  volEl.addEventListener('input', () => {
+    FIXED[name].vol = +volEl.value;
+    document.getElementById('fx-' + name + 'VolVal').textContent = volEl.value + '%';
+  });
+  maxEl.addEventListener('input', () => {
+    FIXED[name].max = +maxEl.value;
+    document.getElementById('fx-' + name + 'MaxVal').textContent = maxEl.value + 'ms';
+  });
+}
+function syncFixedUI() {
+  for (const name of SLOT_NAMES) {
+    document.getElementById('fx-' + name).checked = FIXED[name].on;
+    const tEl = document.getElementById('fx-' + name + 'T');
+    tEl.value = FIXED[name].value = Math.max(1, Math.min(5000, FIXED[name].value));
+    document.getElementById('fx-' + name + 'TVal').textContent = FIXED[name].value + 'ms';
+    const volEl = document.getElementById('fx-' + name + 'Vol');
+    volEl.value = FIXED[name].vol;
+    document.getElementById('fx-' + name + 'VolVal').textContent = FIXED[name].vol + '%';
+    const maxEl = document.getElementById('fx-' + name + 'Max');
+    maxEl.value = FIXED[name].max = Math.max(1, Math.min(5000, FIXED[name].max));
+    document.getElementById('fx-' + name + 'MaxVal').textContent = FIXED[name].max + 'ms';
+    document.getElementById('tpp-' + name).disabled = FIXED[name].on;
+  }
+}
+syncFixedUI();
+
+/* COMMENTED OUT - new lines are started by a direction change only.
 const pauseEl = document.getElementById('pause');
 pauseEl.addEventListener('input', () => {
   GESTURE.pause = +pauseEl.value;
@@ -1322,8 +2039,10 @@ function syncPauseUI() {
   document.getElementById('pauseVal').textContent = GESTURE.pause + 'ms';
 }
 syncPauseUI();
+*/
 
-/* ---- Min / Max per quality ---- */
+/* COMMENTED OUT - gesture values are clamped to sensible built-in ranges.
+   ---- Min / Max per quality ----
 function mmLabel(q, v) { return q === 'volume' ? v.toFixed(2) : v + GESTURE.unit[q]; }
 
 for (const q of QUALITIES) {
@@ -1360,10 +2079,12 @@ function syncMinMaxUI() {
 }
 syncMinMaxUI();
 
+/* COMMENTED OUT - the gesture now determines the mapping automatically.
 function loadGestureUI() {
   for (const slot of ASSIGN_SLOTS) vecSels[slot].value = GESTURE.assign[slot] || '';
 }
 loadGestureUI();
+*/
 
 settingsBtn.addEventListener('click', () => {
   initAudio();
@@ -1373,7 +2094,9 @@ settingsBtn.addEventListener('click', () => {
     saveSettings();
   } else {
     loadLevelUI(currentLevel);
-    loadGestureUI();
+    /* loadGestureUI(); */
+    syncTimePerPxUI();
+    syncFixedUI();
   }
 });
 document.getElementById('closeSettings').addEventListener('click', () => {
@@ -1392,6 +2115,8 @@ document.getElementById('resetDefaults').addEventListener('click', () => {
 document.getElementById('clear').addEventListener('click', () => {
   liveTrees.length = 0;
   bakedTrees.length = 0;
+  lineIndicators.length = 0;
+  clearHud();
   treeCount = 0;
   countEl.textContent = '🌳 0 trees';
 });
@@ -1440,21 +2165,37 @@ function loop(now) {
     else       t.draw(ctx);
   }
 
-  // plant gesture: commit a new line when the finger pauses, then draw feedback
-  if (dragState && mode === 'plant') {
-    if (now - dragState.lastMove > GESTURE.pause) {
-      const moved = Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD;
-      if (moved && dragState.segments.length < GESTURE.maxVectors) {
-        dragState.segments.push({ x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY });
-        dragState.segX = dragState.curX; dragState.segY = dragState.curY;
-      }
-      dragState.lastMove = now;
+  // Line-registration rings (screen space): a circle blooms from each line's
+  // start point as that line is committed, then fades.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let i = lineIndicators.length - 1; i >= 0; i--) {
+    const ind = lineIndicators[i];
+    const p = clamp01((now - ind.born) / ind.dur);
+    let alpha = 1;
+    if (p >= 1) {
+      const fade = (now - ind.born - ind.dur) / 300;
+      if (fade >= 1) { lineIndicators.splice(i, 1); continue; }
+      alpha = 1 - fade;
     }
+    ctx.globalAlpha = 0.85 * alpha;
+    ctx.strokeStyle = ind.color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(ind.x, ind.y, 46 * p, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 
-    if (gestureMoved(dragState)) {
+  // plant gesture: a new line starts only on a change in direction, then
+  // draw feedback. Committing the first line registers the attack + starts the
+  // note.
+  if (dragState && mode === 'plant') {
+    checkDirectionChange(dragState);
+
+    if (dragState && gestureMoved(dragState)) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-      // committed lines (solid) and the live line (dashed)
+      // committed lines (solid)
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(46,93,52,0.7)';
       ctx.beginPath();
@@ -1464,15 +2205,7 @@ function loop(now) {
       }
       ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(46,93,52,0.5)';
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.moveTo(dragState.segX, dragState.segY);
-      ctx.lineTo(dragState.curX, dragState.curY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // anchor dots at line joints
+      // anchor dots at committed line joints
       ctx.fillStyle = 'rgba(46,93,52,0.85)';
       let ax = dragState.startX, ay = dragState.startY;
       for (const s of dragState.segments) {
@@ -1481,44 +2214,28 @@ function loop(now) {
         ctx.fill();
         ax = s.x1; ay = s.y1;
       }
-      ctx.beginPath();
-      ctx.arc(ax, ay, 4, 0, Math.PI * 2);
-      ctx.fill();
 
-      // pause ring around the finger: fills as idle time nears the threshold
-      const idleFrac = Math.min(1, (now - dragState.lastMove) / GESTURE.pause);
-      ctx.strokeStyle = 'rgba(58,91,160,0.7)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(dragState.curX, dragState.curY, 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * idleFrac);
-      ctx.stroke();
+      // Only guide the line being drawn if another line is actually needed
+      // (a slot is still free); once every component is covered or fixed,
+      // stop drawing the dashed preview so it can't imply a usable line.
+      const nextSlot = lineSlotFor(dragState.segments.length);
+      if (nextSlot != null) {
+        ctx.strokeStyle = 'rgba(46,93,52,0.5)';
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(dragState.segX, dragState.segY);
+        ctx.lineTo(dragState.curX, dragState.curY);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-      // per-vector value labels as the lines are drawn
-      const liveMoved = Math.abs(dragState.curX - dragState.segX) + Math.abs(dragState.curY - dragState.segY) > TAP_THRESHOLD;
-      const live = dragState.segments.concat(liveMoved ? [{ x0: dragState.segX, y0: dragState.segY, x1: dragState.curX, y1: dragState.curY }] : []);
-      ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
-      for (let i = 0; i < dragState.segments.length; i++) drawVectorLabel(dragState.segments[i], i, false);
-      if (liveMoved) drawVectorLabel(live[dragState.segments.length], dragState.segments.length, true);
-
-      // live readout of the sound this gesture will produce (defaults where a
-      // quality is unassigned or its vector wasn't drawn)
-      const snd = Object.assign({}, CHIME_SETTINGS.start, gestureSound(live));
-      const vol = snd.volume != null ? snd.volume : 0.12;
-      const line1 = `vol ${vol.toFixed(2)} · atk ${snd.attack}ms · dec ${snd.decay}ms`;
-      const line2 = `sus ${snd.sustain}% · hold ${snd.hold}ms · rel ${snd.release}ms`;
-      ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
-      let lx = dragState.curX + 16, ly = dragState.curY - 16;
-      const tw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width);
-      if (lx + tw + 12 > W) lx = dragState.curX - tw - 24;
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.beginPath();
-      ctx.roundRect(lx, ly - 34, tw + 16, 46, 8);
-      ctx.fill();
-      ctx.fillStyle = '#2e5d34';
-      ctx.fillText(line1, lx + 8, ly - 12);
-      ctx.fillText(line2, lx + 8, ly + 2);
+        ctx.beginPath();
+        ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
+
+  refreshHud(now);
 
   requestAnimationFrame(loop);
 }

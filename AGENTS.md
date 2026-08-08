@@ -36,6 +36,14 @@ A GitHub Pages site (`filler03.github.io`) plus two companion Node.js multiplaye
 | [`.agents/deployment.md`](.agents/deployment.md) | How to deploy: GitHub Pages for static, nginx + pm2 for multiplayer |
 | [`.agents/development.md`](.agents/development.md) | Development workflow, testing, and coding conventions |
 
+## Game Guides Index
+
+Individual game write-ups (indexed from [`.agents/public-site.md`](.agents/public-site.md) → "Game Guides"):
+
+| Game | Guide |
+|------|-------|
+| Growing Trees | [`.agents/games/growing-trees.md`](.agents/games/growing-trees.md) |
+
 ## Quick Rules for Agents
 
 1. **No build system for static content.** Files in `public/` are self-contained HTML — edit and push.
