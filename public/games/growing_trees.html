@@ -116,6 +116,34 @@
     border-radius: 3px;
     transition: width 0.1s linear;
   }
+  .adsr {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 88px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    margin-bottom: 2px;
+  }
+  .adsr-letter {
+    color: rgba(138,109,31,0.4);
+    transition: color 0.12s, transform 0.12s;
+  }
+  .adsr-letter.active {
+    color: #8a6d1f;
+    transform: scale(1.3);
+  }
+  .note-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+  }
   #statHud > div.live {
     background: rgba(255,255,255,0.92);
     outline: 1px dashed #3a5ba0;
@@ -501,7 +529,7 @@
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.2.1</div>
+<div id="version">v1.2.5</div>
 
 <script>
 /* ============================================================
@@ -1021,7 +1049,7 @@ function pitchFor(sx, sy) {
   return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone - 12);   // an octave lower
 }
 
-function plantAt(sx, sy, segments, sound, env) {
+function plantAt(sx, sy, segments, sound, env, tapNote) {
   // The tree starts growing right where you touched the ground: the touch Y
   // picks the scene depth (near bottom .. far horizon), so it sprouts at your
   // fingertip. Size comes only from the gesture/sustain, not from depth.
@@ -1040,9 +1068,8 @@ function plantAt(sx, sy, segments, sound, env) {
     if (env.release != null) s.release = env.release;
   }
   s.note = pitchFor(sx, sy);
-  // The envelope was scheduled as each line registered; finish now with a
-  // quick smoothed dropoff if the release line (4th) was never drawn.
-  endGestureNote();
+  // The tap note schedules its own stop; finish it cleanly if it didn't.
+  endGestureNote(tapNote);
   // The tree's woody window (attack -> release start) sizes it — short gesture
   // = small shrub, long = big tree. The note's individual durations drive the
   // growth animation: trunk during attack, branches during decay+hold, leaves
@@ -1058,7 +1085,7 @@ function plantAt(sx, sy, segments, sound, env) {
 const pointers = new Map();
 let mode = 'plant';      // 'plant' | 'nav'
 let navState = null;     // single-finger pan drag in nav mode
-let dragState = null;    // plant gesture in plant mode
+const dragStates = new Map();  // plant gestures, one per pointer (multi-finger)
 let pinchState = null;   // { dist } two-finger pinch in nav mode
 
 const PAN_SENS = 2;          // camera movement multiplier
@@ -1131,110 +1158,67 @@ const GROW_BRANCH_FULL_MS = 500;  // decay+hold ms for full branches at 1x
 const GROW_FOLIAGE_FULL_MS = 1200; // release ms for full foliage at 1x
 const TRUNK_ATTACK_FRAC = 0.6;    // trunk's attack-based size reached by end of attack; the rest grows in during branches
 
-// Stacked per-component readout in the top-left. One row per envelope slot
-// (attack, decay, hold, release) with a progress bar that fills while that
-// component's segment plays. Committed gesture lines keep their row; the
-// in-progress line updates its slot's value live.
-let hudRows = [];   // committed gesture rows: { slot, name, timeMs, dy }
+// Top-left HUD. Every running tap and every active gesture keeps its own note
+// card, stacked on top of each other. A note card stays on screen until its
+// sound ends.
 const EMOJI_TIME = '⏳';   // hourglass marks time values
 const EMOJI_VOL  = '🔊';   // speaker marks volume values
 
-function hudLineText(stat, timeMs, pct) {
-  return `${stat} · ${EMOJI_TIME} ${Math.round(timeMs)}ms · ${EMOJI_VOL} ${Math.round(pct)}%`;
-}
-
-// The level each slot's segment ends at, as a % of the gesture's gain ceiling
-// (same meaning as the fixed "End vol" setting). Gesture slots chain from the
-// previous slot's end level; the attack always ramps to full gain.
-function slotEndPct(slot, live) {
-  let pct = 0;
-  for (let s = 0; s <= slot; s++) pct = FIXED[SLOT_NAMES[s]].vol;
-  return pct;
-}
-
-// Playback timing for the progress bars. Slots are scheduled in order (they
-// chain), so each slot's window is [noteStart + elapsed, ... + dur].
-const hudState = {
-  on: false,                  // a note is playing
-  noteStart: 0,               // performance.now() when the note started
-  elapsed: 0,                 // cumulative ms of slots scheduled so far
-  startOff: [0, 0, 0, 0],     // ms from note start each slot begins
-  dur: [null, null, null, null],  // duration of each slot (null = not scheduled yet)
-};
-function hudReset() {
-  hudState.on = false;
-  hudState.elapsed = 0;
-  hudState.startOff = [0, 0, 0, 0];
-  hudState.dur = [null, null, null, null];
-}
-function hudSlot(slot, durMs) {
-  if (slot < 0 || slot > 3 || hudState.dur[slot] != null) return;
-  hudState.startOff[slot] = hudState.elapsed;
-  hudState.dur[slot] = durMs;
-  hudState.elapsed += durMs;
-}
-
-function hudProgress(slot, now) {
-  if (!hudState.on || hudState.dur[slot] == null) return 0;
-  return clamp01((now - hudState.noteStart - hudState.startOff[slot]) / hudState.dur[slot]);
-}
-
-function renderHud(now, live) {
-  now = typeof now === 'number' ? now : performance.now();
-  let html = '';
-  let show = hudState.on || hudRows.length > 0 || !!live;
-  // Slow pulse (~3s) for the component currently being drawn, driven in JS
-  // because the HUD DOM is rebuilt every frame.
-  const pulse = 0.5 + 0.5 * Math.sin(now * Math.PI * 2 / 3000);
-  for (let s = 0; s < 4; s++) {
-    const name = SLOT_NAMES[s];
-    const fixed = FIXED[name].on;
-    let text;
-    if (fixed) {
-      text = `${name} · ${EMOJI_TIME} ${FIXED[name].value}ms · ${EMOJI_VOL} ${FIXED[name].vol}%`;
-    } else {
-      const row = hudRows.find(r => r.slot === s);
-      if (row) text = hudLineText(row.name, row.timeMs, slotEndPct(s, live));
-      else if (live && live.slot === s) text = hudLineText(live.name, live.timeMs, slotEndPct(s, live));
-      else text = `${name} · —`;
-    }
-    const isLive = live && live.slot === s;
-    const style = isLive
-      ? ` style="box-shadow: 0 0 ${(5 + 15 * pulse).toFixed(1)}px rgba(58,91,160,${(0.3 + 0.45 * pulse).toFixed(2)});"`
-      : '';
-    const p = hudProgress(s, now);
-    html += `<div${fixed ? ' class="hud-fixed"' : (isLive ? ' class="live"' : '')}${style}>${text}<div class="hud-bar"><div class="hud-fill" style="width:${(p * 100).toFixed(1)}%"></div></div></div>`;
+// Which envelope phase (0=A, 1=D, 2=S, 3=R) `elapsed` ms sits in, for a tap
+// note whose per-slot durations live in n.slots[].
+function tapPhase(n, elapsed) {
+  let acc = 0;
+  for (let i = 0; i < 4; i++) {
+    if (n.slots[i] == null) continue;
+    acc += n.slots[i];
+    if (elapsed < acc) return i;
   }
-  statHud.innerHTML = html;
-  statHud.style.opacity = show ? '1' : '0';
+  return 3;
 }
 
-function commitHudLine(slot, name, timeMs, dy) {
-  hudRows.push({ slot, name, timeMs, dy });
-}
-function clearHud() {
-  hudRows = [];
-  hudReset();
-  renderHud(performance.now(), null);
-}
-
-// Refresh the top-left display each frame: the newest gesture readout while a
-// path is playing back, otherwise the ADSR rows for taps.
-function refreshHud(now) {
-  if (playbacks.length) { renderGestureHud(now, playbacks[playbacks.length - 1]); return; }
-  renderHud(now, null);
+// A tap note card: the A D S R phases in a line, with a progress bar that
+// moves through them as the note plays.
+function tapNoteCardHtml(n, elapsed) {
+  const pct = n.totalMs > 0 ? (Math.min(elapsed, n.totalMs) / n.totalMs * 100).toFixed(1) : 100;
+  const phase = tapPhase(n, elapsed);
+  const letters = ['A', 'D', 'S', 'R']
+    .map((l, i) => `<span class="adsr-letter${phase === i ? ' active' : ''}">${l}</span>`)
+    .join('');
+  return `<div class="hud-fixed"><div class="adsr">${letters}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
 
-// Gesture readout shown while a path plays: elapsed / total time + volume at
-// the circle's current position.
-function renderGestureHud(now, p) {
+function gestureNoteCardHtml(now, p) {
   const elapsed = Math.min(now - p.startedAt, p.totalMs || 0);
   const total = Math.round(p.totalMs || 0);
   const st = pathStateAtTime(p.pts, p.cumTime, elapsed);
   const vol = volumeFromStartY(st.y);
   const pct = total > 0 ? (elapsed / total * 100).toFixed(1) : 100;
-  statHud.innerHTML = `<div class="live">gesture · ${EMOJI_TIME} ${Math.round(elapsed)}ms / ${total}ms · ${EMOJI_VOL} ${Math.round(vol / VOL_MAX * 100)}%<div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
-  statHud.style.opacity = '1';
+  return `<div class="live"><div class="note-stats">${EMOJI_TIME} ${total}ms ${EMOJI_VOL} ${Math.round(vol / VOL_MAX * 100)}%</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
+}
+
+// Refresh the top-left display each frame: one card per running tap note plus
+// one per active gesture playback, stacked. Cards leave when their note is
+// done.
+function refreshHud(now) {
+  const blocks = [];
+  for (let i = tapNotes.length - 1; i >= 0; i--) {
+    const n = tapNotes[i];
+    const elapsed = now - n.noteStart;
+    if (elapsed >= n.totalMs) { tapNotes.splice(i, 1); continue; }
+    blocks.push(tapNoteCardHtml(n, elapsed));
+  }
+  for (const p of playbacks) blocks.push(gestureNoteCardHtml(now, p));
+  if (blocks.length) {
+    statHud.innerHTML = blocks.join('');
+    statHud.style.opacity = '1';
+  } else {
+    statHud.style.opacity = '0';
+  }
+}
+
+// Hide the HUD (used by Clear).
+function clearHud() {
+  statHud.style.opacity = '0';
 }
 
 // A gesture "moved" when the finger travelled far enough from its start to be
@@ -1473,27 +1457,21 @@ function refreshLiveTreePath(ds) {
   }
 }
 
-// End a plant gesture. A tap (no real path) plays the default ADSR note; a
-// drag finishes the freehand path — waiting for the gesture to complete in
-// wait mode, or wrapping up the already-running live note.
-function finishPlantGesture() {
-  if (!dragState) return;
-  const ds = dragState;
+// End one plant gesture (one finger lifted). A tap (no real path) plays the
+// default ADSR note; a drag finishes the freehand path — waiting for the
+// gesture to complete in wait mode, or wrapping up the already-running live
+// note. Other fingers' gestures keep going.
+function finishPlantGesture(ds) {
+  if (!ds) return;
   if (!gestureMoved(ds)) {
-    // ---- Tap: default ADSR note ----
-    ds.attackRegistered = true;
-    if (FIXED.attack.on) {
-      ds.attack = FIXED.attack.value;
-      startGestureNote(ds.startX, ds.startY, FIXED.attack.value, FIXED.attack.vol);
-    } else {
-      ds.attack = TAP_ATTACK_MS;
-      startGestureNote(ds.startX, ds.startY, ds.attack);
-    }
-    scheduleFixedRun(1);
-    commitHudLine(0, 'attack', ds.attack, 0);
+    // ---- Tap: default ADSR note (taps overlap and each keeps its own HUD) ----
+    ds.attack = FIXED.attack.on ? FIXED.attack.value : TAP_ATTACK_MS;
+    const note = startGestureNote(ds.startX, ds.startY, ds.attack,
+                                  FIXED.attack.on ? FIXED.attack.vol : undefined);
+    scheduleFixedRun(note, 1);
     plantAt(ds.startX, ds.startY, [], null, {
       attack: ds.attack, decay: ds.decay, hold: ds.hold, release: ds.release,
-    });
+    }, note);
   } else {
     // ---- Gesture: freehand path ----
     if (GESTURE.waitForGesture) {
@@ -1504,7 +1482,27 @@ function finishPlantGesture() {
       refreshLiveTreePath(ds);
     }
   }
-  dragState = null;
+}
+
+// Abort one plant gesture (pointer cancelled): kill its live note and drop its
+// on-screen playback, leaving every other finger's gesture alone.
+function cancelDragState(ds) {
+  if (ds.gain) {
+    try {
+      const now = audioCtx.currentTime;
+      clearTimeout(ds.cleanupTimer);
+      ds.gain.cancelScheduledValues(now);
+      ds.gain.setValueAtTime(ds.gain.gain.value, now);
+      ds.gain.linearRampToValueAtTime(0, now + 0.03);
+      ds.osc.stop(now + 0.05);
+      setTimeout(() => { try { ds.osc.disconnect(); ds.gain.disconnect(); } catch (e) {} }, 200);
+    } catch (e) {}
+    unregisterNote(ds);
+  }
+  if (ds.playback) {
+    const i = playbacks.indexOf(ds.playback);
+    if (i >= 0) playbacks.splice(i, 1);
+  }
 }
 
 /* ---- Path drawing (screen space) ---- */
@@ -1578,7 +1576,7 @@ function updateModeBtn() {
   modeBtn.textContent = mode === 'plant' ? '🌱 Planting' : '🧭 Navigating';
   modeBtn.classList.toggle('nav', mode === 'nav');}
 modeBtn.addEventListener('click', () => {
-  if (mode === 'plant') { dragState = null; stopGestureNote(); }
+  if (mode === 'plant') { dragStates.clear(); stopGestureNote(); }
   mode = mode === 'plant' ? 'nav' : 'plant';
   updateModeBtn();
   document.getElementById('hint').style.opacity = '0';
@@ -1603,28 +1601,24 @@ canvas.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
   if (mode === 'plant') {
-    if (pointers.size === 1) {
-      clearHud();
-      dragState = {
-        startX: stageX(e), startY: stageY(e),   // where the tree is planted
-        pts: [{ x: stageX(e), y: stageY(e) }],  // recorded freehand path
-        cumTime: [0],                           // ms of note time at each point
-        totalMs: 0,                             // running note length (horizontal travel)
-        started: false, startedAt: 0, ctx0: 0,  // live note state
-        gain: null, osc: null, gainLevel: 0, lastSched: 0, cleanupTimer: null,
-        tree: null, lastRefreshMs: 0,           // live tree, stretched as the path grows
-        playback: null,                         // this drag's playback entry (live mode)
-        attack: null, attackRegistered: false,  // tap-default ADSR
-        decay: null, hold: null, release: null,
-      };
-      if (FIXED.attack.on) dragState.attack = FIXED.attack.value;
-      if (FIXED.decay.on) dragState.decay = FIXED.decay.value;
-      if (FIXED.hold.on) dragState.hold = FIXED.hold.value;
-      if (FIXED.release.on) dragState.release = FIXED.release.value;
-    } else {
-      dragState = null;  // a second finger cancels the plant gesture
-      stopGestureNote();
-    }
+    // Each finger starts its own independent gesture (path + note + tree).
+    const ds = {
+      startX: stageX(e), startY: stageY(e),   // where the tree is planted
+      pts: [{ x: stageX(e), y: stageY(e) }],  // recorded freehand path
+      cumTime: [0],                           // ms of note time at each point
+      totalMs: 0,                             // running note length (horizontal travel)
+      started: false, startedAt: 0, ctx0: 0,  // live note state
+      gain: null, osc: null, gainLevel: 0, lastSched: 0, cleanupTimer: null,
+      tree: null, lastRefreshMs: 0,           // live tree, stretched as the path grows
+      playback: null,                         // this drag's playback entry (live mode)
+      attack: null, attackRegistered: false,  // tap-default ADSR
+      decay: null, hold: null, release: null,
+    };
+    if (FIXED.attack.on) ds.attack = FIXED.attack.value;
+    if (FIXED.decay.on) ds.decay = FIXED.decay.value;
+    if (FIXED.hold.on) ds.hold = FIXED.hold.value;
+    if (FIXED.release.on) ds.release = FIXED.release.value;
+    dragStates.set(e.pointerId, ds);
   } else {
     if (pointers.size === 1) {
       navState = { startX: stageX(e), startY: stageY(e), curX: stageX(e), curY: stageY(e) };
@@ -1642,19 +1636,20 @@ canvas.addEventListener('pointermove', e => {
   p.x = stageX(e); p.y = stageY(e);
 
   if (mode === 'plant') {
-    if (pointers.size === 1 && dragState) {
+    const ds = dragStates.get(e.pointerId);
+    if (ds) {
       const x = stageX(e), y = stageY(e);
-      const before = dragState.pts.length;
-      addPathPoint(dragState, x, y);
-      if (dragState.pts.length > before) {
+      const before = ds.pts.length;
+      addPathPoint(ds, x, y);
+      if (ds.pts.length > before) {
         if (!GESTURE.waitForGesture) {
-          if (!dragState.started && gestureMoved(dragState)) startLivePathNote(dragState);
-          if (dragState.started) scheduleLivePoint(dragState);
-          if (dragState.playback) dragState.playback.totalMs = dragState.totalMs;   // keep the HUD total live
-          if (dragState.tree && (!dragState.lastRefreshMs ||
-              dragState.totalMs - dragState.lastRefreshMs > Math.max(40, dragState.lastRefreshMs * 0.12))) {
-            refreshLiveTreePath(dragState);
-            dragState.lastRefreshMs = dragState.totalMs;
+          if (!ds.started && gestureMoved(ds)) startLivePathNote(ds);
+          if (ds.started) scheduleLivePoint(ds);
+          if (ds.playback) ds.playback.totalMs = ds.totalMs;   // keep the HUD total live
+          if (ds.tree && (!ds.lastRefreshMs ||
+              ds.totalMs - ds.lastRefreshMs > Math.max(40, ds.lastRefreshMs * 0.12))) {
+            refreshLiveTreePath(ds);
+            ds.lastRefreshMs = ds.totalMs;
           }
         }
       }
@@ -1681,9 +1676,9 @@ canvas.addEventListener('pointerup', e => {
   pointers.delete(e.pointerId);
 
   if (mode === 'plant') {
-    if (pointers.size === 0) {
-      finishPlantGesture();
-    }
+    const ds = dragStates.get(e.pointerId);
+    dragStates.delete(e.pointerId);
+    if (ds) finishPlantGesture(ds);
   } else {
     pinchState = null;
     if (pointers.size === 1) {
@@ -1699,7 +1694,9 @@ canvas.addEventListener('pointercancel', e => {
   pointers.delete(e.pointerId);
   pinchState = null;
   if (mode === 'plant') {
-    if (pointers.size === 0) { dragState = null; stopGestureNote(); }
+    const ds = dragStates.get(e.pointerId);
+    dragStates.delete(e.pointerId);
+    if (ds) cancelDragState(ds);
   } else if (pointers.size === 1) {
     const p = [...pointers.values()][0];
     navState = { startX: p.x, startY: p.y, curX: p.x, curY: p.y };
@@ -1714,7 +1711,7 @@ canvas.addEventListener('pointercancel', e => {
 window.addEventListener('blur', () => {
   pointers.clear();
   pinchState = null;
-  dragState = null;
+  dragStates.clear();
   navState = null;
   stopGestureNote();
 });
@@ -1881,23 +1878,18 @@ function setOscWave(osc, s) {
   }
 }
 
-/* ---- Tap note: the default ADSR note played when you tap with no gesture.
-   Uses the FIXED presets for attack/decay/hold/release and the touch's screen
-   Y for volume. ---- */
-let activeNote = null;   // { osc, gain, vol, level, cleanupTimer }
+/* ---- Tap notes: a default ADSR note per tap. Taps overlap — each tap gets
+   its own oscillator + gain node, so several can ring at once. Uses the FIXED
+   presets for attack/decay/hold/release and the touch's screen Y for volume. */
+let tapNotes = [];   // { osc, gain, vol, level, segEnd, noteStart, totalMs, ... }
 
 function startGestureNote(sx, sy, atkMs, volPct) {
   initAudio();
   resumeAudio();
   if (!audioCtx || !masterGain) return;
-  stopTapNote();
-  hudReset();
-  hudState.on = true;
-  hudState.noteStart = performance.now();
   const s = CHIME_SETTINGS.start;
   const vol = volumeFromStartY(sy);
   const atk = Math.max(0.005, (atkMs || TAP_ATTACK_MS) / 1000);
-  hudSlot(0, Math.round(atk * 1000));
   const peak = vol * (volPct != null ? Math.max(0, Math.min(100, volPct)) / 100 : 1);
   const t0 = audioCtx.currentTime;
   const gain = audioCtx.createGain();
@@ -1913,113 +1905,97 @@ function startGestureNote(sx, sy, atkMs, volPct) {
   osc.connect(gain);
   osc.start(t0);
 
-  activeNote = { osc, gain, vol, level: peak, segEnd: t0 + atk, scheduledSlots: [true, false, false, false], cleanupTimer: null };
+  const atkDurMs = Math.round(atk * 1000);
+  const note = {
+    osc, gain, vol, level: peak, segEnd: t0 + atk,
+    scheduledSlots: [true, false, false, false],
+    slots: [atkDurMs, null, null, null],   // per-phase durations, for the A/D/S/R card
+    cleanupTimer: null,
+    releaseScheduled: false,
+    noteStart: performance.now(),
+    totalMs: atkDurMs,
+  };
+  tapNotes.push(note);
+  return note;
 }
 
 // Fixed segments: a generic ramp to a target level, a hold, and a fade-out,
 // all chained onto the running note.
-function scheduleRampTo(target, durMs) {
-  if (!activeNote) return;
+function scheduleRampTo(note, target, durMs) {
+  if (!note) return;
   const now = audioCtx.currentTime;
-  const g = activeNote.gain.gain;
-  const startTime = Math.max(now, activeNote.segEnd || now);
-  const startLevel = activeNote.level;
+  const g = note.gain.gain;
+  const startTime = Math.max(now, note.segEnd || now);
+  const startLevel = note.level;
   const end = startTime + Math.max(0.005, durMs / 1000);
   g.setValueAtTime(startLevel, startTime);
   g.linearRampToValueAtTime(target, end);
-  activeNote.level = target;
-  activeNote.segEnd = end;
+  note.level = target;
+  note.segEnd = end;
 }
 
-// Schedule any run of fixed slots starting at fromSlot, stopping when a
-// gesture slot is reached (it waits for its line).
-function scheduleFixedRun(fromSlot) {
-  if (!activeNote) return;
+// Schedule the fixed tap-default slots (decay, hold, release) onto a note.
+function scheduleFixedRun(note, fromSlot) {
+  if (!note) return;
   for (let slot = fromSlot; slot < 4; slot++) {
-    if (activeNote.scheduledSlots[slot]) continue;
+    if (note.scheduledSlots[slot]) continue;
     if (!FIXED[SLOT_NAMES[slot]].on) return;
-    scheduleFixedSlot(slot);
-    activeNote.scheduledSlots[slot] = true;
+    scheduleFixedSlot(note, slot);
+    note.scheduledSlots[slot] = true;
   }
 }
 
-function scheduleFixedSlot(slot) {
+function scheduleFixedSlot(note, slot) {
   const name = SLOT_NAMES[slot];
   const f = FIXED[name];
-  const vol = activeNote.vol * (f.vol / 100);   // target level, as % of gain
-  hudSlot(slot, f.value);
+  const vol = note.vol * (f.vol / 100);   // target level, as % of gain
+  note.slots[slot] = f.value;             // per-phase duration, for the A/D/S/R card
+  note.totalMs += f.value;                // card stays up for the whole envelope
   if (name === 'decay') {
-    scheduleRampTo(vol, f.value);
+    scheduleRampTo(note, vol, f.value);
   } else if (name === 'hold') {
-    scheduleRampTo(vol, f.value);
+    scheduleRampTo(note, vol, f.value);
   } else if (name === 'release') {
-    scheduleRampTo(vol, f.value);
-    fadeOutAndStop(activeNote.segEnd);
+    scheduleRampTo(note, vol, f.value);
+    fadeOutAndStop(note, note.segEnd);
   }
 }
 
 // Always end on a smooth fade to 0 so the note never clips when the sequence
 // finishes.
-function fadeOutAndStop(fromTime) {
-  if (!activeNote) return;
-  const g = activeNote.gain.gain;
+function fadeOutAndStop(note, fromTime) {
+  if (!note) return;
+  const g = note.gain.gain;
   const end = fromTime + FADE_MS / 1000;
   g.linearRampToValueAtTime(0, end);
-  scheduleStop(end);
+  scheduleStop(note, end);
 }
 
-// Quick (but smoothed) dropoff used when a later line was never drawn. It
-// waits for the currently-scheduled ramp to finish, so the attack (or last
-// segment) plays out in full before the note fades.
-function quickDropoff() {
-  if (!activeNote) return;
-  const now = audioCtx.currentTime;
-  const g = activeNote.gain.gain;
-  const segEnd = activeNote.segEnd && activeNote.segEnd > now ? activeNote.segEnd : now;
-  g.setValueAtTime(activeNote.level, segEnd);
-  fadeOutAndStop(segEnd);
-}
-
-// A gesture is complete: if any component slot was left unfilled (no line was
-// drawn for a gesture slot, or a fixed run was cut off by a gap), jump straight
-// to the release component when it has a preset value set, so the note still
-// ends with a proper release instead of a quick dropoff.
-function jumpToReleaseIfMissing() {
-  if (!activeNote) return false;
-  if (activeNote.scheduledSlots[3]) return false;
-  if (!FIXED.release.on) return false;
-  for (let slot = 1; slot < 3; slot++) {
-    if (!activeNote.scheduledSlots[slot]) {
-      scheduleFixedSlot(3);
-      activeNote.scheduledSlots[3] = true;
-      return true;
-    }
-  }
-  return false;
-}
-
-// Gesture end (finger lift): the release line schedules its own stop; without
-// it, jump to a preset release when a component was missed, else drop off
-// quickly from the current level.
-function endGestureNote() {
-  if (!activeNote) return;
-  if (!activeNote.releaseScheduled && !jumpToReleaseIfMissing()) quickDropoff();
-  activeNote = null;
-}
-
-function scheduleStop(end) {
-  if (!activeNote) return;
-  activeNote.releaseScheduled = true;
-  const { osc, gain } = activeNote;
+function scheduleStop(note, end) {
+  if (!note) return;
+  note.releaseScheduled = true;
+  const { osc, gain } = note;
   try { osc.stop(end + 0.05); } catch (e) {}
-  clearTimeout(activeNote.cleanupTimer);
-  activeNote.cleanupTimer = setTimeout(() => {
+  clearTimeout(note.cleanupTimer);
+  note.cleanupTimer = setTimeout(() => {
     try { osc.disconnect(); gain.disconnect(); } catch (e) {}
   }, (end - audioCtx.currentTime + 0.5) * 1000);
 }
 
-// Cancel everything (used on blur / cancel / mode switch): quickly fade every
-// running note out and drop all playback animations.
+// Tap finished (finger lift): the release slot normally schedules its own
+// stop; if it never did, fade from the current level.
+function endGestureNote(note) {
+  if (!note) return;
+  if (!note.releaseScheduled) {
+    const now = audioCtx.currentTime;
+    const segEnd = note.segEnd && note.segEnd > now ? note.segEnd : now;
+    note.gain.setValueAtTime(note.level, segEnd);
+    fadeOutAndStop(note, segEnd);
+  }
+}
+
+// Cancel everything (used on blur / cancel / mode switch / clear): quickly
+// fade every running note out and drop all playback animations.
 function stopGestureNote() {
   for (const n of gestureNotes) {
     try {
@@ -2032,26 +2008,20 @@ function stopGestureNote() {
       setTimeout(() => { try { n.osc.disconnect(); n.gain.disconnect(); } catch (e) {} }, 200);
     } catch (e) {}
   }
+  for (const note of tapNotes) {
+    try {
+      const now = audioCtx.currentTime;
+      clearTimeout(note.cleanupTimer);
+      note.gain.cancelScheduledValues(now);
+      note.gain.setValueAtTime(note.gain.gain.value, now);
+      note.gain.linearRampToValueAtTime(0, now + 0.03);
+      note.osc.stop(now + 0.05);
+      setTimeout(() => { try { note.osc.disconnect(); note.gain.disconnect(); } catch (e) {} }, 200);
+    } catch (e) {}
+  }
   gestureNotes = [];
+  tapNotes = [];
   playbacks = [];
-  stopTapNote();
-}
-
-// Stop only the current tap (ADSR) note — a tap never cuts a playing gesture.
-function stopTapNote() {
-  if (!activeNote) return;
-  const { osc, gain } = activeNote;
-  clearTimeout(activeNote.cleanupTimer);
-  try {
-    const now = audioCtx.currentTime;
-    const g = gain.gain;
-    g.cancelScheduledValues(now);
-    g.setValueAtTime(g.value, now);
-    g.linearRampToValueAtTime(0, now + 0.03);
-    osc.stop(now + 0.05);
-    setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} }, 200);
-  } catch (e) {}
-  activeNote = null;
 }
 
 function initAudio() {
@@ -2472,9 +2442,11 @@ function loop(now) {
   // glowing green solid line, the unplayed portion behind stays dotted. Every
   // gesture that is still playing (or lingering) keeps its path on screen.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const currentPlay = dragState ? playbacks.find(p => p.pts === dragState.pts) : null;
-  if (dragState && mode === 'plant' && !currentPlay && dragState.pts.length > 1) {
-    drawDottedPath(dragState.pts);
+  if (mode === 'plant') {
+    for (const ds of dragStates.values()) {
+      const currentPlay = playbacks.find(p => p.pts === ds.pts);
+      if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts);
+    }
   }
   for (let i = playbacks.length - 1; i >= 0; i--) {
     const p = playbacks[i];
@@ -2501,7 +2473,7 @@ function loop(now) {
     // Never let a single bad frame brick the game: clear transient gesture
     // state so the next frame recovers, and keep the loop alive.
     console.error(err);
-    dragState = null; navState = null; pinchState = null;
+    dragStates.clear(); navState = null; pinchState = null;
     pointers.clear();
     stopGestureNote();
   }
