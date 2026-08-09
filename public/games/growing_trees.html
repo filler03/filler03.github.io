@@ -501,7 +501,7 @@
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.2.0</div>
+<div id="version">v1.2.1</div>
 
 <script>
 /* ============================================================
@@ -549,11 +549,11 @@ const liveTrees = [];      // trees still growing (full redraw each frame)
 const bakedTrees = [];     // finished trees, cached as bitmaps
 const statHud = document.getElementById('statHud');
 
-// Freehand gesture playback: drives the green-fill circle animation as the
-// note plays. null when nothing is animating.
-let pb = null;             // { pts, cumTime, totalMs, startedAt, wait, released, done }
-let livePathNote = null;   // { osc, gain, ... } audio for a live-mode path
-let deferredNote = null;   // { osc, gain } audio for a wait-mode path playback
+// Freehand gesture playback: drives the green-fill circle animation as each
+// note plays. Multiple gestures can be in flight at once, so this is a list —
+// starting a new gesture never removes an earlier one that is still playing.
+let playbacks = [];        // { pts, cumTime, totalMs, startedAt, released }
+let gestureNotes = [];     // { osc, gain, cleanupTimer } running gesture-note audio
 
 // Mirror the bottom-right version badge into the rotate prompt, so the
 // version shows while the device is held upright too.
@@ -1218,10 +1218,10 @@ function clearHud() {
   renderHud(performance.now(), null);
 }
 
-// Refresh the top-left display each frame: the gesture readout while a path is
-// playing back, otherwise the ADSR rows for taps.
+// Refresh the top-left display each frame: the newest gesture readout while a
+// path is playing back, otherwise the ADSR rows for taps.
 function refreshHud(now) {
-  if (pb) { renderGestureHud(now, pb); return; }
+  if (playbacks.length) { renderGestureHud(now, playbacks[playbacks.length - 1]); return; }
   renderHud(now, null);
 }
 
@@ -1312,7 +1312,6 @@ function buildVolumeCurve(pts, cum, totalMs, N) {
 function schedulePathPlayback(ds) {
   initAudio(); resumeAudio();
   if (!audioCtx || !masterGain) return;
-  stopGestureNote();
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
   const curve = buildVolumeCurve(ds.pts, ds.cumTime, ds.totalMs, 128);
   const s = CHIME_SETTINGS.start;
@@ -1337,10 +1336,11 @@ function schedulePathPlayback(ds) {
   osc.start(t0);
   const tEnd = curveEnd + FADE_MS / 1000;
   osc.stop(tEnd + 0.05);
-  deferredNote = { osc, gain };
-  setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} deferredNote = null; }, (tEnd - t0 + 0.5) * 1000);
+  const note = { osc, gain, cleanupTimer: null };
+  gestureNotes.push(note);
+  setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} unregisterNote(note); }, (tEnd - t0 + 0.5) * 1000);
 
-  pb = { pts: ds.pts, cumTime: ds.cumTime, totalMs, startedAt: performance.now(), wait: true, released: true, done: false };
+  playbacks.push({ pts: ds.pts, cumTime: ds.cumTime, totalMs, startedAt: performance.now(), released: true });
 }
 
 // LIVE MODE: the note begins as soon as the finger moves past the tap
@@ -1353,7 +1353,6 @@ function schedulePathPlayback(ds) {
 function startLivePathNote(ds) {
   initAudio(); resumeAudio();
   if (!audioCtx || !masterGain) return;
-  stopGestureNote();
   const s = CHIME_SETTINGS.start;
   const ctx0 = audioCtx.currentTime;
   const gain = audioCtx.createGain();
@@ -1374,9 +1373,10 @@ function startLivePathNote(ds) {
   ds.gainLevel = vol0;
   ds.lastSched = ctx0;
   ds.cleanupTimer = null;
-  livePathNote = ds;
+  gestureNotes.push(ds);
   plantGestureTree(ds);
-  pb = { pts: ds.pts, cumTime: ds.cumTime, totalMs: 0, startedAt: ds.startedAt, wait: false, released: false, done: false };
+  ds.playback = { pts: ds.pts, cumTime: ds.cumTime, totalMs: 0, startedAt: ds.startedAt, released: false };
+  playbacks.push(ds.playback);
 }
 
 function scheduleLivePoint(ds) {
@@ -1397,9 +1397,9 @@ function scheduleLivePoint(ds) {
 }
 
 function finishLivePathNote(ds) {
-  if (!ds.gain || !pb) return;
-  pb.released = true;
-  pb.totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
+  if (!ds.gain || !ds.playback) return;
+  ds.playback.released = true;
+  ds.playback.totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
   const now = audioCtx.currentTime;
   const endT = ds.ctx0 + ds.totalMs / 1000;       // when the path's playback finishes
   if (performance.now() - ds.startedAt >= ds.totalMs) {
@@ -1415,14 +1415,20 @@ function finishLivePathNote(ds) {
     try { ds.osc.stop(stopT + 0.05); } catch (e) {}
     scheduleLiveCleanup(ds, stopT + 0.5);
   }
-  livePathNote = null;
 }
 
 function scheduleLiveCleanup(ds, t) {
   clearTimeout(ds.cleanupTimer);
   ds.cleanupTimer = setTimeout(() => {
     try { ds.osc.disconnect(); ds.gain.disconnect(); } catch (e) {}
+    unregisterNote(ds);
   }, (t - audioCtx.currentTime + 0.5) * 1000);
+}
+
+// Forget a finished gesture note so it isn't cancelled later.
+function unregisterNote(n) {
+  const i = gestureNotes.indexOf(n);
+  if (i >= 0) gestureNotes.splice(i, 1);
 }
 
 // ---- Trees from gestures ----
@@ -1599,7 +1605,6 @@ canvas.addEventListener('pointerdown', e => {
   if (mode === 'plant') {
     if (pointers.size === 1) {
       clearHud();
-      pb = null;    // a new gesture clears any lingering playback path
       dragState = {
         startX: stageX(e), startY: stageY(e),   // where the tree is planted
         pts: [{ x: stageX(e), y: stageY(e) }],  // recorded freehand path
@@ -1608,6 +1613,7 @@ canvas.addEventListener('pointerdown', e => {
         started: false, startedAt: 0, ctx0: 0,  // live note state
         gain: null, osc: null, gainLevel: 0, lastSched: 0, cleanupTimer: null,
         tree: null, lastRefreshMs: 0,           // live tree, stretched as the path grows
+        playback: null,                         // this drag's playback entry (live mode)
         attack: null, attackRegistered: false,  // tap-default ADSR
         decay: null, hold: null, release: null,
       };
@@ -1644,7 +1650,7 @@ canvas.addEventListener('pointermove', e => {
         if (!GESTURE.waitForGesture) {
           if (!dragState.started && gestureMoved(dragState)) startLivePathNote(dragState);
           if (dragState.started) scheduleLivePoint(dragState);
-          if (pb) pb.totalMs = dragState.totalMs;   // keep the HUD total live
+          if (dragState.playback) dragState.playback.totalMs = dragState.totalMs;   // keep the HUD total live
           if (dragState.tree && (!dragState.lastRefreshMs ||
               dragState.totalMs - dragState.lastRefreshMs > Math.max(40, dragState.lastRefreshMs * 0.12))) {
             refreshLiveTreePath(dragState);
@@ -1884,7 +1890,7 @@ function startGestureNote(sx, sy, atkMs, volPct) {
   initAudio();
   resumeAudio();
   if (!audioCtx || !masterGain) return;
-  stopGestureNote();
+  stopTapNote();
   hudReset();
   hudState.on = true;
   hudState.noteStart = performance.now();
@@ -2012,34 +2018,27 @@ function scheduleStop(end) {
   }, (end - audioCtx.currentTime + 0.5) * 1000);
 }
 
-// Cancel a gesture: quickly fade any running note out instead of leaving it
-// ringing, and drop the playback animation.
+// Cancel everything (used on blur / cancel / mode switch): quickly fade every
+// running note out and drop all playback animations.
 function stopGestureNote() {
-  if (livePathNote && livePathNote.gain) {
-    const lpn = livePathNote;
-    clearTimeout(lpn.cleanupTimer);
+  for (const n of gestureNotes) {
     try {
       const now = audioCtx.currentTime;
-      lpn.gain.cancelScheduledValues(now);
-      lpn.gain.setValueAtTime(lpn.gain.gain.value, now);
-      lpn.gain.linearRampToValueAtTime(0, now + 0.03);
-      lpn.osc.stop(now + 0.05);
-      setTimeout(() => { try { lpn.osc.disconnect(); lpn.gain.disconnect(); } catch (e) {} }, 200);
+      clearTimeout(n.cleanupTimer);
+      n.gain.cancelScheduledValues(now);
+      n.gain.setValueAtTime(n.gain.gain.value, now);
+      n.gain.linearRampToValueAtTime(0, now + 0.03);
+      n.osc.stop(now + 0.05);
+      setTimeout(() => { try { n.osc.disconnect(); n.gain.disconnect(); } catch (e) {} }, 200);
     } catch (e) {}
-    livePathNote = null;
   }
-  if (deferredNote && deferredNote.osc) {
-    try {
-      const now = audioCtx.currentTime;
-      deferredNote.gain.cancelScheduledValues(now);
-      deferredNote.gain.setValueAtTime(deferredNote.gain.gain.value, now);
-      deferredNote.gain.linearRampToValueAtTime(0, now + 0.03);
-      deferredNote.osc.stop(now + 0.05);
-      setTimeout(() => { try { deferredNote.osc.disconnect(); deferredNote.gain.disconnect(); } catch (e) {} }, 200);
-    } catch (e) {}
-    deferredNote = null;
-  }
-  if (pb) pb = null;
+  gestureNotes = [];
+  playbacks = [];
+  stopTapNote();
+}
+
+// Stop only the current tap (ADSR) note — a tap never cuts a playing gesture.
+function stopTapNote() {
   if (!activeNote) return;
   const { osc, gain } = activeNote;
   clearTimeout(activeNote.cleanupTimer);
@@ -2416,7 +2415,7 @@ document.getElementById('resetDefaults').addEventListener('click', () => {
 document.getElementById('clear').addEventListener('click', () => {
   liveTrees.length = 0;
   bakedTrees.length = 0;
-  pb = null;
+  stopGestureNote();
   clearHud();
   treeCount = 0;
   countEl.textContent = '🌳 0 trees';
@@ -2470,30 +2469,31 @@ function loop(now) {
   // ---- Plant gesture rendering (screen space) ----
   // While drawing, the path is a dotted line. Once a note plays back, the
   // circle's current position splits the path: the played portion ahead is a
-  // glowing green solid line, the unplayed portion behind stays dotted.
+  // glowing green solid line, the unplayed portion behind stays dotted. Every
+  // gesture that is still playing (or lingering) keeps its path on screen.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (dragState && mode === 'plant' && !pb && dragState.pts.length > 1) {
+  const currentPlay = dragState ? playbacks.find(p => p.pts === dragState.pts) : null;
+  if (dragState && mode === 'plant' && !currentPlay && dragState.pts.length > 1) {
     drawDottedPath(dragState.pts);
   }
-  if (pb) {
-    const elapsed = now - pb.startedAt;
-    const totalMs = pb.totalMs || 0;
-    const done = pb.released && elapsed >= totalMs;
+  for (let i = playbacks.length - 1; i >= 0; i--) {
+    const p = playbacks[i];
+    const elapsed = now - p.startedAt;
+    const totalMs = p.totalMs || 0;
+    const done = p.released && elapsed >= totalMs;
     let alpha = 1;
     if (done) {
       const after = elapsed - totalMs;
-      if (after >= LINGER_MS) { pb = null; }
-      else alpha = 1 - after / LINGER_MS;
+      if (after >= LINGER_MS) { playbacks.splice(i, 1); continue; }
+      alpha = 1 - after / LINGER_MS;
     }
-    if (pb) {
-      const pts = pb.pts, cum = pb.cumTime;
-      const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
-      ctx.globalAlpha = alpha;
-      drawGreenPath(pts, st);
-      drawDottedTail(pts, st);
-      drawPlaybackCircle(st.x, st.y, alpha);
-      ctx.globalAlpha = 1;
-    }
+    const pts = p.pts, cum = p.cumTime;
+    const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
+    ctx.globalAlpha = alpha;
+    drawGreenPath(pts, st);
+    drawDottedTail(pts, st);
+    drawPlaybackCircle(st.x, st.y, alpha);
+    ctx.globalAlpha = 1;
   }
 
   refreshHud(now);

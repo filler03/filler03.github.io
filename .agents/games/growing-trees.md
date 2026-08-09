@@ -2,7 +2,7 @@
 
 > Single-file HTML5 canvas game: draw a freehand gesture and it both **plays a synthesized note** and **grows a tree** from the ground. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays.
 >
-> Current version badge: `v1.2.0` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.2.1` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -37,6 +37,8 @@ A gesture is one continuous freehand path (no more line splitting, guide circles
 
 While drawing the path is a **dotted line**. During playback a small **glowing circle** travels along the path at the point whose `cumTime` equals the elapsed note time, turning the traveled portion into a **glowing green solid line** (`GESTURE_GREEN = #3ecb5a`); the unplayed portion stays dotted. When the note finishes the whole path stays green and fades out after `LINGER_MS = 800`.
 
+Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps still cut the previous tap note only (`stopTapNote`); cancel/blur/mode-switch still cancel everything (`stopGestureNote`).
+
 ### Live vs Wait (top-left toggle)
 
 | Mode | When the note plays |
@@ -65,7 +67,7 @@ Growth runs at a **fixed speed** (`GESTURE.growSpeed`, slider 0.25–4x, default
 
 ## Top-Left HUD (`#statHud`)
 
-- **Gesture playback** (`renderGestureHud`): a single live row — elapsed / total ms and the volume % at the circle's current position, with a progress bar.
+- **Gesture playback** (`renderGestureHud`): a single live row for the newest active gesture — elapsed / total ms and the volume % at the circle's current position, with a progress bar.
 - **Taps**: four ADSR rows (Attack / Decay / Hold / Release) with progress bars via `hudState`.
 
 ## Settings Panel
@@ -116,7 +118,7 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.2.0`) and re-run `node --check` on the extracted `<script>` block after changes.
+- **Always bump the `#version` badge** (currently `v1.2.1`) and re-run `node --check` on the extracted `<script>` block after changes.
 - Trees/branches: don't re-introduce lazy spawning — the pre-built + dynamic-base approach keeps parts connected during growth.
 - Don't revert the elapsed-time growth math to per-frame accumulation; sub-frame segments (e.g. a 5ms attack) would never grow.
 - Gesture→tree growth mapping is still provisional (proportional split of `totalMs`); revisit when the tree-growth design is decided.
