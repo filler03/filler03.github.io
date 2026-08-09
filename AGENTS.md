@@ -23,6 +23,7 @@ A GitHub Pages site (`filler03.github.io`) plus two companion Node.js multiplaye
 │   └── soccer/              ← ⚽ 2-player multiplayer (port 3200)
 │
 ├── PATCH_NOTES.md           ← Changelog for multiplayer game-over bug fixes
+├── .agents/                 ← Detailed docs for agents (indexed from this file)
 └── AGENTS.md                ← You are here
 ```
 
@@ -38,11 +39,7 @@ A GitHub Pages site (`filler03.github.io`) plus two companion Node.js multiplaye
 
 ## Game Guides Index
 
-Individual game write-ups (indexed from [`.agents/public-site.md`](.agents/public-site.md) → "Game Guides"):
-
-| Game | Guide |
-|------|-------|
-| Growing Trees | [`.agents/games/growing-trees.md`](.agents/games/growing-trees.md) |
+Per-game write-ups live in [`.agents/games/`](.agents/games/); the canonical list is the [Game Guides table](.agents/public-site.md) in the public-site doc.
 
 ## Quick Rules for Agents
 

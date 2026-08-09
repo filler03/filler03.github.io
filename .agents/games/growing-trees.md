@@ -38,7 +38,7 @@ A gesture is one continuous freehand path (no more line splitting, guide circles
 
 While drawing the path is a **dotted line**. During playback a small **glowing circle** travels along the path at the point whose `cumTime` equals the elapsed note time, turning the traveled portion into a **glowing green solid line** (`GESTURE_GREEN = #3ecb5a`); the unplayed portion stays dotted. When the note finishes the whole path stays green and fades out after `LINGER_MS = 800`.
 
-Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps still cut the previous tap note only (`stopTapNote`); cancel/blur/mode-switch still cancel everything (`stopGestureNote`).
+Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps overlap too (each is its own note in `tapNotes[]`); only a global cancel on blur/cancel/mode-switch/clear stops everything (`stopGestureNote`).
 
 ### Live vs Wait (top-left toggle)
 
@@ -70,7 +70,7 @@ Growth runs at a **fixed speed** (`GESTURE.growSpeed`, slider 0.25–4x, default
 
 Stacked **note cards**, one per running tap and one per active gesture playback, removed when that sound finishes:
 
-- **Taps** (`tapNoteCardHtml`): one `hud-fixed` note card per active tap showing the phases **A D S R** in a line with a progress bar that moves through them (the active phase's letter is highlighted; per-phase durations come from `note.slots[]`). Simultaneous taps stack one on top of the other.
+- **Taps** (`tapNoteCardHtml`): one `hud-fixed` note card per active tap showing the phases **A D S R** in a line (A/D/S/R = attack / decay / hold-as-sustain / release) with a progress bar that moves through them (the active phase's letter is highlighted; per-phase durations come from `note.slots[]`). Simultaneous taps stack one on top of the other.
 - **Gesture playback** (`gestureNoteCardHtml`): one `live` note card per active gesture — as compact as the tap cards, showing `⏳` + the note's total ms and `🔊` + the volume % at the circle's current position. Every simultaneous gesture gets its own note card.
 
 ## Settings Panel
@@ -125,3 +125,4 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 - Trees/branches: don't re-introduce lazy spawning — the pre-built + dynamic-base approach keeps parts connected during growth.
 - Don't revert the elapsed-time growth math to per-frame accumulation; sub-frame segments (e.g. a 5ms attack) would never grow.
 - Gesture→tree growth mapping is still provisional (proportional split of `totalMs`); revisit when the tree-growth design is decided.
+- Keep this guide lean: if the game's internals outgrow it, split deep details into their own `.agents/games/` file rather than padding this one.
