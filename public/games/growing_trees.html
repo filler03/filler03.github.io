@@ -43,6 +43,12 @@
     box-shadow: 0 4px 18px rgba(0,0,0,0.15);
   }
   #rotateOverlay .rotate-msg .rot { font-size: 42px; display: block; margin-bottom: 8px; }
+  #rotateOverlay .rotate-msg .rotate-version {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(46,93,52,0.7);
+    margin-top: 12px;
+  }
   @media (orientation: portrait) {
     #rotateOverlay { display: flex; }
   }
@@ -202,6 +208,15 @@
   }
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
+  .line-max {
+    margin-bottom: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #3a5ba0;
+    background: rgba(58,91,160,0.08);
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
   .fx-block {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -339,7 +354,7 @@
 </style>
 </head>
 <body>
-<div id="rotateOverlay"><div class="rotate-msg"><span class="rot">📱🔄</span>Please rotate your device to landscape</div></div>
+<div id="rotateOverlay"><div class="rotate-msg"><span class="rot">📱🔄</span>Please rotate your device to landscape<div class="rotate-version" id="rotateVersion"></div></div></div>
 <div id="hint">🌱 Planting: tap or drag the ground to grow a tree • turn sharply mid-drag to start a new line (up to 4 lines set the note's envelope: length = time, Y change = volume) • the trunk grows during attack, branches during decay+hold, leaves & fruit during release • tap the buttons (bottom-left) to switch to 🧭 Navigating or to make the sound wait for the whole gesture</div>
 <div id="count">🌳 0 trees</div>
 <div id="statHud"></div>
@@ -419,6 +434,18 @@
     <label for="growSpeed">Growth speed <b class="val" id="growSpeedVal"></b></label>
     <input type="range" id="growSpeed" min="0.25" max="4" step="0.05">
   </div>
+  <div class="vec-head">Line drawing</div>
+  <div class="grid">
+    <label for="maxW">Screen width / line <b class="val" id="maxWVal"></b></label>
+    <input type="range" id="maxW" min="10" max="100" step="5">
+    <label for="maxH">Screen height / line <b class="val" id="maxHVal"></b></label>
+    <input type="range" id="maxH" min="10" max="100" step="5">
+    <label for="timeMult">Time multiplier <b class="val" id="timeMultVal"></b></label>
+    <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
+    <label for="guardW">Guard width <b class="val" id="guardWVal"></b></label>
+    <input type="range" id="guardW" min="0.5" max="4" step="0.1">
+  </div>
+  <div class="line-max">Full drag width = ⏳ <b id="lineMaxTime"></b>ms · full drag height = 🔊 100%</div>
   </div>
   <div class="panel-col actions">
   <div class="panel-actions">
@@ -428,38 +455,30 @@
   </div>
   </div>
   <div class="fx-section">
-  <div class="vec-head">Fixed values (tick to skip that gesture line) · Max = value of a full-width line (time); full-height = full volume</div>
+  <div class="vec-head">Fixed values (tick to skip that gesture line) · a line's time and volume come from the Line drawing settings</div>
   <div class="fx-block">
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-attack"> Attack</label><b class="val" id="fx-attackTVal"></b> ms</div>
       <input type="range" id="fx-attackT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val">100%</b></div>
-      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-attackMaxVal"></b> ms</div>
-      <input type="range" id="fx-attackMax" min="50" max="5000" step="10">
     </div>
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-decay"> Decay</label><b class="val" id="fx-decayTVal"></b> ms</div>
       <input type="range" id="fx-decayT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-decayVolVal"></b></div>
       <input type="range" id="fx-decayVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-decayMaxVal"></b> ms</div>
-      <input type="range" id="fx-decayMax" min="50" max="5000" step="10">
     </div>
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-hold"> Hold</label><b class="val" id="fx-holdTVal"></b> ms</div>
       <input type="range" id="fx-holdT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-holdVolVal"></b></div>
       <input type="range" id="fx-holdVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-holdMaxVal"></b> ms</div>
-      <input type="range" id="fx-holdMax" min="100" max="5000" step="10">
     </div>
     <div class="fx-item">
       <div class="fx-head"><label><input type="checkbox" id="fx-release"> Release</label><b class="val" id="fx-releaseTVal"></b> ms</div>
       <input type="range" id="fx-releaseT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-releaseVolVal"></b></div>
       <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
-      <div class="fx-head"><span>Max (full width)</span><b class="val" id="fx-releaseMaxVal"></b> ms</div>
-      <input type="range" id="fx-releaseMax" min="100" max="5000" step="10">
     </div>
   </div>
   </div>
@@ -512,7 +531,7 @@
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.1.52</div>
+<div id="version">v1.1.63</div>
 
 <script>
 /* ============================================================
@@ -559,6 +578,10 @@ const liveTrees = [];      // trees still growing (full redraw each frame)
 const bakedTrees = [];     // finished trees, cached as bitmaps
 const lineIndicators = []; // rings at each registered line's start point
 const statHud = document.getElementById('statHud');
+
+// Mirror the bottom-right version badge into the rotate prompt, so the
+// version shows while the device is held upright too.
+document.getElementById('rotateVersion').textContent = document.getElementById('version').textContent;
 
 // Stage coordinates match the viewport directly; landscape orientation is
 // enforced by the rotate prompt, so no swapping or rotation is needed.
@@ -836,7 +859,7 @@ class Branch {
 
 /* ---------- Tree ---------- */
 class Tree {
-  constructor(x, y, sceneDepth, growDur, sustainLevel, note) {
+  constructor(x, y, sceneDepth, sustainLevel, note) {
     this.x = x;                                   // world position (used for chords)
     this.y = y;                                   // ground point (trunk base)
     this.depth = sceneDepth;                      // 0 far .. 1 near
@@ -848,6 +871,7 @@ class Tree {
       s: base.s + (Math.random() * 8 - 4),
       l: base.l + (Math.random() * 8 - 4),
     };
+    this.sustainLevel = sustainLevel;
 
     // ---- GROWTH (fixed speed, the note decides how MUCH) ----
     // Trunk grows across the attack, branches across decay + hold, and leaves
@@ -855,6 +879,72 @@ class Tree {
     // longer note segments grow a part further, never faster. The trunk keeps
     // thickening slowly through the branch window so it animates in and then
     // fattens like a real trunk while the branches spread.
+    // applyNote() derives the caps and windows from the note. In live-sound
+    // mode the tree is planted when the first line completes, and later lines
+    // re-apply a stretched envelope to the same growing tree — rebuilding it
+    // at the bigger size the longer woody window implies (refreshLiveTree).
+    this.applyNote(note);
+    this.born       = performance.now();
+    this.phase      = 'grow';
+
+    // ---- SIZE from GESTURE ----
+    // Size comes only from how long the woody window lasts (attack -> release
+    // start): a very short gesture makes a tiny shrub; a long gesture makes a
+    // tall, full tree. Where you plant it has no effect on size. The structure
+    // is built from the size the CURRENT note implies; in live-sound mode it is
+    // rebuilt bigger as later lines stretch the woody window.
+    this.buildStructure(this.targetSize());
+
+    this.bmp = null; this.bx = 0; this.by = 0;
+  }
+
+  // The structure size the current note implies.
+  targetSize() {
+    const FULL_GROW_MS = 6000;                  // woody window for a full-size tree
+    const growDur = Math.max(120, this.note.attack + this.note.decay + this.note.hold);
+    const sizeFactor = clamp01(growDur / FULL_GROW_MS) *
+                       (0.35 + 0.65 * clamp01(this.sustainLevel));
+    return {
+      growDur,
+      sizeFactor,
+      trunkHeight: 0.35 + 0.65 * Math.pow(sizeFactor, 0.5),
+      // Branch/footprint scale from the gesture alone (no depth perspective).
+      scale: 0.7 + 1.3 * sizeFactor,
+      // Bigger trees branch more (bushier), small shrubs stay sparse.
+      maxDepth: 2 + Math.round(sizeFactor * 6),    // 2 .. 8 levels
+    };
+  }
+
+  // Build (or rebuild) the branch network from a size returned by targetSize().
+  buildStructure(size) {
+    this.sizeFactor = size.sizeFactor;
+    this.scale = size.scale;
+    this.maxDepth = size.maxDepth;
+    const trunkLen = (55 + Math.random() * 45) * size.scale * size.trunkHeight;
+    const trunkThick = Math.max(3, 12 * size.scale * (0.5 + 0.5 * size.sizeFactor));
+    this.trunk = new Branch(this.x, this.y, -Math.PI / 2 + (Math.random() - 0.5) * 0.2,
+                            trunkLen, trunkThick, 0);
+    this.trunk.build(this);
+    this.sizeScale = 1;   // 1 = natural size; eased up from a live-mode rebuild
+  }
+
+  // If a finished (baked) tree must grow again because a live line stretched
+  // the envelope, drop its cached bitmap and resume live growth.
+  unbake() {
+    if (!this.bmp) return;
+    this.bmp = null;
+    const i = bakedTrees.indexOf(this);
+    if (i >= 0) bakedTrees.splice(i, 1);
+    liveTrees.push(this);
+    this.phase = 'grow';
+  }
+
+  applyNote(note) {
+    // Recompute the growth caps and phase windows from a (possibly partial)
+    // note envelope. Each cap is a fraction of "full" grown, and each phase
+    // grows at the fixed growth speed, so the note decides how much a part
+    // grows, never how fast.
+    this.note = note;
     const speed = Math.max(0.01, GESTURE.growSpeed);
     this.trunkCap   = clamp01(note.attack / (GROW_TRUNK_FULL_MS / speed));
     this.branchCap  = clamp01((note.decay + note.hold) / (GROW_BRANCH_FULL_MS / speed));
@@ -869,43 +959,36 @@ class Tree {
     const trunkFrac = this.trunkCap * TRUNK_ATTACK_FRAC;
     this.trunkRate      = trunkFrac / this.tTrunkEnd;                                   // attack phase (per ms)
     this.trunkSlackRate = (this.trunkCap - trunkFrac) / Math.max(0.001, this.tBranchEnd - this.tTrunkEnd);  // branch phase (per ms)
-    this.born       = performance.now();
-    this.phase      = 'grow';
-
-    // ---- SIZE from GESTURE ----
-    // Size comes only from how long the woody window lasts (attack -> release
-    // start): a very short gesture makes a tiny shrub; a long gesture makes a
-    // tall, full tree. Where you plant it has no effect on size.
-    const FULL_GROW_MS = 6000;                  // woody window for a full-size tree
-    this.growDur = Math.max(120, growDur);
-    const sizeFactor = clamp01(this.growDur / FULL_GROW_MS) *
-                       (0.35 + 0.65 * clamp01(sustainLevel));
-    const trunkHeight = 0.35 + 0.65 * Math.pow(sizeFactor, 0.5);
-
-    // Branch/footprint scale from the gesture alone (no depth perspective).
-    this.scale = 0.7 + 1.3 * sizeFactor;
-
-    // Bigger trees branch more (bushier), small shrubs stay sparse.
-    this.maxDepth = 2 + Math.round(sizeFactor * 6);    // 2 .. 8 levels
-
-    const trunkLen = (55 + Math.random() * 45) * this.scale * trunkHeight;
-    const trunkThick = Math.max(3, 12 * this.scale * (0.5 + 0.5 * sizeFactor));
-    this.trunk = new Branch(x, y, -Math.PI / 2 + (Math.random() - 0.5) * 0.2,
-                            trunkLen, trunkThick, 0);
-    this.trunk.build(this);
-
-    this.bmp = null; this.bx = 0; this.by = 0;
   }
 
   update(now, dt) {
     const t = now - this.born;
+    // A live-mode rebuild starts the tree smaller and eases it up to the new
+    // size so the bigger structure appears to keep growing, not pop.
+    if (this.sizeScale < 1) {
+      this.sizeScale = Math.min(1, this.sizeScale + (1 - this.sizeScale) * Math.min(1, dt * 8));
+    }
     if (t >= this.tTotal) this.phase = 'done';
     this.trunk.update(this, now, dt);
     return this.phase === 'done';
   }
-  draw(ctx) { this.trunk.draw(ctx, this, this.x, this.y, this.trunk.grown); }
+
+  draw(ctx) {
+    if (this.sizeScale === 1) {
+      this.trunk.draw(ctx, this, this.x, this.y, this.trunk.grown);
+    } else {
+      // Scale about the trunk base so a mid-rebuild tree eases up in size.
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.scale(this.sizeScale, this.sizeScale);
+      ctx.translate(-this.x, -this.y);
+      this.trunk.draw(ctx, this, this.x, this.y, this.trunk.grown);
+      ctx.restore();
+    }
+  }
 
   bake() {
+    this.sizeScale = 1;   // the cached bitmap is the final, full-grown size
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
     this.trunk.bounds(box, this.x, this.y);
     const pad = 4;
@@ -989,13 +1072,59 @@ function plantAt(sx, sy, segments, sound, env) {
   // = small shrub, long = big tree. The note's individual durations drive the
   // growth animation: trunk during attack, branches during decay+hold, leaves
   // & fruit during release, all at the fixed growth speed.
-  const animDur = s.attack + s.decay + s.hold;
   const rootY = groundYFor(depth);
   const note = { attack: s.attack, decay: s.decay, hold: s.hold, release: s.release };
-  liveTrees.push(new Tree(w.x, rootY, depth, animDur, s.sustain / 100, note));
+  liveTrees.push(new Tree(w.x, rootY, depth, s.sustain / 100, note));
   treeCount++;
   countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
   document.getElementById('hint').style.opacity = '0';
+}
+
+// The envelope a live gesture has registered so far, with the same fallbacks
+// plantAt uses for components no line has covered yet.
+function liveEnvNote(ds) {
+  const s = Object.assign({}, CHIME_SETTINGS.start);
+  if (ds.attack != null) s.attack = ds.attack;
+  s.decay = ds.decay != null ? ds.decay : 40;   // quick dropoff if no line 2
+  s.hold  = ds.hold  != null ? ds.hold  : 0;    // none if no line 3
+  if (ds.release != null) s.release = ds.release;
+  return { attack: s.attack, decay: s.decay, hold: s.hold, release: s.release };
+}
+
+// Live-sound mode: plant the tree the moment the note begins — right after
+// the first line completes — so it grows in sync with the sound instead of
+// waiting for the whole gesture to finish.
+function plantLiveTree(ds) {
+  const w = toWorld(ds.startX, ds.startY);
+  const depth = Math.max(0, (w.y - HORIZON) / (H * 0.42));
+  const note = liveEnvNote(ds);
+  const tree = new Tree(w.x, groundYFor(depth), depth,
+                        CHIME_SETTINGS.start.sustain / 100, note);
+  ds.tree = tree;
+  liveTrees.push(tree);
+  treeCount++;
+  countEl.textContent = `🌳 ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
+  document.getElementById('hint').style.opacity = '0';
+}
+
+// Later gesture lines stretch the envelope; extend the live tree's growth
+// windows to match. A longer woody window (attack + decay + hold) also means a
+// bigger tree, so the structure is rebuilt at the new size and eased up from
+// the old one — the tree keeps growing throughout the gesture instead of
+// staying a small shrub.
+function refreshLiveTree(ds) {
+  const t = ds.tree;
+  if (!t) return;
+  const note = liveEnvNote(ds);
+  t.applyNote(note);
+  const size = t.targetSize();
+  const grew = size.sizeFactor > (t.sizeFactor || 0) + 0.001;
+  if (t.bmp) t.unbake();                 // a finished tree resumes growing
+  if (grew) {
+    const oldScale = t.scale || size.scale;
+    t.buildStructure(size);
+    if (oldScale > 0) t.sizeScale = oldScale / size.scale;
+  }
 }
 
 const pointers = new Map();
@@ -1035,6 +1164,12 @@ const DEFAULT_GESTURE = {
   maxVectors: 4,
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
   growSpeed: 1,    // tree growth multiplier (fixed speed the parts grow at)
+  maxW: 100,       // drag area width per line, % of screen width (sets the time guide)
+  maxH: 100,       // drag area height per line, % of screen height (sets the volume guide)
+  timeMult: 1,     // × the base time rate (TIME_PER_W ms per % width)
+  guardW: 1.5,     // guard corridor half-width, as a multiple of the guide radius —
+                   // how far you can sway off the locked direction before the line ends
+                   // (ending a line early can start the next one)
   assign: { v1x: null, v1y: null, v2x: null, v2y: null, v3x: null, v3y: null },
   sens:  { volume: 8, attack: 150, decay: 200, sustain: 50, hold: 1200, release: 400 },
   min:   { volume: 0.02, attack: 30, decay: 50, sustain: 20, hold: 100, release: 100 },
@@ -1043,15 +1178,20 @@ const DEFAULT_GESTURE = {
 };
 let GESTURE = clone(DEFAULT_GESTURE);
 
+// Base time rate at a 1x multiplier: 10% of the screen width = 500 ms of time.
+// Volume is not multiplier-driven: the full drag height (GESTURE.maxH % of the
+// screen) always spans the whole 0–100% volume range.
+const TIME_PER_W = 50;    // ms of time per % of screen width at 1x time multiplier
+
 // Fixed values for the four envelope components. When a component is ticked
 // ("on"), it uses this preset value and its gesture line is skipped, so the
 // remaining lines shift up to fill the unticked components.
 const SLOT_NAMES = ['attack', 'decay', 'hold', 'release'];
 const DEFAULT_FIXED = {
-  attack:  { on: true,  value: 5,    vol: 100, max: 2000 },
-  decay:   { on: true,  value: 120,  vol: 60,  max: 3000 },
-  hold:    { on: true,  value: 250,  vol: 60,  max: 5000 },
-  release: { on: true,  value: 1200, vol: 0,   max: 5000 },
+  attack:  { on: true,  value: 5,    vol: 100 },
+  decay:   { on: true,  value: 120,  vol: 60 },
+  hold:    { on: true,  value: 250,  vol: 60 },
+  release: { on: true,  value: 1200, vol: 0 },
 };
 let FIXED = clone(DEFAULT_FIXED);
 
@@ -1080,64 +1220,84 @@ function volumeFromStartY(sy) {
   return mix(VOL_MIN, VOL_MAX, clamp01(1 - sy / H));
 }
 
-// SIMPLIFIED ENVELOPE: every line's time comes from its X change; a line can
-// stay short in time while still sweeping a large volume. A line's Y change
-// sets the volume change across that duration (upward = louder, downward =
-// quieter). Volume never exceeds the gain chosen by the start position; the
-// attack line (line 1) always ramps up to that gain.
-// Gesture line time: the X change as a FRACTION OF THE SCREEN WIDTH, scaled by
-// the component's Max setting and capped by it — a drag across the full width
-// gives the Max time on any device. Every line uses the X axis for time — the
-// attack included — so a line's Y change only ever sets its volume.
-// Volume change: the Y change as a FRACTION OF THE SCREEN HEIGHT — a drag
-// across the full height sweeps the whole gain range on any device.
+// SIMPLIFIED ENVELOPE: a line can stay short in time while still sweeping a
+// large volume. A line's Y change sets the volume change across that duration
+// (upward = louder, downward = quieter). Volume never exceeds the gain chosen
+// by the start position; the attack line (line 1) always ramps up to that gain.
+// Gesture line time: the SAME base rate for every line (TIME_PER_W ms per % of
+// screen width × the time multiplier), capped at the drag width (GESTURE.maxW
+// %). The attack measures by line LENGTH (any direction); every other line by
+// its horizontal extent. Volume change: the Y change as a fraction of the drag
+// height (GESTURE.maxH % of the screen height), which always spans the whole
+// 0–100% range and never goes above 100%.
 function lineTimeForSlot(seg, slot, lineIndex) {
-  // The attack's time comes from the line's LENGTH (it can go in any
-  // direction); every other line's time comes from its X extent (a full
-  // screen width = its max).
-  const w = Math.abs(seg.x1 - seg.x0);
-  const len = Math.hypot(seg.x1 - seg.x0, seg.y1 - seg.y0);
-  const frac = (slot === 0 ? len : w) / Math.max(1, W);
-  const max = FIXED[SLOT_NAMES[slot]].max;
-  return Math.min(Math.round(frac * max), max);
+  // The attack can go in any direction, so its time comes from the line's
+  // LENGTH (in screen-width units); every other line's time comes from its
+  // horizontal extent. Both share the same rate and the same max.
+  const w = slot === 0
+    ? Math.hypot(seg.x1 - seg.x0, seg.y1 - seg.y0)
+    : Math.abs(seg.x1 - seg.x0);
+  const rate = TIME_PER_W * GESTURE.timeMult;   // ms per % of screen width
+  return Math.min(Math.round((w / Math.max(1, W)) * 100 * rate), GESTURE.maxW * rate);
 }
 const FADE_MS = 150;      // smooth fade-out to 0 when a sequence ends (no clip)
 const TAP_ATTACK_MS = 60; // quick attack for a tap with no line
 
-const GUIDE_RADIUS = 13;     // glowing max-circle radius (also sets the guard cone)
-const GUIDE_LOCK_PX = 15;    // px of line before the drag direction locks and the
+const GUIDE_RADIUS = 13;     // glowing max-circle radius
+const GUIDE_LOCK_PX = 30;    // px of line before the drag direction locks and the
                              // guides (edge arrows + max circle + guard lines)
                              // appear — the wiggle room you get to aim first
 
-// Guide for the live line being drawn: the point where the component reaches
-// its max — Max time at a full screen width, max volume at a full screen
-// height — so the max circle sits at the screen edge in the drag direction.
-// Returns the screen point plus the ms / % shown there and the committed drag
-// direction (angle) from the line's origin.
+// Guide for the live line being drawn: the point where the line reaches its
+// max — the full drag width (GESTURE.maxW % of the screen, time) or the volume
+// cap, whichever the locked ray crosses first. Volume starts where the
+// previous slot left it, so a line can only move it toward 0 or 100 from
+// there — the circle sits at the fraction of the drag height that uses up that
+// remaining range, not always at the full drag height.
 function segmentGuide(seg, slot, lineIndex, radius) {
   const dx = seg.x1 - seg.x0, dy = seg.y1 - seg.y0;
   const len = Math.hypot(dx, dy);
   if (len < 1) return null;
   const r = radius || GUIDE_RADIUS;
-  const maxMs = FIXED[SLOT_NAMES[slot]].max;
 
-  // Max time = a full screen width, max volume = a full screen height, so the
-  // max circle sits at the screen edge in the drag direction (whichever edge
-  // the ray reaches first). The attack follows the same guide — it can go in
-  // any direction; only its TIME mapping differs (line length vs X extent).
   const ux = dx / len, uy = dy / len;
-  const L_time = ux !== 0 ? (ux > 0 ? W - seg.x0 : seg.x0) / Math.abs(ux) : Infinity;
-  const L_vol  = uy !== 0 ? (uy > 0 ? H - seg.y0 : seg.y0) / Math.abs(uy) : Infinity;
-  const L = Math.min(L_time, L_vol);
+  const timeRate = TIME_PER_W * GESTURE.timeMult;   // ms per % of width
+  const dragWpx = Math.max(1, W * GESTURE.maxW / 100);
+  const dragHpx = Math.max(1, H * GESTURE.maxH / 100);
+
+  // The drag-area rectangle (maxW % wide × maxH % tall) bounds every guide, so
+  // a line drawn in any direction keeps its circle on the rectangle's edge —
+  // straight down stays straight down, never diagonal.
+  const L_height = uy !== 0 ? dragHpx / Math.abs(uy) : Infinity;
+  // Time cap: the attack measures time by line LENGTH, so its cap is a fixed
+  // length (the drag width); every other line measures by X extent, so its cap
+  // is the distance to the width boundary along the ray.
+  const L_time = slot === 0 ? dragWpx
+               : (ux !== 0 ? dragWpx / Math.abs(ux) : Infinity);
+
+  // Volume cap: where the remaining range toward 0 or 100 from the line's
+  // start level runs out. The attack always ramps to full gain, so it has no
+  // volume limit; when a line has no volume room in its direction, the drag
+  // rectangle bounds the circle instead.
+  const startPct = slot === 0 ? 0 : slotEndPct(slot - 1, null);
+  let L_vol = Infinity;
+  if (slot !== 0 && uy !== 0) {
+    const volCap = uy < 0 ? 100 - startPct : startPct;
+    if (volCap >= 1) L_vol = (volCap / 100) * dragHpx / Math.abs(uy);
+  }
+  const L = Math.min(L_time, L_vol, L_height);
   if (!isFinite(L)) return null;
-  // For the attack, ms uses the ray LENGTH to the edge (full width = max);
-  // other lines use their X extent at that point.
+
+  // For the attack, time is the ray LENGTH to the circle; for other lines it's
+  // the horizontal extent there.
   const timeFrac = (slot === 0 ? L : Math.abs(ux) * L) / Math.max(1, W);
+  const volFrac  = Math.abs(uy) * L / Math.max(1, dragHpx);
+  const volDir = uy < 0 ? 1 : -1;              // + louder, - quieter
   return {
     px: Math.max(r, Math.min(W - r, seg.x0 + ux * L)),
     py: Math.max(r, Math.min(H - r, seg.y0 + uy * L)),
-    ms: Math.min(maxMs, Math.round(timeFrac * maxMs)),
-    pct: slot === 0 ? 100 : Math.min(100, Math.round((Math.abs(uy) * L / Math.max(1, H)) * 100)),
+    ms: Math.round(timeFrac * 100 * timeRate),
+    pct: slot === 0 ? 100 : Math.max(0, Math.min(100, Math.round(startPct + volDir * volFrac * 100))),
     angle: Math.atan2(dy, dx),             // committed drag direction
     dist: L,                               // origin → circle center
     R: r,
@@ -1182,7 +1342,9 @@ function slotEndPct(slot, live) {
       let dy = 0;
       if (row) dy = row.dy;
       else if (live && live.slot === s) dy = live.dy;
-      pct = Math.max(0, Math.min(100, pct + (dy / Math.max(1, H)) * 100));
+      // The full drag height (maxH % of the screen) spans the whole 0–100%
+      // volume range.
+      pct = Math.max(0, Math.min(100, pct + (dy / Math.max(1, H * GESTURE.maxH / 100)) * 100));
     }
   }
   return pct;
@@ -1219,6 +1381,9 @@ function renderHud(now, live) {
   now = typeof now === 'number' ? now : performance.now();
   let html = '';
   let show = hudState.on || hudRows.length > 0 || !!live;
+  // Slow pulse (~3s) for the component currently being drawn, driven in JS
+  // because the HUD DOM is rebuilt every frame.
+  const pulse = 0.5 + 0.5 * Math.sin(now * Math.PI * 2 / 3000);
   for (let s = 0; s < 4; s++) {
     const name = SLOT_NAMES[s];
     const fixed = FIXED[name].on;
@@ -1231,8 +1396,12 @@ function renderHud(now, live) {
       else if (live && live.slot === s) text = hudLineText(live.name, live.timeMs, slotEndPct(s, live));
       else text = `${name} · —`;
     }
+    const isLive = live && live.slot === s;
+    const style = isLive
+      ? ` style="box-shadow: 0 0 ${(5 + 15 * pulse).toFixed(1)}px rgba(58,91,160,${(0.3 + 0.45 * pulse).toFixed(2)});"`
+      : '';
     const p = hudProgress(s, now);
-    html += `<div${fixed ? ' class="hud-fixed"' : ''}>${text}<div class="hud-bar"><div class="hud-fill" style="width:${(p * 100).toFixed(1)}%"></div></div></div>`;
+    html += `<div${fixed ? ' class="hud-fixed"' : (isLive ? ' class="live"' : '')}${style}>${text}<div class="hud-bar"><div class="hud-fill" style="width:${(p * 100).toFixed(1)}%"></div></div></div>`;
   }
   statHud.innerHTML = html;
   statHud.style.opacity = show ? '1' : '0';
@@ -1371,7 +1540,14 @@ function applyLineToNote(ds, seg, index) {
   if (slot === 0) ds.attackRegistered = true;
   pushLineIndicator(seg, slot, time);
   commitHudLine(slot, name, time, seg.y0 - seg.y1);
-  if (!GESTURE.waitForGesture) scheduleLineToNote(ds, seg, index);
+  if (!GESTURE.waitForGesture) {
+    scheduleLineToNote(ds, seg, index);
+    // Live-sound mode: the note begins as soon as this line is in, so the tree
+    // starts growing right after the first line completes; later lines stretch
+    // its growth windows as the envelope catches up.
+    if (!ds.tree && activeNote) plantLiveTree(ds);
+    else refreshLiveTree(ds);
+  }
 }
 
 // Schedule a committed line's envelope segment. In live mode this runs as each
@@ -1455,12 +1631,18 @@ function finishPlantGesture() {
     playDeferredEnvelope(dragState);
   }
   const sound = gestureMoved(dragState) ? gestureSound(dragState.segments) : null;
-  plantAt(dragState.startX, dragState.startY, dragState.segments, sound, {
-    attack: dragState.attack,
-    decay: dragState.decay,
-    hold: dragState.hold,
-    release: dragState.release,
-  });
+  if (dragState.tree) {
+    // Live-sound mode: the tree already began growing with the first line and
+    // the final line already stretched it — just finish the note cleanly.
+    endGestureNote();
+  } else {
+    plantAt(dragState.startX, dragState.startY, dragState.segments, sound, {
+      attack: dragState.attack,
+      decay: dragState.decay,
+      hold: dragState.hold,
+      release: dragState.release,
+    });
+  }
   dragState = null;
 }
 
@@ -1509,6 +1691,7 @@ canvas.addEventListener('pointerdown', e => {
         hold: null,                             // set when line 3 ends
         release: null,                          // set when line 4 ends
         guide: null,                            // locked max-guide for the current line
+        tree: null,                             // live-sound tree, planted at the first line
       };
       // Fixed components play their preset and skip their gesture line. The
       // note is NOT started on touch: it begins when the first line is drawn
@@ -1677,6 +1860,15 @@ function loadSavedSettings() {
       if (d.gesture.maxVectors != null) g.maxVectors = d.gesture.maxVectors;
       if (d.gesture.waitForGesture != null) g.waitForGesture = !!d.gesture.waitForGesture;
       if (d.gesture.growSpeed != null) g.growSpeed = d.gesture.growSpeed;
+      if (d.gesture.maxW != null) g.maxW = d.gesture.maxW;
+      if (d.gesture.maxH != null) g.maxH = d.gesture.maxH;
+      if (d.gesture.timeMult != null) g.timeMult = d.gesture.timeMult;
+      if (d.gesture.guardW != null) g.guardW = d.gesture.guardW;
+      // Keep the line-drawing settings inside their slider ranges.
+      g.maxW = Math.max(10, Math.min(100, g.maxW));
+      g.maxH = Math.max(10, Math.min(100, g.maxH));
+      g.timeMult = Math.max(0.1, Math.min(4, g.timeMult));
+      g.guardW = Math.max(0.5, Math.min(4, g.guardW));
       for (const key of ['assign', 'sens', 'min', 'max']) {
         if (d.gesture[key]) g[key] = Object.assign({}, g[key], d.gesture[key]);
       }
@@ -1711,6 +1903,7 @@ function resetToDefaults() {
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
   syncGrowSpeedUI();
+  syncLineUI();
   syncFixedUI();
   syncWaitBtn();
   document.getElementById('startMode').value = PREFERENCES.startMode;
@@ -1827,7 +2020,8 @@ function scheduleVolumeSegment(durMs, seg, stopAtEnd, slot, idleMs) {
   const startTime = Math.max(now, activeNote.segEnd || now);   // let the last ramp finish
   const startLevel = activeNote.level;                         // where the last segment ended
   const dy = seg.y0 - seg.y1;   // screen Y grows downward: - upward = louder, + downward = quieter
-  const delta = (dy / Math.max(1, H)) * activeNote.vol;   // full height = full gain range
+  // The full drag height (maxH % of the screen) spans the whole gain range.
+  const delta = (dy / Math.max(1, H * GESTURE.maxH / 100)) * activeNote.vol;
   const target = Math.max(0, Math.min(activeNote.vol, startLevel + delta));
   // idleMs folds the catch-up time into this line, so its segment lasts long
   // enough for the envelope to reach the gesture again.
@@ -2181,12 +2375,51 @@ function syncGrowSpeedUI() {
 }
 syncGrowSpeedUI();
 
+/* ---- Line drawing (one drag area & time multiplier for every line) ---- */
+const timeMultEl = document.getElementById('timeMult');
+const maxWEl = document.getElementById('maxW');
+const maxHEl = document.getElementById('maxH');
+const guardWEl = document.getElementById('guardW');
+// The max time a line across the full drag width delivers, shown live.
+function syncLineMax() {
+  document.getElementById('lineMaxTime').textContent = Math.round(GESTURE.maxW * TIME_PER_W * GESTURE.timeMult);
+}
+function syncLineUI() {
+  maxWEl.value = GESTURE.maxW;
+  maxHEl.value = GESTURE.maxH;
+  timeMultEl.value = GESTURE.timeMult;
+  guardWEl.value = GESTURE.guardW;
+  document.getElementById('maxWVal').textContent = GESTURE.maxW + ' %';
+  document.getElementById('maxHVal').textContent = GESTURE.maxH + ' %';
+  document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
+  document.getElementById('guardWVal').textContent = GESTURE.guardW.toFixed(1) + 'x';
+  syncLineMax();
+}
+maxWEl.addEventListener('input', () => {
+  GESTURE.maxW = +maxWEl.value;
+  document.getElementById('maxWVal').textContent = GESTURE.maxW + ' %';
+  syncLineMax();
+});
+maxHEl.addEventListener('input', () => {
+  GESTURE.maxH = +maxHEl.value;
+  document.getElementById('maxHVal').textContent = GESTURE.maxH + ' %';
+});
+timeMultEl.addEventListener('input', () => {
+  GESTURE.timeMult = +timeMultEl.value;
+  document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
+  syncLineMax();
+});
+guardWEl.addEventListener('input', () => {
+  GESTURE.guardW = +guardWEl.value;
+  document.getElementById('guardWVal').textContent = GESTURE.guardW.toFixed(1) + 'x';
+});
+syncLineUI();
+
 /* ---- Fixed values ---- */
 for (const name of SLOT_NAMES) {
   const cb = document.getElementById('fx-' + name);
   const tEl = document.getElementById('fx-' + name + 'T');
   const volEl = name === 'attack' ? null : document.getElementById('fx-' + name + 'Vol');
-  const maxEl = document.getElementById('fx-' + name + 'Max');
   // Fixed-value sliders (preset time, end vol) only apply when the component
   // is ticked to use its fixed value.
   function syncFxEnabled() {
@@ -2206,10 +2439,6 @@ for (const name of SLOT_NAMES) {
     FIXED[name].vol = +volEl.value;
     document.getElementById('fx-' + name + 'VolVal').textContent = volEl.value + '%';
   });
-  maxEl.addEventListener('input', () => {
-    FIXED[name].max = +maxEl.value;
-    document.getElementById('fx-' + name + 'MaxVal').textContent = maxEl.value + 'ms';
-  });
 }
 function syncFixedUI() {
   for (const name of SLOT_NAMES) {
@@ -2222,9 +2451,6 @@ function syncFixedUI() {
       volEl.value = FIXED[name].vol;
       document.getElementById('fx-' + name + 'VolVal').textContent = FIXED[name].vol + '%';
     }
-    const maxEl = document.getElementById('fx-' + name + 'Max');
-    maxEl.value = FIXED[name].max = Math.max(1, Math.min(5000, FIXED[name].max));
-    document.getElementById('fx-' + name + 'MaxVal').textContent = FIXED[name].max + 'ms';
     const fixed = FIXED[name].on;
     tEl.disabled = !fixed;
     if (name !== 'attack') document.getElementById('fx-' + name + 'Vol').disabled = !fixed;
@@ -2306,6 +2532,7 @@ settingsBtn.addEventListener('click', () => {
     settingsPanel.classList.remove('hidden');
     loadLevelUI(currentLevel);
     /* loadGestureUI(); */
+    syncLineUI();
     syncFixedUI();
   } else {
     closeSettingsPanel();
@@ -2446,10 +2673,11 @@ function loop(now) {
         // lines) only appear once the drag direction is locked, so the wiggle
         // room before that stays free of directional hints.
         if (dragState.guide) {
-        // Time & volume guides: thick lines centered on the screen edges that
-        // wiggle back and forth. The bottom one (time, shown for every line
-        // including the attack) arrows the way the line moves horizontally; the
-        // right one (volume, skipped for the attack whose volume is always
+        // Time & volume guides: thick arrows that wiggle back and forth. The
+        // time arrow (shown for every line) points the way the line moves: for
+        // the attack it sits right beside the guard corridor pointing along the
+        // drag; for other lines it stays on the bottom edge pointing sideways.
+        // The right one (volume, skipped for the attack whose volume is always
         // 100%) arrows the way it moves vertically.
         {
           const odx = dragState.curX - dragState.segX, ody = dragState.curY - dragState.segY;
@@ -2460,9 +2688,24 @@ function loop(now) {
             // points along the drag direction (any direction); every other
             // line's time is horizontal, so their arrow stays horizontal.
             if (Math.abs(odx) >= 1) {
-              const dragAngle = Math.atan2(ody, odx);
-              const a = nextSlot === 0 ? dragAngle : (odx > 0 ? 0 : Math.PI);
-              const gx = W / 2 + wig * 12, gy = H - EDGE_INSET;
+              // time guide: the attack's time is length-based, so its arrow
+              // points along the locked drag direction and sits right beside
+              // the guard corridor at the line's start; every other line's
+              // time is horizontal, so their arrow stays on the bottom edge.
+              const a = nextSlot === 0 ? dragState.guide.angle : (odx > 0 ? 0 : Math.PI);
+              let gx, gy;
+              if (nextSlot === 0) {
+                const perpX = -Math.sin(a), perpY = Math.cos(a);
+                const aside = dragState.guide.R * GESTURE.guardW + 14;   // just outside the guard line
+                const fwd = 24;
+                gx = dragState.segX + Math.cos(a) * fwd + perpX * aside;
+                gy = dragState.segY + Math.sin(a) * fwd + perpY * aside;
+                gx = Math.max(16, Math.min(W - 16, gx));
+                gy = Math.max(16, Math.min(H - 16, gy));
+              } else {
+                gx = W / 2 + wig * 12;
+                gy = H - EDGE_INSET;
+              }
               const LEN = 90;
               const tailX = gx - Math.cos(a) * LEN / 2, tailY = gy - Math.sin(a) * LEN / 2;
               const headX = gx + Math.cos(a) * LEN / 2, headY = gy + Math.sin(a) * LEN / 2;
@@ -2543,7 +2786,7 @@ function loop(now) {
           const prog = vx * dirX + vy * dirY;                  // forward progress along the path
           const perp = Math.abs(vx * dirY - vy * dirX);        // lateral distance from the drag line
           g.startProg = Math.max(g.startProg || 0, prog);      // the start circle advances, never retreats
-          if (perp > g.R || prog >= g.dist || prog < g.startProg - g.R) {
+          if (perp > g.R * GESTURE.guardW || prog >= g.dist || prog < g.startProg - g.R) {
             const limit = gestureLineLimit();
             if (dragState.segments.length >= limit - 1) finishPlantGesture();
             else commitLine(dragState, dragState.lastMove);
@@ -2562,8 +2805,8 @@ function loop(now) {
           ctx.lineWidth = 1.5;
           for (const s of [-1, 1]) {
             ctx.beginPath();
-            ctx.moveTo(ox + perpX * s * g.R, oy + perpY * s * g.R);
-            ctx.lineTo(g.px + perpX * s * g.R, g.py + perpY * s * g.R);
+            ctx.moveTo(ox + perpX * s * g.R * GESTURE.guardW, oy + perpY * s * g.R * GESTURE.guardW);
+            ctx.lineTo(g.px + perpX * s * g.R * GESTURE.guardW, g.py + perpY * s * g.R * GESTURE.guardW);
             ctx.stroke();
           }
           // The start circle rides forward with the drag (never backward),
