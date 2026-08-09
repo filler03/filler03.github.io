@@ -51,3 +51,4 @@ Individual game write-ups (indexed from [`.agents/public-site.md`](.agents/publi
 3. **Server is authoritative.** All game physics run server-side. Clients are pure renderers. Don't move game logic to the client.
 4. **Test before deploying multiplayer changes.** Each app has a `test-server.js` — run it with `node test-server.js`.
 5. **Keep HTML self-contained.** Games and tools are single-file HTML apps with inline CSS and JS. Don't split them into separate files unless explicitly asked.
+6. **Report the current branch.** Whenever you make (or are about to make) edits in this repo, tell the user which git branch you are currently on (e.g. `git branch --show-current`).

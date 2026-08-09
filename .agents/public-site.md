@@ -31,7 +31,7 @@ Detailed, indexed write-ups for individual games live in [`.agents/games/`](game
 
 | Game | Guide |
 |------|-------|
-| Growing Trees | [`.agents/games/growing-trees.md`](games/growing-trees.md) — gesture→envelope model, fixed values & Max caps, tree growth phases, HUD, settings, architecture index |
+| Growing Trees | [`.agents/games/growing-trees.md`](games/growing-trees.md) — freehand gesture→note model (X = time, Y = volume), live/wait playback, tap defaults, tree growth phases, HUD, settings, architecture index |
 
 ## Test Builds (`public/test/`)
 

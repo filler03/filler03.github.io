@@ -1,8 +1,8 @@
 # Growing Trees (`public/games/growing_trees.html`)
 
-> Single-file HTML5 canvas game: draw a multi-segment gesture and it both **plays a synthesized note** and **grows a tree** from the ground. The envelope you draw (attack / decay / hold / release) drives the sound, the tree growth, and a live top-left HUD with per-component progress bars.
+> Single-file HTML5 canvas game: draw a freehand gesture and it both **plays a synthesized note** and **grows a tree** from the ground. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays.
 >
-> Current version badge: `v1.1.21` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.2.0` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -10,53 +10,43 @@
 |--------|--------|
 | File | `public/games/growing_trees.html` (self-contained HTML/CSS/JS) |
 | Rendering | Canvas 2D, single depth-sorted pass (far → near), finished trees cached to bitmaps |
-| Audio | Web Audio API (oscillator + gain envelope, master gain 0.45, compressor) |
-| Persistence | `localStorage` key `growingTrees.settings.v4` → `{ chime, gesture, fixed, prefs }` |
+| Audio | Web Audio API (oscillator + gain envelope, master gain 0.45, compressor). Gestures use `setValueCurveAtTime` (wait mode) or incremental ramps (live mode) |
+| Persistence | `localStorage` key `growingTrees.settings.v5` → `{ chime, gesture, fixed, prefs }` |
 | Interaction | Two modes: `plant` (draw trees/notes) and `nav` (pan + pinch zoom) |
 
 ## Controls
 
 | Input | Plant mode (`plant`) | Navigate mode (`nav`) |
 |-------|----------------------|------------------------|
-| Tap / drag on ground | Plant a tree (gesture sets the note) | — |
-| Sharp direction change (~72°, `TURN_DOT = 0.3`, line must be ≥ `TURN_MIN_LINE = 30px`) | Ends the current line, starts the next | — |
-| Sharp turn on the **last** line | Ends the line **and** releases the gesture (plants the tree) | — |
+| Tap | Play the default ADSR note + grow a small tree | — |
+| Drag a freehand path | Draw a dotted path that plays back (circle turns it green) | — |
 | Pan sliders (on-screen) | — | Pan `cam.x` / `cam.y` |
 | Pinch inside pan slider | — | Zoom (zoomAt) |
 
 - Startup camera: zoomed all the way out, panned all the way down — `cam = { x: 0, y: HORIZON * MIN_ZOOM, zoom: MIN_ZOOM }`, where `MIN_ZOOM = 0.3`, `MAX_ZOOM = 3.0`, `HORIZON = H * 0.56`.
 
-## Gesture → Sound Envelope
+## Gesture → Note (freehand path)
 
-Up to **4 gesture lines** map onto the note's envelope, in order (skipping fixed components):
+A gesture is one continuous freehand path (no more line splitting, guide circles, or guard corridors):
 
-1. Each line's **length** (px) × `GESTURE.timePerPx` (default `12`, slider 1–40) = that component's **time in ms**.
-2. Each line's **Y change** = that component's **volume change** (`VOL_PX_REF = 400` px sweeps the whole gain range).
-   - **Y is inverted**: screen Y grows downward, so `dy = y0 - y1` → dragging **up = louder**, down = quieter.
-3. A component's gesture value is capped by its **Max** setting (`FIXED[name].max` via `lineTimeForSlot`).
-4. Volume ceiling (gain) comes from the gesture **start X**: `volumeFromStartX` — far left ≈ `0.01`, far right ≈ `0.5`.
-5. Pitch comes from the plant position: `pitchFor(sx, sy)` — major pentatonic, one octave below the key.
+- **Time (X)**: each path step adds `(|Δx| / W * 100) * TIME_PER_W * timeMult` ms of note time. Left and right both count (`|Δx|`), so a purely vertical line is ~0 ms (fills in a flash) and a long horizontal one makes a long note. `cumTime[]` accumulates this along the path; `totalMs = cumTime[last]`.
+- **Volume (Y)**: absolute screen Y — `volumeFromStartY(y)` (top = loud `0.5`, bottom = quiet `0.01`). The starting volume is therefore the first touch's Y automatically.
+- **Pitch**: from the plant X position via `pitchFor(sx, sy)` (major pentatonic, an octave below the key).
 
-| Slot | Component | Gesture line role |
-|------|-----------|-------------------|
-| 0 | `attack` | Always ramps silence → full gain over the line's time |
-| 1 | `decay` | Ramp to its ΔY target, chains from attack's end |
-| 2 | `hold` | Same, chains after decay |
-| 3 | `release` | Same, then fades to 0 (anti-clip `FADE_MS = 150`) |
+### Playback visualization
 
-## Fixed Values & Max Caps
+While drawing the path is a **dotted line**. During playback a small **glowing circle** travels along the path at the point whose `cumTime` equals the elapsed note time, turning the traveled portion into a **glowing green solid line** (`GESTURE_GREEN = #3ecb5a`); the unplayed portion stays dotted. When the note finishes the whole path stays green and fades out after `LINGER_MS = 800`.
 
-Each component can be ticked **fixed** ("skip its gesture line") or gesture-driven:
+### Live vs Wait (top-left toggle)
 
-| Setting | Purpose |
-|---------|---------|
-| `on` (checkbox) | Tick = use preset, skip this component's gesture line |
-| value (`fx-<name>T`) | Preset ms used when fixed (defaults: attack 5, decay 120, hold 250, release 1200) |
-| End vol (`fx-<name>Vol`) | Preset target level as % of gain (defaults: 100 / 60 / 60 / 0) |
-| Max (`fx-<name>Max`) | Cap for gesture-derived ms (defaults: 2000 / 3000 / 10000 / 5000) |
+| Mode | When the note plays |
+|------|---------------------|
+| 🎵 Live sound (`waitForGesture: false`) | The note starts as soon as the finger moves past `TAP_THRESHOLD`. The audio clock is real time, so each new path point is scheduled at its own `cumTime`. If the circle catches the fingertip (drawing slower than the clock), the sound **holds at the fingertip's volume and waits** for the finger to move again (`setTargetAtTime` catch-up). On lift, any unplayed remainder continues to the end then fades. |
+| ⏳ Wait for gesture (`waitForGesture: true`) | The whole note is scheduled at release via a single `setValueCurveAtTime` over 128 volume samples (with a ~20 ms anti-click rise and `FADE_MS` tail). |
 
-- All four ticked (defaults) = a piano note: quick attack to peak, decay to 60%, hold, smooth release to 0.
-- `lineSlotFor(lineIndex)` maps gesture lines to unticked slots in order; `gestureLineLimit()` = count of unticked components.
+### Tap note defaults
+
+A tap (movement ≤ `TAP_THRESHOLD`, 8 px) plays the default ADSR note: the four `FIXED` presets (attack/decay/hold/release + end-vol), volume from the touch's Y, pitch from its X. Same audio path as before (`startGestureNote` → `scheduleFixedRun`).
 
 ## Tree Growth Animation
 
@@ -69,22 +59,24 @@ Growth runs at a **fixed speed** (`GESTURE.growSpeed`, slider 0.25–4x, default
 | Leaves & fruit | release window | `clamp01(release / (1200 / speed))` |
 
 - Full-growth reference times: `GROW_TRUNK_FULL_MS = 20`, `GROW_BRANCH_FULL_MS = 500`, `GROW_FOLIAGE_FULL_MS = 1200`.
-- **Tree size** comes from the *woody* window (attack + decay + hold) vs `FULL_GROW_MS = 6000`, scaled by `sustain` — a short gesture = small shrub, long = full tree. Size does **not** depend on where you plant.
-- Structure is **pre-built** (`Branch.build`); each branch draws from its parent's live tip (no floating during growth), then `Tree.bake()` renders the finished tree to an offscreen bitmap for fast blits.
+- **Taps** size the tree from the woody window (attack + decay + hold) vs `FULL_GROW_MS = 6000` × sustain.
+- **Gestures** use a simple proportional envelope of the path's total time (`gestureTreeNote`): attack 10%, decay 20%, hold 25%, release 45% — so the tree grows in sync with playback (longer path = bigger tree). In live mode the tree is planted at note start and `refreshLiveTreePath` re-applies the envelope (and rebuilds bigger) as the path grows. **The exact gesture→growth mapping is intentionally pending refinement.**
+- Structure is **pre-built** (`Branch.build`); each branch draws from its parent's live tip, then `Tree.bake()` caches finished trees to bitmaps.
 
 ## Top-Left HUD (`#statHud`)
 
-Four rows — Attack / Decay / Hold / Release — each showing its value (fixed preset, committed gesture line, or the live line being drawn) plus a **progress bar** that fills while that component's segment plays. Timing is derived from `hudState` (`noteStart`, per-slot `startOff`/`dur`, chained `elapsed`).
+- **Gesture playback** (`renderGestureHud`): a single live row — elapsed / total ms and the volume % at the circle's current position, with a progress bar.
+- **Taps**: four ADSR rows (Attack / Decay / Hold / Release) with progress bars via `hudState`.
 
 ## Settings Panel
 
 | Section | Controls |
 |---------|----------|
 | Default values | Start mode (`plant`/`nav`), Key (root note) |
-| Gesture timing | Dist → time (`timePerPx`), Growth speed (`growSpeed`) |
-| Fixed values | Per component: checkbox + ms slider + End vol slider + Max slider |
+| Gesture timing | Growth speed (`growSpeed`), Time multiplier (`timeMult` — ms per % of horizontal travel) |
+| Tap note defaults | Attack / Decay / Hold / Release ms + End vol sliders |
 
-Settings persist on every change via `saveSettings()`; `resetToDefaults()` clears the saved key and restores `DEFAULT_CHIME` / `DEFAULT_GESTURE` / `DEFAULT_FIXED`.
+Settings persist on every change via `saveSettings()`; `resetToDefaults()` clears the saved key and restores the defaults.
 
 ## Architecture Index
 
@@ -99,28 +91,32 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 
 | Function | Purpose |
 |----------|---------|
-| `plantAt` | Builds the note from the gesture, ends the note, creates the `Tree` |
-| `commitLine` / `applyLineToNote` | Commit a gesture line and schedule its envelope segment |
-| `checkDirectionChange` / `finishPlantGesture` | Turn detection; last-line turn = release, or finger-lift = release |
-| `startGestureNote` / `scheduleVolumeSegment` / `scheduleFixedRun` / `scheduleFixedSlot` | Web Audio scheduling for gesture and fixed segments |
-| `renderHud` / `refreshHud` / `commitHudLine` | Top-left HUD incl. progress bars |
-| `lineSlotFor` / `gestureLineLimit` / `lineTimeForSlot` | Slot mapping, line limit, Max caps |
-| `volumeFromStartX` / `pitchFor` / `toWorld` / `zoomAt` | Volume, pitch, camera math |
+| `addPathPoint` / `pathStateAtTime` | Record a freehand point; locate the playback circle on the path for an elapsed time |
+| `buildVolumeCurve` / `schedulePathPlayback` | Wait mode: sample the path's volume profile and play it with `setValueCurveAtTime` |
+| `startLivePathNote` / `scheduleLivePoint` / `finishLivePathNote` | Live mode: real-time delayed scheduling with `setTargetAtTime` catch-up when the circle reaches the fingertip |
+| `gestureTreeNote` / `plantGestureTree` / `refreshLiveTreePath` | Gesture trees: proportional envelope, plant + stretch as the path grows |
+| `finishPlantGesture` | Tap → default ADSR note; drag → schedule playback + plant the tree |
+| `startGestureNote` / `scheduleFixedRun` / `scheduleFixedSlot` | Tap note's ADSR scheduling |
+| `volumeFromStartY` / `pitchFor` / `toWorld` / `zoomAt` | Volume, pitch, camera math |
+| `renderGestureHud` / `renderHud` / `refreshHud` | HUD: gesture readout / ADSR rows |
 
 ### Key constants
 
 | Constant | Value | Meaning |
 |----------|-------|---------|
-| `VOL_PX_REF` | 400 | px of Y change = full gain range |
+| `TIME_PER_W` | 50 | ms of note time per % of screen width at 1× time multiplier |
+| `MIN_GESTURE_MS` | 80 | shortest note a gesture can produce (a vertical line ≈ 0 ms) |
+| `LINGER_MS` | 800 | how long a finished green path stays before fading |
 | `FADE_MS` | 150 | anti-clip fade-out |
 | `TAP_ATTACK_MS` | 60 | attack for a tap (no line) |
-| `TURN_DOT` / `TURN_MIN_LINE` | 0.3 / 30 | line-ending turn thresholds |
 | `TAP_THRESHOLD` | 8 | px before a drag counts |
+| `VOL_MIN` / `VOL_MAX` | 0.01 / 0.5 | screen-Y volume gain range |
 | `PAN_SENS` / `PINCH_SENS` | 2 / 0.4 | nav camera sensitivities |
 | `GROW_*_FULL_MS` | 20 / 500 / 1200 | full-growth reference per part |
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.1.21`) and re-run `node --check` on the extracted `<script>` block after changes.
+- **Always bump the `#version` badge** (currently `v1.2.0`) and re-run `node --check` on the extracted `<script>` block after changes.
 - Trees/branches: don't re-introduce lazy spawning — the pre-built + dynamic-base approach keeps parts connected during growth.
 - Don't revert the elapsed-time growth math to per-frame accumulation; sub-frame segments (e.g. a 5ms attack) would never grow.
+- Gesture→tree growth mapping is still provisional (proportional split of `totalMs`); revisit when the tree-growth design is decided.
