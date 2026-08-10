@@ -459,6 +459,7 @@
       <div class="fx-head"><span>Attack</span><b class="val" id="fx-attackTVal"></b> ms</div>
       <input type="range" id="fx-attackT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val">100%</b></div>
+      <div class="fx-head"><label title="Append this attack value to the beginning of every custom gesture"><input type="checkbox" id="fx-attackGesture"> Add to gestures</label></div>
     </div>
     <div class="fx-item">
       <div class="fx-head"><span>Decay</span><b class="val" id="fx-decayTVal"></b> ms</div>
@@ -477,6 +478,7 @@
       <input type="range" id="fx-releaseT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-releaseVolVal"></b></div>
       <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
+      <div class="fx-head"><label title="Append this release value to the end of every custom gesture"><input type="checkbox" id="fx-releaseGesture"> Add to gestures</label></div>
     </div>
   </div>
   </div>
@@ -529,7 +531,7 @@
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.2.5</div>
+<div id="version">v1.4.3</div>
 
 <script>
 /* ============================================================
@@ -1118,6 +1120,8 @@ const DEFAULT_GESTURE = {
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
   growSpeed: 1,            // tree growth multiplier (fixed speed the parts grow at)
   timeMult: 1,             // × the base time rate (TIME_PER_W ms per % of width)
+  gestureAttack: false,    // when on, the tap-note attack value is prepended to custom gestures
+  gestureRelease: false,   // when on, the tap-note release value is appended to custom gestures
 };
 let GESTURE = clone(DEFAULT_GESTURE);
 
@@ -1125,6 +1129,7 @@ let GESTURE = clone(DEFAULT_GESTURE);
 const TIME_PER_W = 50;    // ms of time per % of screen width at 1x time multiplier
 const MIN_GESTURE_MS = 80;  // shortest note a gesture can produce (a vertical line ~ 0 ms)
 const LINGER_MS = 800;      // how long a finished gesture's green path stays before fading
+const RELEASE_TAIL_STEPS = 14;  // subdivisions of the appended release tail
 
 // Fixed values for the four envelope components. When a component is ticked
 // ("on"), it uses this preset value and its gesture line is skipped, so the
@@ -1144,6 +1149,9 @@ let FIXED = clone(DEFAULT_FIXED);
 const VOL_MIN = 0.01, VOL_MAX = 0.5;
 function volumeFromStartY(sy) {
   return mix(VOL_MIN, VOL_MAX, clamp01(1 - sy / H));
+}
+function yForVolume(v) {
+  return H * (1 - (v - VOL_MIN) / (VOL_MAX - VOL_MIN));
 }
 
 const FADE_MS = 150;      // smooth fade-out to 0 when a sequence ends (no clip)
@@ -1292,25 +1300,48 @@ function buildVolumeCurve(pts, cum, totalMs, N) {
 
 // WAIT MODE: the whole note is scheduled once the gesture is released. The
 // volume profile is played with a single setValueCurveAtTime (128 samples)
-// plus a tiny anti-click rise and a fade-out tail.
+// plus a tiny anti-click rise and a fade-out tail. The visual shows
+// immediately; the audio waits for the AudioContext to actually be running so
+// the first gesture on a fresh load isn't dropped.
 function schedulePathPlayback(ds) {
-  initAudio(); resumeAudio();
-  if (!audioCtx || !masterGain) return;
+  initAudio();
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
+  const atkMs = gestureAttackMs();
+  const relMs = gestureReleaseMs();
+  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, atkMs, relMs);
+  playbacks.push({
+    pts: tail.pts, cumTime: tail.cum, tailStart: tail.tailStart, tailEnd: tail.tailEnd,
+    totalMs: totalMs + atkMs + relMs, relMs, startedAt: performance.now(), released: true,
+  });
+  ensureAudioRunning(() => schedulePathAudio(ds, totalMs, atkMs, relMs), Date.now() + 30000);
+}
+
+function schedulePathAudio(ds, totalMs, atkMs, relMs) {
+  if (!audioCtx || !masterGain) return;
   const curve = buildVolumeCurve(ds.pts, ds.cumTime, ds.totalMs, 128);
   const s = CHIME_SETTINGS.start;
   const t0 = audioCtx.currentTime;
-  const dur = totalMs / 1000;
-  const atk = Math.min(0.02, dur / 3);
+  const pathDur = totalMs / 1000;
+  const atkSec = atkMs / 1000;
 
   const gain = audioCtx.createGain();
   const g = gain.gain;
   g.setValueAtTime(0, t0);
-  g.linearRampToValueAtTime(curve[0], t0 + atk);
-  g.setValueCurveAtTime(curve, t0 + atk, dur - atk);
-  const curveEnd = t0 + dur;
+  if (atkSec > 0) {
+    g.linearRampToValueAtTime(curve[0], t0 + atkSec);
+    g.setValueCurveAtTime(curve, t0 + atkSec, pathDur);
+  } else {
+    const atk = Math.min(0.02, pathDur / 3);
+    g.linearRampToValueAtTime(curve[0], t0 + atk);
+    if (pathDur - atk > 0.001) g.setValueCurveAtTime(curve, t0 + atk, pathDur - atk);
+    else g.setValueAtTime(curve[curve.length - 1], t0 + atk);
+  }
+  const curveEnd = t0 + atkSec + pathDur;
   g.setValueAtTime(curve[curve.length - 1], curveEnd);
-  g.linearRampToValueAtTime(0, curveEnd + FADE_MS / 1000);
+  if (relMs > 0) {
+    g.linearRampToValueAtTime(curve[curve.length - 1] * (FIXED.release.vol / 100), curveEnd + relMs / 1000);
+  }
+  g.linearRampToValueAtTime(0, curveEnd + relMs / 1000 + FADE_MS / 1000);
   gain.connect(masterGain);
 
   const osc = audioCtx.createOscillator();
@@ -1318,13 +1349,11 @@ function schedulePathPlayback(ds) {
   osc.frequency.value = noteToFreq(pitchFor(ds.startX, ds.startY));
   osc.connect(gain);
   osc.start(t0);
-  const tEnd = curveEnd + FADE_MS / 1000;
+  const tEnd = curveEnd + relMs / 1000 + FADE_MS / 1000;
   osc.stop(tEnd + 0.05);
   const note = { osc, gain, cleanupTimer: null };
   gestureNotes.push(note);
   setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} unregisterNote(note); }, (tEnd - t0 + 0.5) * 1000);
-
-  playbacks.push({ pts: ds.pts, cumTime: ds.cumTime, totalMs, startedAt: performance.now(), released: true });
 }
 
 // LIVE MODE: the note begins as soon as the finger moves past the tap
@@ -1335,42 +1364,98 @@ function schedulePathPlayback(ds) {
 // makes the sound hold at the fingertip's volume and resume as the finger
 // moves again.
 function startLivePathNote(ds) {
-  initAudio(); resumeAudio();
+  initAudio();
+  ds.started = true;   // stop repeated pointermoves from double-starting the note
+  // The visual (tree + playback) shows immediately; only the audio waits for
+  // the AudioContext to be running, since a freshly-created context is still
+  // suspended on the very first load and events scheduled at currentTime 0
+  // would be missed.
+  plantGestureTree(ds);
+  ds.playback = { ds, pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false };
+  syncLivePlaybackPath(ds);
+  playbacks.push(ds.playback);
+  ensureLiveAudio(ds, Date.now() + 30000);
+}
+
+// Run `fn` once the AudioContext is actually running. On the very first load the
+// context is created suspended and some browsers defer resume() until a later
+// gesture, so poll until it is running (or the wait times out).
+function ensureAudioRunning(fn, deadline) {
   if (!audioCtx || !masterGain) return;
+  if (audioCtx.state === 'running') { fn(); return; }
+  if (deadline && Date.now() > deadline) return;
+  resumeAudio();
+  requestAnimationFrame(() => ensureAudioRunning(fn, deadline));
+}
+
+// Start a live gesture's note audio as soon as the AudioContext is actually
+// running.
+function ensureLiveAudio(ds, deadline) {
+  if (!audioCtx || !masterGain || ds.gain) return;
+  if (audioCtx.state === 'running') { initLivePathAudio(ds); return; }
+  if (deadline && Date.now() > deadline) return;
+  resumeAudio();
+  requestAnimationFrame(() => {
+    if (!ds.gain && (dragStates.has(ds.pointerId) || ds.finished)) ensureLiveAudio(ds, deadline);
+  });
+}
+
+function initLivePathAudio(ds) {
   const s = CHIME_SETTINGS.start;
   const ctx0 = audioCtx.currentTime;
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const vol0 = volumeFromStartY(ds.pts[0].y);
-  g.setValueAtTime(vol0, ctx0);
+  const atkMs = gestureAttackMs();
+  if (atkMs > 0) {
+    g.setValueAtTime(0, ctx0);
+    g.linearRampToValueAtTime(vol0, ctx0 + atkMs / 1000);
+  } else {
+    g.setValueAtTime(vol0, ctx0);
+  }
   gain.connect(masterGain);
   const osc = audioCtx.createOscillator();
   setOscWave(osc, s);
   osc.frequency.value = noteToFreq(pitchFor(ds.startX, ds.startY));
   osc.connect(gain);
   osc.start(ctx0);
-  ds.started = true;
   ds.startedAt = performance.now();
   ds.ctx0 = ctx0;
   ds.gain = g;
   ds.osc = osc;
   ds.gainLevel = vol0;
-  ds.lastSched = ctx0;
+  ds.atkMs = atkMs;
+  ds.lastSched = ctx0 + atkMs / 1000;
   ds.cleanupTimer = null;
   gestureNotes.push(ds);
-  plantGestureTree(ds);
-  ds.playback = { pts: ds.pts, cumTime: ds.cumTime, totalMs: 0, startedAt: ds.startedAt, released: false };
-  playbacks.push(ds.playback);
+  // The gesture finished before the context finished resuming (a very quick
+  // first flick): wrap the note up right away so it plays and never leaks.
+  if (ds.finished) finishLivePathNote(ds);
+}
+
+// Rebuild a live playback's path so it always matches the gesture so far, with
+// the prepended attack tail intact. The release tail is added on finger-up.
+function syncLivePlaybackPath(ds) {
+  if (!ds.playback) return;
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, gestureAttackMs(), 0);
+  ds.playback.pts = path.pts;
+  ds.playback.cumTime = path.cum;
+  ds.playback.tailStart = path.tailStart;
+  ds.playback.tailEnd = path.tailEnd;
 }
 
 function scheduleLivePoint(ds) {
   if (!ds.gain) return;
   const pt = ds.pts[ds.pts.length - 1];
   const target = volumeFromStartY(pt.y);
-  const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
+  // The prepended attack ramp owns [ctx0, ctx0 + atkMs], so each path point is
+  // scheduled to play after it.
+  const targetT = ds.ctx0 + (ds.atkMs || 0) / 1000 + ds.totalMs / 1000;   // audio-clock time this point plays
   const now = audioCtx.currentTime;
+  const atkEndT = ds.ctx0 + ds.atkMs / 1000;
+  if (targetT <= atkEndT) return;   // still inside the attack ramp, which owns this window
   if (targetT > now + 0.005) {
-    const startT = Math.max(now, ds.lastSched);
+    const startT = Math.max(now, ds.lastSched, atkEndT);
     ds.gain.setValueAtTime(ds.gainLevel, startT);
     ds.gain.linearRampToValueAtTime(target, targetT);
     ds.lastSched = targetT;
@@ -1382,19 +1467,41 @@ function scheduleLivePoint(ds) {
 
 function finishLivePathNote(ds) {
   if (!ds.gain || !ds.playback) return;
+  const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
+  const atkMs = gestureAttackMs();
+  const relMs = gestureReleaseMs();
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, atkMs, relMs);
   ds.playback.released = true;
-  ds.playback.totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
+  ds.playback.totalMs = totalMs + atkMs + relMs;
+  ds.playback.relMs = relMs;
+  ds.playback.pts = path.pts;
+  ds.playback.cumTime = path.cum;
+  ds.playback.tailStart = path.tailStart;
+  ds.playback.tailEnd = path.tailEnd;
   const now = audioCtx.currentTime;
-  const endT = ds.ctx0 + ds.totalMs / 1000;       // when the path's playback finishes
-  if (performance.now() - ds.startedAt >= ds.totalMs) {
-    // The circle already caught the fingertip: fade out from the held level.
-    ds.gain.setTargetAtTime(0, now, 0.03);
-    try { ds.osc.stop(now + 0.4); } catch (e) {}
-    scheduleLiveCleanup(ds, now + 0.6);
+  const atkSec = (ds.atkMs || 0) / 1000;
+  const endT = ds.ctx0 + atkSec + ds.totalMs / 1000;   // when the path's playback finishes
+  if (performance.now() - ds.startedAt >= (ds.atkMs || 0) + ds.totalMs) {
+    if (relMs > 0) {
+      const held = ds.gain.gain.value;
+      ds.gain.cancelScheduledValues(now);
+      ds.gain.setValueAtTime(held, now);
+      ds.gain.linearRampToValueAtTime(held * (FIXED.release.vol / 100), now + relMs / 1000);
+      ds.gain.linearRampToValueAtTime(0, now + relMs / 1000 + FADE_MS / 1000);
+      try { ds.osc.stop(now + relMs / 1000 + FADE_MS / 1000 + 0.05); } catch (e) {}
+      scheduleLiveCleanup(ds, now + relMs / 1000 + FADE_MS / 1000);
+    } else {
+      // The circle already caught the fingertip: fade out from the held level.
+      ds.gain.setTargetAtTime(0, now, 0.03);
+      try { ds.osc.stop(now + 0.4); } catch (e) {}
+      scheduleLiveCleanup(ds, now + 0.6);
+    }
   } else {
     // Playback is still behind the fingertip: finish the path, then fade.
-    const stopT = Math.max(now, endT) + FADE_MS / 1000;
-    ds.gain.setValueAtTime(ds.gainLevel, Math.max(now, endT));
+    const startT = Math.max(now, endT, ds.ctx0 + (ds.atkMs || 0) / 1000);
+    const stopT = startT + relMs / 1000 + FADE_MS / 1000;
+    ds.gain.setValueAtTime(ds.gainLevel, startT);
+    if (relMs > 0) ds.gain.linearRampToValueAtTime(ds.gainLevel * (FIXED.release.vol / 100), startT + relMs / 1000);
     ds.gain.linearRampToValueAtTime(0, stopT);
     try { ds.osc.stop(stopT + 0.05); } catch (e) {}
     scheduleLiveCleanup(ds, stopT + 0.5);
@@ -1419,13 +1526,23 @@ function unregisterNote(n) {
 // Growth mapping is a simple proportional split of the path's total time so
 // the tree grows in sync with the note (trunk early, branches mid, leaves
 // late). Exact growth design is pending.
+function gestureAttackMs() {
+  // ms of attack prepended to a custom gesture's note when "Add to gestures" is on
+  return GESTURE.gestureAttack ? (FIXED.attack.value || 0) : 0;
+}
+
+function gestureReleaseMs() {
+  // ms of release appended to a custom gesture's note when "Add to gestures" is on
+  return GESTURE.gestureRelease ? (FIXED.release.value || 0) : 0;
+}
+
 function gestureTreeNote(totalMs) {
   const T = Math.max(200, totalMs);
   return {
-    attack:  Math.round(T * 0.10),
+    attack:  Math.round(T * 0.10) + gestureAttackMs(),
     decay:   Math.round(T * 0.20),
     hold:    Math.round(T * 0.25),
-    release: Math.round(T * 0.45),
+    release: Math.round(T * 0.45) + gestureReleaseMs(),
   };
 }
 
@@ -1463,6 +1580,16 @@ function refreshLiveTreePath(ds) {
 // note. Other fingers' gestures keep going.
 function finishPlantGesture(ds) {
   if (!ds) return;
+  // A live note is already running for this finger — wrap it up no matter where
+  // the finger ended. Otherwise a path that finishes back near its start (or a
+  // slightly-jittery tap) would be read as a tap, and its already-started
+  // oscillator would never be stopped, so the sound would keep playing forever.
+  if (ds.started) {
+    ds.finished = true;
+    finishLivePathNote(ds);
+    refreshLiveTreePath(ds);
+    return;
+  }
   if (!gestureMoved(ds)) {
     // ---- Tap: default ADSR note (taps overlap and each keeps its own HUD) ----
     ds.attack = FIXED.attack.on ? FIXED.attack.value : TAP_ATTACK_MS;
@@ -1472,15 +1599,10 @@ function finishPlantGesture(ds) {
     plantAt(ds.startX, ds.startY, [], null, {
       attack: ds.attack, decay: ds.decay, hold: ds.hold, release: ds.release,
     }, note);
-  } else {
-    // ---- Gesture: freehand path ----
-    if (GESTURE.waitForGesture) {
-      schedulePathPlayback(ds);
-      plantGestureTree(ds);
-    } else if (ds.started) {
-      finishLivePathNote(ds);
-      refreshLiveTreePath(ds);
-    }
+  } else if (GESTURE.waitForGesture) {
+    // ---- Gesture: freehand path (wait mode) ----
+    schedulePathPlayback(ds);
+    plantGestureTree(ds);
   }
 }
 
@@ -1540,18 +1662,67 @@ function drawGreenPath(pts, st) {
   ctx.shadowBlur = 0;
 }
 
-// Dotted line for the portion ahead of the playback point.
-function drawDottedTail(pts, st) {
+// Dotted line for the portion ahead of the playback point. The gesture's own
+// unplayed path keeps the normal dotted color; the appended attack tail (before
+// tailStart) and release tail (from tailEnd on) are drawn fainter so they read
+// as separate tails.
+function drawDottedTail(pts, cum, st, tailStart, tailEnd) {
   if (st.idx >= pts.length - 1) return;
-  ctx.strokeStyle = 'rgba(46,93,52,0.55)';
-  ctx.lineWidth = 2.5;
-  ctx.setLineDash([7, 9]);
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(st.x, st.y);
-  for (let i = st.idx + 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-  ctx.stroke();
+  const seg = (from, to, color, dash) => {
+    if (from > to) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash(dash);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pts[from - 1].x, pts[from - 1].y);
+    for (let i = from; i <= to; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  };
+  if (st.idx < tailStart - 1) seg(st.idx + 1, tailStart - 1, 'rgba(46,93,52,0.22)', [4, 10]);
+  if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, tailStart), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
+  if (st.idx < pts.length - 1) seg(Math.max(st.idx + 1, tailEnd), pts.length - 1, 'rgba(46,93,52,0.22)', [4, 10]);
   ctx.setLineDash([]);
+}
+
+// Build the playback path a gesture's note follows: a prepended attack tail
+// (silence up to the gesture's first point), the gesture's own path, then an
+// appended release tail (the gesture's last point down to its end volume). Each
+// tail is a straight line in X=time / Y=volume space stretched over its
+// duration of horizontal travel. Returns { pts, cum, tailStart, tailEnd }.
+function buildGesturePlaybackPath(pts, cum, pathMs, atkMs, relMs) {
+  if (!pts.length) return { pts, cum, tailStart: 0, tailEnd: pts.length };
+  const start = pts[0], end = pts[pts.length - 1];
+  let out = pts.slice();
+  let outc = cum.slice();
+  let tailStart = 0;
+
+  if (atkMs > 0) {
+    const px = atkMs / (TIME_PER_W * GESTURE.timeMult) * W / 100;
+    const y0 = yForVolume(0);
+    const pre = [];
+    const preCum = [];
+    for (let i = 0; i < RELEASE_TAIL_STEPS; i++) {
+      const t = i / RELEASE_TAIL_STEPS;
+      pre.push({ x: start.x - px + px * t, y: y0 + (start.y - y0) * t });
+      preCum.push(atkMs * t);
+    }
+    out = pre.concat(out);
+    outc = preCum.concat(outc.map(c => c + atkMs));
+    tailStart = RELEASE_TAIL_STEPS;
+  }
+
+  let tailEnd = out.length;
+  if (relMs > 0) {
+    const px = relMs / (TIME_PER_W * GESTURE.timeMult) * W / 100;
+    const endY = yForVolume(volumeFromStartY(end.y) * (FIXED.release.vol / 100));
+    for (let i = 1; i <= RELEASE_TAIL_STEPS; i++) {
+      const t = i / RELEASE_TAIL_STEPS;
+      out.push({ x: end.x + px * t, y: end.y + (endY - end.y) * t });
+      outc.push(pathMs + atkMs + relMs * t);
+    }
+  }
+  return { pts: out, cum: outc, tailStart, tailEnd };
 }
 
 function drawPlaybackCircle(x, y, alpha) {
@@ -1595,14 +1766,14 @@ waitBtn.addEventListener('click', () => {
 syncWaitBtn();
 
 canvas.addEventListener('pointerdown', e => {
-  initAudio();
-  resumeAudio();
+  unlockAudio();
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
   if (mode === 'plant') {
     // Each finger starts its own independent gesture (path + note + tree).
     const ds = {
+      pointerId: e.pointerId,                 // lets a late audio init check if this drag is still alive
       startX: stageX(e), startY: stageY(e),   // where the tree is planted
       pts: [{ x: stageX(e), y: stageY(e) }],  // recorded freehand path
       cumTime: [0],                           // ms of note time at each point
@@ -1645,7 +1816,10 @@ canvas.addEventListener('pointermove', e => {
         if (!GESTURE.waitForGesture) {
           if (!ds.started && gestureMoved(ds)) startLivePathNote(ds);
           if (ds.started) scheduleLivePoint(ds);
-          if (ds.playback) ds.playback.totalMs = ds.totalMs;   // keep the HUD total live
+          if (ds.playback) {
+            ds.playback.totalMs = gestureAttackMs() + ds.totalMs;   // keep the HUD total live
+            syncLivePlaybackPath(ds);
+          }
           if (ds.tree && (!ds.lastRefreshMs ||
               ds.totalMs - ds.lastRefreshMs > Math.max(40, ds.lastRefreshMs * 0.12))) {
             refreshLiveTreePath(ds);
@@ -1673,6 +1847,7 @@ canvas.addEventListener('pointermove', e => {
 });
 
 canvas.addEventListener('pointerup', e => {
+  unlockAudio();
   pointers.delete(e.pointerId);
 
   if (mode === 'plant') {
@@ -1789,6 +1964,8 @@ function loadSavedSettings() {
       if (d.gesture.waitForGesture != null) g.waitForGesture = !!d.gesture.waitForGesture;
       if (d.gesture.growSpeed != null) g.growSpeed = Math.max(0.25, Math.min(4, d.gesture.growSpeed));
       if (d.gesture.timeMult != null) g.timeMult = Math.max(0.1, Math.min(4, d.gesture.timeMult));
+      if (d.gesture.gestureAttack != null) g.gestureAttack = !!d.gesture.gestureAttack;
+      if (d.gesture.gestureRelease != null) g.gestureRelease = !!d.gesture.gestureRelease;
     }
     GESTURE = g;
     const fx = clone(DEFAULT_FIXED);
@@ -2042,8 +2219,32 @@ function initAudio() {
 }
 
 function resumeAudio() {
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') return audioCtx.resume();
 }
+
+// iOS-style audio unlock: some browsers only start a freshly-created
+// AudioContext from a discrete tap/click and don't treat a drag's pointer events
+// as audio user activations. Create and resume the context, play a silent
+// sample, and retry the resume a tick later once the context creation has
+// settled, so the first interaction can unlock audio.
+function unlockAudio() {
+  initAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'running') return;
+  resumeAudio();
+  if (audioCtx.state === 'suspended') {
+    try {
+      const buf = audioCtx.createBuffer(1, Math.max(1, Math.floor(audioCtx.sampleRate * 0.05)), audioCtx.sampleRate);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      src.start(0);
+    } catch (e) {}
+    setTimeout(() => { if (audioCtx && audioCtx.state === 'suspended') resumeAudio(); }, 0);
+  }
+}
+document.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+document.addEventListener('click', unlockAudio, { once: true, passive: true });
 
 /* ---------- Chime settings panel ---------- */
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -2277,6 +2478,16 @@ for (const name of SLOT_NAMES) {
     document.getElementById('fx-' + name + 'VolVal').textContent = volEl.value + '%';
   });
 }
+const attackGestureEl = document.getElementById('fx-attackGesture');
+attackGestureEl.addEventListener('change', () => {
+  GESTURE.gestureAttack = attackGestureEl.checked;
+  saveSettings();
+});
+const releaseGestureEl = document.getElementById('fx-releaseGesture');
+releaseGestureEl.addEventListener('change', () => {
+  GESTURE.gestureRelease = releaseGestureEl.checked;
+  saveSettings();
+});
 function syncFixedUI() {
   for (const name of SLOT_NAMES) {
     FIXED[name].on = true;   // every component is always a tap default
@@ -2289,6 +2500,8 @@ function syncFixedUI() {
       document.getElementById('fx-' + name + 'VolVal').textContent = FIXED[name].vol + '%';
     }
   }
+  attackGestureEl.checked = !!GESTURE.gestureAttack;
+  releaseGestureEl.checked = !!GESTURE.gestureRelease;
 }
 syncFixedUI();
 
@@ -2444,7 +2657,7 @@ function loop(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (mode === 'plant') {
     for (const ds of dragStates.values()) {
-      const currentPlay = playbacks.find(p => p.pts === ds.pts);
+      const currentPlay = playbacks.find(p => p.ds === ds);
       if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts);
     }
   }
@@ -2463,7 +2676,7 @@ function loop(now) {
     const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
     ctx.globalAlpha = alpha;
     drawGreenPath(pts, st);
-    drawDottedTail(pts, st);
+    drawDottedTail(pts, cum, st, p.tailStart != null ? p.tailStart : 0, p.tailEnd != null ? p.tailEnd : pts.length);
     drawPlaybackCircle(st.x, st.y, alpha);
     ctx.globalAlpha = 1;
   }
