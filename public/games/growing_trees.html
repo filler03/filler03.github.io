@@ -557,7 +557,7 @@
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.5.5</div>
+<div id="version">v1.5.8</div>
 
 <script>
 /* ============================================================
@@ -1276,7 +1276,12 @@ function gestureNoteCardHtml(now, p) {
   const elapsed = Math.min(now - p.startedAt, p.totalMs || 0);
   const total = Math.round(p.totalMs || 0);
   const st = pathStateAtTime(p.pts, p.cumTime, elapsed);
-  const vol = volumeFromStartY(st.y);
+  // Show the true volume at this moment: the path's volume scaled by the attack
+  // fade where the note currently is. Live notes share the audio's fade progress
+  // (which also advances while the finger is held); wait-mode notes use their
+  // playback timeline position.
+  const fade = (p.ds && p.ds.gain) ? liveAttackProgress(p.ds) : Math.min(elapsed, p.atkMs || 0);
+  const vol = volumeFromStartY(st.y) * attackFactor(fade, p.atkMs || 0);
   const pct = total > 0 ? (elapsed / total * 100).toFixed(1) : 100;
   return `<div class="live"><div class="note-stats">${EMOJI_TIME} ${total}ms ${EMOJI_VOL} ${Math.round(vol / VOL_MAX * 100)}%</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
@@ -1331,6 +1336,7 @@ function addPathPoint(ds, x, y) {
   ds.pts.push({ x, y });
   ds.cumTime.push(ds.totalMs + dt);
   ds.totalMs += dt;
+  ds.lastMoveAt = performance.now();
 }
 
 // Where the playback circle is along the path at elapsed time `t` (ms):
@@ -1362,6 +1368,15 @@ function pathStateAtTime(pts, cum, t) {
 // fade factor at every moment. After the window the factor is 1.
 function attackFactor(tMs, atkMs) {
   return atkMs > 0 ? Math.min(1, tMs / atkMs) : 1;
+}
+
+// How far a live note's attack fade has progressed in ms. The fade normally
+// follows the gesture's note time, which only advances while the finger draws
+// — so during a hold it also advances with real time, keeping the fade-in
+// moving (and completing) even when no new path points arrive.
+function liveAttackProgress(ds) {
+  if (!(ds.atkMs > 0)) return 0;
+  return Math.min(ds.atkMs, Math.max(ds.totalMs || 0, performance.now() - (ds.startedAt || 0)));
 }
 
 // Sample the volume the path produces at N evenly-spaced times across its
@@ -1522,8 +1537,9 @@ function scheduleLivePoint(ds) {
   if (!ds.gain) return;
   const pt = ds.pts[ds.pts.length - 1];
   // Inside the attack window the base volume is scaled by the fade factor at
-  // this point's moment, so the fade tracks a fluctuating base every ms.
-  const target = volumeFromStartY(pt.y) * attackFactor(ds.totalMs, ds.atkMs || 0);
+  // this point's moment, so the fade tracks a fluctuating base every ms. The
+  // fade progress never steps backward when a held gesture resumes drawing.
+  const target = volumeFromStartY(pt.y) * attackFactor(liveAttackProgress(ds), ds.atkMs || 0);
   const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
   const now = audioCtx.currentTime;
   if (targetT > now + 0.005) {
@@ -1534,6 +1550,28 @@ function scheduleLivePoint(ds) {
   } else {
     ds.gain.setTargetAtTime(target, now, 0.06);   // catch-up: chase the fingertip
   }
+  ds.gainLevel = target;
+}
+
+// A held finger adds no new path points, so no volume automation is scheduled
+// and the attack fade would stall mid-fade. Each frame, while a live note is
+// inside its attack window and the finger isn't drawing, schedule the gain
+// toward the fingertip's level along the real-time fade curve so the volume
+// keeps rising during a hold.
+function tickLiveHold(ds) {
+  if (!ds.gain || ds.finished || !(ds.atkMs > 0)) return;
+  if (performance.now() - (ds.lastMoveAt || 0) < 50) return;   // finger is still drawing
+  const at = audioCtx.currentTime;
+  if (at < ds.lastSched - 0.005) return;                       // scheduled automation is still ahead
+  const prog = liveAttackProgress(ds);
+  if (prog >= ds.atkMs) return;                                // fade already complete
+  const base = volumeFromStartY(ds.pts[ds.pts.length - 1].y);
+  const horizon = 0.04;                                        // seconds of fade scheduled per frame
+  const target = base * attackFactor(Math.min(ds.atkMs, prog + horizon * 1000), ds.atkMs);
+  ds.gain.cancelScheduledValues(at);
+  ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), at);
+  ds.gain.linearRampToValueAtTime(target, at + horizon);
+  ds.lastSched = at + horizon;
   ds.gainLevel = target;
 }
 
@@ -1726,49 +1764,47 @@ function drawDottedPath(pts) {
 }
 
 // Solid glowing line from the path's start up to the playback point `st`.
-// The part inside the attack window is amber; the rest is green.
-function drawGreenPath(pts, st, atkEnd) {
+// The part inside the attack window and the appended release tail (from
+// tailEnd on) are amber; the gesture's own played path between them is green.
+function drawGreenPath(pts, st, atkEnd, tailEnd) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = 4;
-  if (!(atkEnd > 0)) {
-    ctx.strokeStyle = GESTURE_GREEN;
-    ctx.shadowColor = 'rgba(62,203,90,0.9)';
+  const N = pts.length;
+  if (tailEnd == null) tailEnd = N;
+  const hasAtk = atkEnd > 0 && atkEnd < N;
+  // Green starts after the attack window (or at the path start with no attack)
+  // and ends where the release tail begins.
+  const greenFrom = hasAtk ? Math.min(atkEnd, tailEnd) : 0;
+
+  const seg = (from, to, amber) => {
+    if (from > to) return;
+    ctx.strokeStyle = amber ? GESTURE_AMBER : GESTURE_GREEN;
+    ctx.shadowColor = amber ? 'rgba(245,166,35,0.9)' : 'rgba(62,203,90,0.9)';
     ctx.shadowBlur = 14;
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i <= st.idx && i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    if (st.idx < pts.length - 1) ctx.lineTo(st.x, st.y);
+    ctx.moveTo(pts[Math.max(0, from)].x, pts[Math.max(0, from)].y);
+    for (let i = Math.max(1, from + 1); i <= to && i < N; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (to === st.idx && st.idx < N - 1) ctx.lineTo(st.x, st.y);
     ctx.stroke();
-    ctx.shadowBlur = 0;
-    return;
-  }
-  // Amber up to the attack-window boundary (or the playback point if still inside).
-  ctx.strokeStyle = GESTURE_AMBER;
-  ctx.shadowColor = 'rgba(245,166,35,0.9)';
-  ctx.shadowBlur = 14;
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  const amberTo = Math.min(atkEnd, st.idx);
-  for (let i = 1; i <= amberTo && i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-  if (st.idx < atkEnd && st.idx < pts.length - 1) ctx.lineTo(st.x, st.y);
-  ctx.stroke();
-  if (st.idx >= atkEnd && atkEnd < pts.length) {
-    ctx.strokeStyle = GESTURE_GREEN;
-    ctx.shadowColor = 'rgba(62,203,90,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(pts[atkEnd].x, pts[atkEnd].y);
-    for (let i = atkEnd + 1; i <= st.idx && i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    if (st.idx < pts.length - 1) ctx.lineTo(st.x, st.y);
-    ctx.stroke();
+  };
+
+  const playedTo = st.idx;
+  if (playedTo < greenFrom) {
+    // Playback still inside the attack window: all amber.
+    seg(0, playedTo, true);
+  } else {
+    seg(0, greenFrom - 1, true);                                  // attack window
+    seg(greenFrom, Math.min(playedTo, tailEnd - 1), false);       // own played path
+    seg(tailEnd, playedTo, true);                                 // release tail
   }
   ctx.shadowBlur = 0;
 }
 
 // Dotted line for the portion ahead of the playback point. The unplayed path
-// inside the attack window is faint amber; the rest of the gesture's own
-// unplayed path keeps the normal dotted color; the appended release tail (from
-// tailEnd on) is drawn fainter so it reads as a separate tail.
+// inside the attack window and the appended release tail (from tailEnd on) are
+// faint amber; the rest of the gesture's own unplayed path keeps the normal
+// dotted color.
 function drawDottedTail(pts, cum, st, atkEnd, tailEnd) {
   if (st.idx >= pts.length - 1) return;
   const seg = (from, to, color, dash) => {
@@ -1785,7 +1821,7 @@ function drawDottedTail(pts, cum, st, atkEnd, tailEnd) {
   const amberTo = Math.min(atkEnd, tailEnd) - 1;
   if (atkEnd > 0 && st.idx < amberTo) seg(st.idx + 1, amberTo, 'rgba(245,166,35,0.5)', [4, 10]);
   if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, atkEnd), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
-  if (st.idx < pts.length - 1) seg(Math.max(st.idx + 1, tailEnd), pts.length - 1, 'rgba(46,93,52,0.22)', [4, 10]);
+  if (st.idx < pts.length - 1) seg(Math.max(st.idx + 1, tailEnd), pts.length - 1, 'rgba(245,166,35,0.5)', [4, 10]);
   ctx.setLineDash([]);
 }
 
@@ -1870,6 +1906,7 @@ canvas.addEventListener('pointerdown', e => {
       started: false, startedAt: 0, ctx0: 0,  // live note state
       gain: null, osc: null, gainLevel: 0, lastSched: 0, cleanupTimer: null,
       tree: null, lastRefreshMs: 0,           // live tree, stretched as the path grows
+      lastMoveAt: 0,                          // when the finger last added a path point
       playback: null,                         // this drag's playback entry (live mode)
       attack: null, attackRegistered: false,  // tap-default ADSR
       decay: null, hold: null, release: null,
@@ -2749,6 +2786,11 @@ function loop(now) {
   // gesture that is still playing (or lingering) keeps its path on screen.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (mode === 'plant') {
+    // Held live-sound gestures keep their attack fade advancing in real time;
+    // without this the fade stalls the moment the finger stops drawing.
+    for (const ds of dragStates.values()) {
+      if (ds.gain && !ds.finished) tickLiveHold(ds);
+    }
     for (const ds of dragStates.values()) {
       const currentPlay = playbacks.find(p => p.ds === ds);
       if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts);
@@ -2769,7 +2811,7 @@ function loop(now) {
     const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
     const atkEnd = attackEndIdx(cum, p.atkMs || 0);
     ctx.globalAlpha = alpha;
-    drawGreenPath(pts, st, atkEnd);
+    drawGreenPath(pts, st, atkEnd, p.tailEnd != null ? p.tailEnd : pts.length);
     drawDottedTail(pts, cum, st, atkEnd, p.tailEnd != null ? p.tailEnd : pts.length);
     drawPlaybackCircle(st.x, st.y, alpha);
     ctx.globalAlpha = 1;
