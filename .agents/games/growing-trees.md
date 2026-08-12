@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.7.5` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.7.6` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -96,7 +96,8 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.7.5`) after changes, and **keep the `?v=<version>` cache-buster on every `<script src>`** in `index.html` — browsers cache the JS separately from the HTML, so a stale `gesture.js`/`main.js` silently reverts behavior while the badge still looks new.
+- **Always bump the `#version` badge** (currently `v1.7.6`) after changes.
+- **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
 - **No tree code:** tree planting/rendering was removed entirely (this is a gesture→note instrument now). Don't reintroduce trees without a design.
