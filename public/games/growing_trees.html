@@ -492,6 +492,7 @@
       <input type="range" id="fx-decayT" min="1" max="5000" step="10">
       <div class="fx-head"><span>End vol</span><b class="val" id="fx-decayVolVal"></b></div>
       <input type="range" id="fx-decayVol" min="0" max="100" step="1">
+      <div class="fx-head"><label title="Fade each custom gesture's volume out over this decay time, applied right after the attack (the path shows amber while it applies)"><input type="checkbox" id="fx-decayGesture"> Add to gestures</label></div>
     </div>
     <div class="fx-item">
       <div class="fx-head"><span>Hold</span><b class="val" id="fx-holdTVal"></b> ms</div>
@@ -557,7 +558,7 @@
 <canvas id="scene"></canvas>
 <button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.5.8</div>
+<div id="version">v1.6.0</div>
 
 <script>
 /* ============================================================
@@ -1198,6 +1199,7 @@ const DEFAULT_GESTURE = {
   growSpeed: 1,            // tree growth multiplier (fixed speed the parts grow at)
   timeMult: 1,             // × the base time rate (TIME_PER_W ms per % of width)
   gestureAttack: false,    // when on, custom gestures fade their volume in over the tap-note attack time
+  gestureDecay: false,     // when on, custom gestures fade their volume out over the tap-note decay time, right after the attack
   gestureRelease: false,   // when on, the tap-note release value is appended to custom gestures
 };
 let GESTURE = clone(DEFAULT_GESTURE);
@@ -1277,11 +1279,15 @@ function gestureNoteCardHtml(now, p) {
   const total = Math.round(p.totalMs || 0);
   const st = pathStateAtTime(p.pts, p.cumTime, elapsed);
   // Show the true volume at this moment: the path's volume scaled by the attack
-  // fade where the note currently is. Live notes share the audio's fade progress
-  // (which also advances while the finger is held); wait-mode notes use their
-  // playback timeline position.
-  const fade = (p.ds && p.ds.gain) ? liveAttackProgress(p.ds) : Math.min(elapsed, p.atkMs || 0);
-  const vol = volumeFromStartY(st.y) * attackFactor(fade, p.atkMs || 0);
+  // fade over the first atkMs and the decay fade over the decMs right after it.
+  // Live notes share the audio's fade progress (which also advances while the
+  // finger is held); wait-mode notes use their playback timeline position.
+  const prog = (p.ds && p.ds.gain) ? liveFadeProgress(p.ds) : elapsed;
+  // The release tail already encodes its own volume drop spatially, so the
+  // decay factor only scales the gesture's own path (before tailEnd).
+  const onOwnPath = p.tailEnd == null || st.idx < p.tailEnd;
+  const vol = volumeFromStartY(st.y) * attackFactor(prog, p.atkMs || 0)
+    * (onOwnPath ? decayFactor(prog, p.atkMs || 0, p.decMs || 0) : 1);
   const pct = total > 0 ? (elapsed / total * 100).toFixed(1) : 100;
   return `<div class="live"><div class="note-stats">${EMOJI_TIME} ${total}ms ${EMOJI_VOL} ${Math.round(vol / VOL_MAX * 100)}%</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
@@ -1370,30 +1376,44 @@ function attackFactor(tMs, atkMs) {
   return atkMs > 0 ? Math.min(1, tMs / atkMs) : 1;
 }
 
-// How far a live note's attack fade has progressed in ms. The fade normally
-// follows the gesture's note time, which only advances while the finger draws
-// — so during a hold it also advances with real time, keeping the fade-in
-// moving (and completing) even when no new path points arrive.
-function liveAttackProgress(ds) {
-  if (!(ds.atkMs > 0)) return 0;
-  return Math.min(ds.atkMs, Math.max(ds.totalMs || 0, performance.now() - (ds.startedAt || 0)));
+// Decay mirrors the attack and is applied right after it: the attack fades the
+// volume IN from 0 to the gesture's own volume over the first `atkMs`, then the
+// decay fades it OUT from the 100% volume point (where the attack ends) down to
+// the decay's end volume over `decMs`. `fadeProg` is how far the note's fade
+// domain has progressed in ms. Without an attack the decay starts right away at
+// the note's start (the 100% volume point is the very beginning).
+function decayFactor(fadeProg, atkMs, decMs) {
+  if (!(decMs > 0)) return 1;
+  const start = atkMs > 0 ? atkMs : 0;
+  const p = Math.min(1, Math.max(0, (fadeProg - start) / decMs));
+  return 1 - (1 - decayEndVol()) * p;
+}
+
+// How far a live note's fade domain has progressed in ms — the attack occupies
+// the first atkMs and the decay the decMs right after it. Like the attack's
+// progress, it follows the gesture's note time while drawing and keeps moving
+// with real time during a hold.
+function liveFadeProgress(ds) {
+  return Math.max(ds.totalMs || 0, performance.now() - (ds.startedAt || 0));
 }
 
 // Sample the volume the path produces at N evenly-spaced times across its
-// duration. For near-vertical paths (almost no time) the samples walk the path
-// by index instead so the note still sweeps its Y range in a short blip.
-function buildVolumeCurve(pts, cum, totalMs, N, atkMs) {
+// duration. The attack and decay fades are baked into each sample. For
+// near-vertical paths (almost no time) the samples walk the path by index
+// instead so the note still sweeps its Y range in a short blip.
+function buildVolumeCurve(pts, cum, totalMs, N, atkMs, decMs) {
   const curve = new Float32Array(N);
   if (totalMs < MIN_GESTURE_MS) {
     for (let k = 0; k < N; k++) {
       const idx = Math.min(pts.length - 1, Math.round((k / (N - 1)) * (pts.length - 1)));
-      curve[k] = volumeFromStartY(pts[idx].y) * attackFactor(totalMs * k / (N - 1), atkMs);
+      const t = totalMs * k / (N - 1);
+      curve[k] = volumeFromStartY(pts[idx].y) * attackFactor(t, atkMs) * decayFactor(t, atkMs, decMs);
     }
     return curve;
   }
   for (let k = 0; k < N; k++) {
     const t = (totalMs * k) / (N - 1);
-    curve[k] = volumeFromStartY(pathStateAtTime(pts, cum, t).y) * attackFactor(t, atkMs);
+    curve[k] = volumeFromStartY(pathStateAtTime(pts, cum, t).y) * attackFactor(t, atkMs) * decayFactor(t, atkMs, decMs);
   }
   return curve;
 }
@@ -1407,18 +1427,19 @@ function schedulePathPlayback(ds) {
   initAudio();
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
   const atkMs = gestureAttackMs();
+  const decMs = gestureDecayMs();
   const relMs = gestureReleaseMs();
-  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs);
+  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, atkMs, decMs, relMs);
   playbacks.push({
-    pts: tail.pts, cumTime: tail.cum, atkMs, tailEnd: tail.tailEnd,
+    pts: tail.pts, cumTime: tail.cum, atkMs, decMs, tailEnd: tail.tailEnd,
     totalMs: totalMs + relMs, relMs, startedAt: performance.now(), released: true,
   });
-  ensureAudioRunning(() => schedulePathAudio(ds, totalMs, atkMs, relMs), Date.now() + 30000);
+  ensureAudioRunning(() => schedulePathAudio(ds, totalMs, atkMs, decMs, relMs), Date.now() + 30000);
 }
 
-function schedulePathAudio(ds, totalMs, atkMs, relMs) {
+function schedulePathAudio(ds, totalMs, atkMs, decMs, relMs) {
   if (!audioCtx || !masterGain) return;
-  const curve = buildVolumeCurve(ds.pts, ds.cumTime, ds.totalMs, 128, atkMs);
+  const curve = buildVolumeCurve(ds.pts, ds.cumTime, ds.totalMs, 128, atkMs, decMs);
   const s = CHIME_SETTINGS.start;
   const t0 = audioCtx.currentTime;
   const pathDur = totalMs / 1000;
@@ -1463,7 +1484,7 @@ function startLivePathNote(ds) {
   // suspended on the very first load and events scheduled at currentTime 0
   // would be missed.
   plantGestureTree(ds);
-  ds.playback = { ds, pts: [], cumTime: [], atkMs: gestureAttackMs(), totalMs: 0, relMs: 0, startedAt: performance.now(), released: false };
+  ds.playback = { ds, pts: [], cumTime: [], atkMs: gestureAttackMs(), totalMs: 0, decMs: gestureDecayMs(), relMs: 0, startedAt: performance.now(), released: false };
   syncLivePlaybackPath(ds);
   playbacks.push(ds.playback);
   ensureLiveAudio(ds, Date.now() + 30000);
@@ -1515,6 +1536,7 @@ function initLivePathAudio(ds) {
   ds.osc = osc;
   ds.gainLevel = atkMs > 0 ? 0 : vol0;
   ds.atkMs = atkMs;
+  ds.decMs = gestureDecayMs();
   ds.lastSched = ctx0;
   ds.cleanupTimer = null;
   gestureNotes.push(ds);
@@ -1527,7 +1549,7 @@ function initLivePathAudio(ds) {
 // The release tail is added on finger-up.
 function syncLivePlaybackPath(ds) {
   if (!ds.playback) return;
-  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, 0);
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, gestureAttackMs(), ds.decMs || 0, 0);
   ds.playback.pts = path.pts;
   ds.playback.cumTime = path.cum;
   ds.playback.tailEnd = path.tailEnd;
@@ -1536,10 +1558,14 @@ function syncLivePlaybackPath(ds) {
 function scheduleLivePoint(ds) {
   if (!ds.gain) return;
   const pt = ds.pts[ds.pts.length - 1];
-  // Inside the attack window the base volume is scaled by the fade factor at
-  // this point's moment, so the fade tracks a fluctuating base every ms. The
-  // fade progress never steps backward when a held gesture resumes drawing.
-  const target = volumeFromStartY(pt.y) * attackFactor(liveAttackProgress(ds), ds.atkMs || 0);
+  // The envelope is applied in place: the base volume is scaled by the attack
+  // fade over the first atkMs and by the decay fade over the decMs right after
+  // it. Each point is scaled by the fade progress at the moment it is drawn;
+  // the progress never steps backward when a held gesture resumes drawing.
+  const prog = liveFadeProgress(ds);
+  const target = volumeFromStartY(pt.y)
+    * attackFactor(prog, ds.atkMs || 0)
+    * decayFactor(prog, ds.atkMs || 0, ds.decMs || 0);
   const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
   const now = audioCtx.currentTime;
   if (targetT > now + 0.005) {
@@ -1557,17 +1583,23 @@ function scheduleLivePoint(ds) {
 // and the attack fade would stall mid-fade. Each frame, while a live note is
 // inside its attack window and the finger isn't drawing, schedule the gain
 // toward the fingertip's level along the real-time fade curve so the volume
-// keeps rising during a hold.
+// keeps rising during a hold. The decay fade works the same way right after
+// the attack: once the fade progress passes atkMs, the held note fades down
+// toward the decay's end volume.
 function tickLiveHold(ds) {
-  if (!ds.gain || ds.finished || !(ds.atkMs > 0)) return;
+  if (!ds.gain || ds.finished) return;
+  const atkMs = ds.atkMs || 0, decMs = ds.decMs || 0;
+  if (!(atkMs > 0) && !(decMs > 0)) return;
   if (performance.now() - (ds.lastMoveAt || 0) < 50) return;   // finger is still drawing
   const at = audioCtx.currentTime;
   if (at < ds.lastSched - 0.005) return;                       // scheduled automation is still ahead
-  const prog = liveAttackProgress(ds);
-  if (prog >= ds.atkMs) return;                                // fade already complete
+  const prog = liveFadeProgress(ds);
+  const decEnd = (atkMs > 0 ? atkMs : 0) + decMs;
+  if (prog >= atkMs && prog >= decEnd) return;                 // both fades complete
   const base = volumeFromStartY(ds.pts[ds.pts.length - 1].y);
   const horizon = 0.04;                                        // seconds of fade scheduled per frame
-  const target = base * attackFactor(Math.min(ds.atkMs, prog + horizon * 1000), ds.atkMs);
+  const progF = prog + horizon * 1000;
+  const target = base * attackFactor(progF, atkMs) * decayFactor(progF, atkMs, decMs);
   ds.gain.cancelScheduledValues(at);
   ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), at);
   ds.gain.linearRampToValueAtTime(target, at + horizon);
@@ -1579,7 +1611,7 @@ function finishLivePathNote(ds) {
   if (!ds.gain || !ds.playback) return;
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
   const relMs = gestureReleaseMs();
-  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs);
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, ds.atkMs || gestureAttackMs(), ds.decMs || gestureDecayMs(), relMs);
   ds.playback.released = true;
   ds.playback.totalMs = totalMs + relMs;
   ds.playback.relMs = relMs;
@@ -1638,6 +1670,17 @@ function gestureAttackMs() {
   return GESTURE.gestureAttack ? (FIXED.attack.value || 0) : 0;
 }
 
+function gestureDecayMs() {
+  // ms over which a custom gesture's volume fades out, right after the attack,
+  // when "Add to gestures" is on
+  return GESTURE.gestureDecay ? (FIXED.decay.value || 0) : 0;
+}
+
+function decayEndVol() {
+  // fraction of the full volume the decay fades down to (FIXED.decay.vol, 0..1)
+  return Math.max(0, Math.min(1, (FIXED.decay.vol || 0) / 100));
+}
+
 function gestureReleaseMs() {
   // ms of release appended to a custom gesture's note when "Add to gestures" is on
   return GESTURE.gestureRelease ? (FIXED.release.value || 0) : 0;
@@ -1647,7 +1690,7 @@ function gestureTreeNote(totalMs) {
   const T = Math.max(200, totalMs);
   return {
     attack:  Math.round(T * 0.10) + gestureAttackMs(),
-    decay:   Math.round(T * 0.20),
+    decay:   Math.round(T * 0.20) + gestureDecayMs(),
     hold:    Math.round(T * 0.25),
     release: Math.round(T * 0.45) + gestureReleaseMs(),
   };
@@ -1764,18 +1807,19 @@ function drawDottedPath(pts) {
 }
 
 // Solid glowing line from the path's start up to the playback point `st`.
-// The part inside the attack window and the appended release tail (from
-// tailEnd on) are amber; the gesture's own played path between them is green.
-function drawGreenPath(pts, st, atkEnd, tailEnd) {
+// The part inside the attack + decay envelope window and the appended release
+// tail (from envEnd / tailEnd on) are amber; the gesture's own played path
+// between them is green.
+function drawGreenPath(pts, st, envEnd, tailEnd) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = 4;
   const N = pts.length;
   if (tailEnd == null) tailEnd = N;
-  const hasAtk = atkEnd > 0 && atkEnd < N;
-  // Green starts after the attack window (or at the path start with no attack)
-  // and ends where the release tail begins.
-  const greenFrom = hasAtk ? Math.min(atkEnd, tailEnd) : 0;
+  const hasEnv = envEnd > 0 && envEnd < N;
+  // Green starts after the envelope window (or at the path start with no
+  // attack/decay) and ends where the release tail begins.
+  const greenFrom = hasEnv ? Math.min(envEnd, tailEnd) : 0;
 
   const seg = (from, to, amber) => {
     if (from > to) return;
@@ -1791,10 +1835,10 @@ function drawGreenPath(pts, st, atkEnd, tailEnd) {
 
   const playedTo = st.idx;
   if (playedTo < greenFrom) {
-    // Playback still inside the attack window: all amber.
+    // Playback still inside the attack/decay envelope window: all amber.
     seg(0, playedTo, true);
   } else {
-    seg(0, greenFrom - 1, true);                                  // attack window
+    seg(0, greenFrom - 1, true);                                  // attack + decay window
     seg(greenFrom, Math.min(playedTo, tailEnd - 1), false);       // own played path
     seg(tailEnd, playedTo, true);                                 // release tail
   }
@@ -1802,10 +1846,10 @@ function drawGreenPath(pts, st, atkEnd, tailEnd) {
 }
 
 // Dotted line for the portion ahead of the playback point. The unplayed path
-// inside the attack window and the appended release tail (from tailEnd on) are
-// faint amber; the rest of the gesture's own unplayed path keeps the normal
-// dotted color.
-function drawDottedTail(pts, cum, st, atkEnd, tailEnd) {
+// inside the attack + decay envelope window and the appended release tail (from
+// envEnd / tailEnd on) are faint amber; the rest of the gesture's own unplayed
+// path keeps the normal dotted color.
+function drawDottedTail(pts, cum, st, envEnd, tailEnd) {
   if (st.idx >= pts.length - 1) return;
   const seg = (from, to, color, dash) => {
     if (from > to) return;
@@ -1818,20 +1862,21 @@ function drawDottedTail(pts, cum, st, atkEnd, tailEnd) {
     for (let i = from; i <= to; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   };
-  const amberTo = Math.min(atkEnd, tailEnd) - 1;
-  if (atkEnd > 0 && st.idx < amberTo) seg(st.idx + 1, amberTo, 'rgba(245,166,35,0.5)', [4, 10]);
-  if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, atkEnd), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
+  const amberTo = Math.min(envEnd, tailEnd) - 1;
+  if (envEnd > 0 && st.idx < amberTo) seg(st.idx + 1, amberTo, 'rgba(245,166,35,0.5)', [4, 10]);
+  if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, envEnd), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
   if (st.idx < pts.length - 1) seg(Math.max(st.idx + 1, tailEnd), pts.length - 1, 'rgba(245,166,35,0.5)', [4, 10]);
   ctx.setLineDash([]);
 }
 
 // Build the playback path a gesture's note follows: the gesture's own path,
-// then an appended release tail (the gesture's last point down to its end
-// volume). The attack no longer prepends a tail — it fades the volume in
-// place over the path's first `attackMs`, so it adds no time. The release
-// tail is a straight line in X=time / Y=volume space stretched over its
-// duration of horizontal travel. Returns { pts, cum, tailEnd }.
-function buildGesturePlaybackPath(pts, cum, pathMs, relMs) {
+// then an appended release tail. The attack and decay no longer add a tail —
+// they fade the volume in place over the path's first `attackMs` and the
+// `decayMs` right after it, so they add no time. The release tail is a straight
+// line in X=time / Y=volume space stretched over its duration of horizontal
+// travel, starting from the envelope level the note reaches at the gesture's
+// end (decayed, if the decay is applied). Returns { pts, cum, tailEnd }.
+function buildGesturePlaybackPath(pts, cum, pathMs, atkMs, decMs, relMs) {
   if (!pts.length) return { pts, cum, tailEnd: pts.length };
   const end = pts[pts.length - 1];
   let out = pts.slice();
@@ -1840,10 +1885,13 @@ function buildGesturePlaybackPath(pts, cum, pathMs, relMs) {
   let tailEnd = out.length;
   if (relMs > 0) {
     const px = relMs / (TIME_PER_W * GESTURE.timeMult) * W / 100;
-    const endY = yForVolume(volumeFromStartY(end.y) * (FIXED.release.vol / 100));
+    const base = volumeFromStartY(end.y);
+    const envAtEnd = attackFactor(pathMs, atkMs) * decayFactor(pathMs, atkMs, decMs);
+    const startY = yForVolume(base * envAtEnd);
+    const endY = yForVolume(base * envAtEnd * (FIXED.release.vol / 100));
     for (let i = 1; i <= RELEASE_TAIL_STEPS; i++) {
       const t = i / RELEASE_TAIL_STEPS;
-      out.push({ x: end.x + px * t, y: end.y + (endY - end.y) * t });
+      out.push({ x: end.x + px * t, y: startY + (endY - startY) * t });
       outc.push(pathMs + relMs * t);
     }
   }
@@ -2091,6 +2139,7 @@ function loadSavedSettings() {
       if (d.gesture.growSpeed != null) g.growSpeed = Math.max(0.25, Math.min(4, d.gesture.growSpeed));
       if (d.gesture.timeMult != null) g.timeMult = Math.max(0.1, Math.min(4, d.gesture.timeMult));
       if (d.gesture.gestureAttack != null) g.gestureAttack = !!d.gesture.gestureAttack;
+      if (d.gesture.gestureDecay != null) g.gestureDecay = !!d.gesture.gestureDecay;
       if (d.gesture.gestureRelease != null) g.gestureRelease = !!d.gesture.gestureRelease;
     }
     GESTURE = g;
@@ -2618,6 +2667,11 @@ releaseGestureEl.addEventListener('change', () => {
   GESTURE.gestureRelease = releaseGestureEl.checked;
   saveSettings();
 });
+const decayGestureEl = document.getElementById('fx-decayGesture');
+decayGestureEl.addEventListener('change', () => {
+  GESTURE.gestureDecay = decayGestureEl.checked;
+  saveSettings();
+});
 function syncFixedUI() {
   for (const name of SLOT_NAMES) {
     FIXED[name].on = true;   // every component is always a tap default
@@ -2631,6 +2685,7 @@ function syncFixedUI() {
     }
   }
   attackGestureEl.checked = !!GESTURE.gestureAttack;
+  decayGestureEl.checked = !!GESTURE.gestureDecay;
   releaseGestureEl.checked = !!GESTURE.gestureRelease;
 }
 syncFixedUI();
@@ -2809,10 +2864,12 @@ function loop(now) {
     }
     const pts = p.pts, cum = p.cumTime;
     const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
-    const atkEnd = attackEndIdx(cum, p.atkMs || 0);
+    const tailEnd = p.tailEnd != null ? p.tailEnd : pts.length;
+    // The amber envelope window covers the attack and the decay right after it.
+    const envEnd = Math.min(attackEndIdx(cum, (p.atkMs || 0) + (p.decMs || 0)), tailEnd);
     ctx.globalAlpha = alpha;
-    drawGreenPath(pts, st, atkEnd, p.tailEnd != null ? p.tailEnd : pts.length);
-    drawDottedTail(pts, cum, st, atkEnd, p.tailEnd != null ? p.tailEnd : pts.length);
+    drawGreenPath(pts, st, envEnd, tailEnd);
+    drawDottedTail(pts, cum, st, envEnd, tailEnd);
     drawPlaybackCircle(st.x, st.y, alpha);
     ctx.globalAlpha = 1;
   }
