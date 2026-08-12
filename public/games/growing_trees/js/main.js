@@ -184,7 +184,7 @@ function loop(now) {
     }
     for (const ds of dragStates.values()) {
       const currentPlay = playbacks.find(p => p.ds === ds);
-      if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts);
+      if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts, ds.cumTime, gestureAttackMs(), gestureDecayMs());
     }
   }
   for (let i = playbacks.length - 1; i >= 0; i--) {
@@ -203,10 +203,11 @@ function loop(now) {
     const tailEnd = p.tailEnd != null ? p.tailEnd : pts.length;
     // The amber envelope window covers the attack and the decay right after it.
     const envEnd = Math.min(attackEndIdx(cum, (p.atkMs || 0) + (p.decMs || 0)), tailEnd);
+    const cY = envelopeY(st, cumAtState(cum, st), p.atkMs || 0, p.decMs || 0, st.idx < tailEnd);
     ctx.globalAlpha = alpha;
-    drawGreenPath(pts, st, envEnd, tailEnd);
-    drawDottedTail(pts, cum, st, envEnd, tailEnd);
-    drawPlaybackCircle(st.x, st.y, alpha);
+    drawGreenPath(pts, cum, st, envEnd, tailEnd, p.atkMs || 0, p.decMs || 0);
+    drawDottedTail(pts, cum, st, envEnd, tailEnd, p.atkMs || 0, p.decMs || 0);
+    drawPlaybackCircle(st.x, cY, alpha);
     ctx.globalAlpha = 1;
   }
 
