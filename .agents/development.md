@@ -8,14 +8,14 @@ There is **no build system, no bundler, no package.json, and no dependencies** f
 
 ### How to Work on Static Files
 
-1. Edit the HTML file directly — each is self-contained with inline `<style>` and `<script>` tags
+1. Edit the HTML file directly — most are self-contained with inline `<style>` and `<script>` tags. Some are split into multiple files (see Growing Trees under `games/growing_trees/`), loaded with classic `<script src>` tags (no ES modules).
 2. Open in a browser via `file://` or a local HTTP server to test
 3. Use browser dev tools device emulation for mobile testing
 4. Push to GitHub to deploy
 
 ### Coding Conventions
 
-- **Single-file architecture** — each game or tool is one `.html` file with everything inline
+- **No build system** — files are edited directly and pushed. Small games/tools stay single-file HTML; multi-file games use classic `<script src>` tags (no ES modules, so pages still open over `file://`) with all referenced files committed in the same folder
 - **Canvas API** for game rendering (2D context)
 - **`requestAnimationFrame`** for game loops
 - **CSS Custom Properties** for theming (see `tools/multiStepCalculator.html` for an example)
