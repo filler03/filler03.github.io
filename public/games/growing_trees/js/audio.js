@@ -331,7 +331,7 @@ function endGestureNote(note) {
   }
 }
 
-// Cancel everything (used on blur / cancel / mode switch / clear): quickly
+// Cancel everything (used on blur / cancel / clear): quickly
 // fade every running note out and drop all playback animations.
 function stopGestureNote() {
   for (const n of gestureNotes) {

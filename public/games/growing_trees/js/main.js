@@ -25,12 +25,9 @@ function dismissSoundOverlay() {
 }
 soundOverlay.addEventListener('click', dismissSoundOverlay);
 
-// Apply the saved start mode (planting vs navigating) to this session.
+// Apply the saved settings to this session.
 loadSavedSettings();
-mode = PREFERENCES.startMode === 'nav' ? 'nav' : 'plant';
-updateModeBtn();
 syncWaitBtn();
-document.getElementById('startMode').value = PREFERENCES.startMode;
 syncLineUI();
 syncFixedUI();
 

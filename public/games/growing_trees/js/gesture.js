@@ -169,11 +169,18 @@ function finishPlantGesture(ds) {
     return;
   }
   if (!gestureMoved(ds)) {
-    // ---- Tap: default ADSR note (taps overlap and each keeps its own HUD) ----
-    ds.attack = FIXED.attack.on ? FIXED.attack.value : TAP_ATTACK_MS;
-    const note = startGestureNote(ds.startX, ds.startY, ds.attack,
-                                  FIXED.attack.on ? FIXED.attack.vol : undefined);
-    scheduleFixedRun(note, 1);
+    if (GESTURE.allowTapNotes) {
+      // ---- Tap: default ADSR note (taps overlap and each keeps its own HUD) ----
+      ds.attack = FIXED.attack.on ? FIXED.attack.value : TAP_ATTACK_MS;
+      const note = startGestureNote(ds.startX, ds.startY, ds.attack,
+                                    FIXED.attack.on ? FIXED.attack.vol : undefined);
+      scheduleFixedRun(note, 1);
+    } else {
+      // Tap notes disabled: a tap behaves like a ~0-length gesture — a very
+      // short note that follows the same gesture scheduling rules (volume from
+      // the tap's Y, pitch from its X, min note length, playback visualization).
+      schedulePathPlayback(ds);
+    }
   } else if (GESTURE.waitForGesture) {
     // ---- Gesture: freehand path (wait mode) ----
     schedulePathPlayback(ds);

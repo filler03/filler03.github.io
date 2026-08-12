@@ -81,6 +81,7 @@ const EMOJI_VOL  = '🔊';   // speaker marks volume values
 const DEFAULT_GESTURE = {
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
   timeMult: 1,             // × the base time rate (TIME_PER_W ms per % of width)
+  allowTapNotes: true,     // when off, tapping the screen plays no note
   gestureAttack: false,    // when on, custom gestures fade their volume in over the tap-note attack time
   gestureDecay: false,     // when on, custom gestures fade their volume out over the tap-note decay time, right after the attack
   gestureRelease: false,   // when on, the tap-note release value is appended to custom gestures
@@ -104,9 +105,6 @@ const DEFAULT_CHIME = {
   finish: { note: 'C4', wave: 'sine', blend: 0, blendTo: null, attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
 };
 var CHIME_SETTINGS = clone(DEFAULT_CHIME);
-
-const DEFAULT_PREFERENCES = { startMode: 'plant' };
-var PREFERENCES = clone(DEFAULT_PREFERENCES);
 
 /* ---------- Camera (pan + zoom) ---------- */
 const MIN_ZOOM = 0.3, MAX_ZOOM = 3.0;

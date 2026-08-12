@@ -69,17 +69,7 @@ function clearHud() {
   statHud.style.opacity = '0';
 }
 
-/* ---- Mode & live/wait buttons ---- */
-const modeBtn = document.getElementById('modeBtn');
-function updateModeBtn() {
-  modeBtn.textContent = mode === 'plant' ? '🌱 Planting' : '🧭 Navigating';
-  modeBtn.classList.toggle('nav', mode === 'nav');}
-modeBtn.addEventListener('click', () => {
-  if (mode === 'plant') { dragStates.clear(); stopGestureNote(); }
-  mode = mode === 'plant' ? 'nav' : 'plant';
-  updateModeBtn();
-});
-
+/* ---- Live / wait button ---- */
 const waitBtn = document.getElementById('waitBtn');
 function syncWaitBtn() {
   waitBtn.textContent = GESTURE.waitForGesture ? '⏳ Wait for gesture' : '🎵 Live sound';
@@ -96,7 +86,7 @@ const STORAGE_KEY = 'growingTrees.settings.v5';
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, fixed: FIXED, prefs: PREFERENCES }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, fixed: FIXED }));
     return true;
   } catch (e) { return false; }
 }
@@ -114,6 +104,7 @@ function loadSavedSettings() {
     if (d.gesture) {
       if (d.gesture.waitForGesture != null) g.waitForGesture = !!d.gesture.waitForGesture;
       if (d.gesture.timeMult != null) g.timeMult = Math.max(0.1, Math.min(4, d.gesture.timeMult));
+      if (d.gesture.allowTapNotes != null) g.allowTapNotes = !!d.gesture.allowTapNotes;
       if (d.gesture.gestureAttack != null) g.gestureAttack = !!d.gesture.gestureAttack;
       if (d.gesture.gestureDecay != null) g.gestureDecay = !!d.gesture.gestureDecay;
       if (d.gesture.gestureRelease != null) g.gestureRelease = !!d.gesture.gestureRelease;
@@ -129,8 +120,6 @@ function loadSavedSettings() {
     for (const name of SLOT_NAMES) fx[name].on = true;
     fx.attack.vol = 100;   // the attack always ramps to full gain
     FIXED = fx;
-    PREFERENCES = clone(DEFAULT_PREFERENCES);
-    if (d.prefs) PREFERENCES.startMode = d.prefs.startMode === 'nav' ? 'nav' : 'plant';
     return true;
   } catch (e) { return false; }
 }
@@ -139,13 +128,11 @@ function resetToDefaults() {
   CHIME_SETTINGS = clone(DEFAULT_CHIME);
   GESTURE = clone(DEFAULT_GESTURE);
   FIXED = clone(DEFAULT_FIXED);
-  PREFERENCES = clone(DEFAULT_PREFERENCES);
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
   syncFixedUI();
   syncWaitBtn();
-  document.getElementById('startMode').value = PREFERENCES.startMode;
 }
 
 /* ---------- Chime settings panel ---------- */
@@ -224,10 +211,6 @@ blendToSel.addEventListener('change', () => {
   previewChime();
 });
 */
-const startModeSel = document.getElementById('startMode');
-startModeSel.addEventListener('change', () => {
-  PREFERENCES.startMode = startModeSel.value;
-});
 /* COMMENTED OUT - ADSR defaults are gesture-driven now.
 for (const f of ENV_FIELDS) {
   const el = document.getElementById(f);
@@ -364,6 +347,11 @@ decayGestureEl.addEventListener('change', () => {
   GESTURE.gestureDecay = decayGestureEl.checked;
   saveSettings();
 });
+const allowTapNotesEl = document.getElementById('allowTapNotes');
+allowTapNotesEl.addEventListener('change', () => {
+  GESTURE.allowTapNotes = allowTapNotesEl.checked;
+  saveSettings();
+});
 function syncFixedUI() {
   for (const name of SLOT_NAMES) {
     FIXED[name].on = true;   // every component is always a tap default
@@ -379,6 +367,7 @@ function syncFixedUI() {
   attackGestureEl.checked = !!GESTURE.gestureAttack;
   decayGestureEl.checked = !!GESTURE.gestureDecay;
   releaseGestureEl.checked = !!GESTURE.gestureRelease;
+  allowTapNotesEl.checked = !!GESTURE.allowTapNotes;
 }
 
 /* COMMENTED OUT - new lines are started by a direction change only.

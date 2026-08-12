@@ -288,31 +288,10 @@
     margin-bottom: 2px;
   }
   .grid.mm { grid-template-columns: 78px 1fr 52px 1fr 52px; }
-  #modeBtn {
-    position: fixed;
-    left: calc(16px + env(safe-area-inset-left));
-    bottom: calc(16px + env(safe-area-inset-bottom));
-    padding: 13px 20px;
-    border: none;
-    border-radius: 26px;
-    background: #2e5d34;
-    color: #fff;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    touch-action: manipulation;
-    user-select: none;
-    -webkit-user-select: none;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-    z-index: 40;
-  }
-  #modeBtn:hover { background: #3c7a45; }
-  #modeBtn.nav { background: #3a5ba0; }
-  #modeBtn.nav:hover { background: #4a6db0; }
   #waitBtn {
     position: fixed;
     left: calc(16px + env(safe-area-inset-left));
-    bottom: calc(68px + env(safe-area-inset-bottom));
+    bottom: calc(16px + env(safe-area-inset-bottom));
     padding: 11px 16px;
     border: none;
     border-radius: 22px;
@@ -392,16 +371,11 @@
   <div class="panel-col">
   <div class="vec-head">Default values</div>
   <div class="grid">
-    <label for="startMode">Start mode</label>
-    <select id="startMode">
-      <option value="plant">Planting 🌱</option>
-      <option value="nav">Navigating 🧭</option>
-    </select>
     <label for="note">Key</label>
     <select id="note"></select>
     <!-- COMMENTED OUT - the gesture now determines the sound's wave, blend,
          volume, attack, decay, sustain, hold, and release. Only the key
-         (root pitch) and start mode stay manual.
+         (root pitch) stays manual.
     <label for="wave">Wave</label>
     <select id="wave">
       <option value="sine">Sine</option>
@@ -475,6 +449,9 @@
       <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
       <div class="fx-head"><label title="Append this release value to the end of every custom gesture"><input type="checkbox" id="fx-releaseGesture"> Add to gestures</label></div>
     </div>
+    <div class="fx-item">
+      <div class="fx-head"><label title="When off, a tap plays a very short gesture note (the default tap note is disabled)"><input type="checkbox" id="allowTapNotes"> Allow tap notes</label></div>
+    </div>
   </div>
   </div>
   </div>
@@ -524,9 +501,8 @@
 </div>
 
 <canvas id="scene"></canvas>
-<button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.7.1</div>
+<div id="version">v1.7.3</div>
 
 <script src="js/app.js"></script>
 <script src="js/audio.js"></script>

@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. (Formerly "Growing Trees" — tree planting/rendering was removed entirely; the page is now a gesture→note toy on a plain white background.)
 >
-> Current version badge: `v1.7.1` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.7.3` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -13,20 +13,18 @@
 | Script style | Classic `<script src>` tags — **no ES modules**, so the page still opens over `file://`. Shared top-level state uses `var`; load order matters (see above) |
 | Rendering | Canvas 2D, plain white world background; gesture paths drawn in screen space |
 | Audio | Web Audio API (oscillator + gain envelope, master gain 0.45, compressor). Gestures use `setValueCurveAtTime` (wait mode) or incremental ramps (live mode) |
-| Persistence | `localStorage` key `growingTrees.settings.v5` → `{ chime, gesture, fixed, prefs }` (key kept for backwards compatibility with saved settings) |
-| Interaction | Two modes: `plant` (draw notes) and `nav` (pan + pinch zoom) |
+| Persistence | `localStorage` key `growingTrees.settings.v5` → `{ chime, gesture, fixed }` (key kept for backwards compatibility with saved settings) |
+| Interaction | Single mode — freehand gestures only. The nav-mode button/start-mode setting were removed; the dormant camera (pan/zoom) code is kept in case navigation is re-added later |
 
 ## Controls
 
-| Input | Plant mode (`plant`) | Navigate mode (`nav`) |
-|-------|----------------------|------------------------|
-| Tap | Play the default ADSR note | — |
-| Drag a freehand path | Draw a dotted path that plays back (circle turns it green) | — |
-| **Multiple fingers** | Each finger starts its own independent gesture (path + note) | — |
-| Pan sliders (on-screen) | — | Pan `cam.x` / `cam.y` |
-| Pinch inside pan slider | — | Zoom (zoomAt) |
+| Input | Action |
+|-------|--------|
+| Tap | Play the default ADSR note, or a very short gesture note when **Allow tap notes** is off |
+| Drag a freehand path | Draw a dotted path that plays back (circle turns it green) |
+| **Multiple fingers** | Each finger starts its own independent gesture (path + note) |
 
-- Startup camera: zoomed all the way out, panned all the way down — `cam = { x: 0, y: HORIZON * MIN_ZOOM, zoom: MIN_ZOOM }`, where `MIN_ZOOM = 0.3`, `MAX_ZOOM = 3.0`, `HORIZON = H * 0.56`.
+- The camera/pan/zoom code (`cam`, `zoomAt`, `navState`, `pinchState`) still exists but is dormant — there is no navigation button and `mode` is always `'plant'`. Re-enabling navigation later just needs the toggle restored.
 
 ## Gesture → Note (freehand path)
 
@@ -40,7 +38,7 @@ A gesture is one continuous freehand path. Any number of fingers can gesture at 
 
 While drawing the path is a **dotted line**. During playback a small **glowing circle** travels along the path at the point whose `cumTime` equals the elapsed note time, turning the traveled portion into a **glowing green solid line** (`GESTURE_GREEN = #3ecb5a`); the unplayed portion stays dotted. When the note finishes the whole path stays green and fades out after `LINGER_MS = 800`.
 
-Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps overlap too (each is its own note in `tapNotes[]`); only a global cancel on blur/cancel/mode-switch/clear stops everything (`stopGestureNote`).
+Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps overlap too (each is its own note in `tapNotes[]`); only a global cancel on blur/cancel/clear stops everything (`stopGestureNote`).
 
 ### Live vs Wait (top-left toggle)
 
@@ -51,7 +49,7 @@ Gestures **overlap**: starting a new gesture never removes an earlier one that i
 
 ### Tap note defaults
 
-A tap (movement ≤ `TAP_THRESHOLD`, 8 px) plays the default ADSR note: the four `FIXED` presets (attack/decay/hold/release + end-vol), volume from the touch's Y, pitch from its X. Taps **overlap** — each gets its own oscillator + gain node (`tapNotes[]`).
+A tap (movement ≤ `TAP_THRESHOLD`, 8 px) plays the default ADSR note: the four `FIXED` presets (attack/decay/hold/release + end-vol), volume from the touch's Y, pitch from its X. Taps **overlap** — each gets its own oscillator + gain node (`tapNotes[]`). When **Allow tap notes** (`GESTURE.allowTapNotes`) is off, the default note is skipped and the tap instead plays a very short **gesture** note via `schedulePathPlayback` — same rules as any freehand gesture (min `MIN_GESTURE_MS` = 80 ms, volume from Y, pitch from X, gesture attack/decay/release settings, and green playback visualization).
 
 ## Top-Left HUD (`#statHud`)
 
@@ -64,9 +62,9 @@ Stacked **note cards**, one per running tap and one per active gesture playback,
 
 | Section | Controls |
 |---------|----------|
-| Default values | Start mode (`plant`/`nav`), Key (root note) |
+| Default values | Key (root note) |
 | Gesture timing | Time multiplier (`timeMult` — ms per % of horizontal travel) |
-| Tap note defaults | Attack / Decay / Hold / Release ms + End vol sliders |
+| Tap note defaults | Allow tap notes (checkbox), Attack / Decay / Hold / Release ms + End vol sliders |
 
 Settings persist on every change via `saveSettings()`; `resetToDefaults()` clears the saved key and restores the defaults. (The former **Growth speed** slider was removed along with the tree logic.)
 
@@ -76,11 +74,11 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 
 | Module | Functions |
 |--------|-----------|
-| `app.js` | `resize`, `toWorld`, `zoomAt`, `clampCamY`, `volumeFromStartY`/`yForVolume`; shared state (`playbacks`, `gestureNotes`, `tapNotes`, `cam`, `mode`, `dragStates`, `CHIME_SETTINGS`, `GESTURE`, `FIXED`, `PREFERENCES`) |
+| `app.js` | `resize`, `toWorld`, `zoomAt`, `clampCamY`, `volumeFromStartY`/`yForVolume`; shared state (`playbacks`, `gestureNotes`, `tapNotes`, `cam`, `mode`, `dragStates`, `CHIME_SETTINGS`, `GESTURE`, `FIXED`) |
 | `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
 | `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
 | `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring |
-| `main.js` | Boot (apply saved prefs, sound-overlay gate), pointer handlers, `loop()` render loop |
+| `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
 
 ### Key constants
 
@@ -93,11 +91,12 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 | `TAP_ATTACK_MS` | 60 | attack for a tap (no line) |
 | `TAP_THRESHOLD` | 8 | px before a drag counts |
 | `VOL_MIN` / `VOL_MAX` | 0.01 / 0.5 | screen-Y volume gain range |
-| `PAN_SENS` / `PINCH_SENS` | 2 / 0.4 | nav camera sensitivities |
+| `PAN_SENS` / `PINCH_SENS` | 2 / 0.4 | nav camera sensitivities (dormant — nav removed for now) |
+| `GESTURE.allowTapNotes` | true | when off, a tap plays a ~0-length gesture note instead of the default tap note |
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.7.1`) after changes.
+- **Always bump the `#version` badge** (currently `v1.7.3`) after changes.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
 - **No tree code:** tree planting/rendering was removed entirely (formerly "Growing Trees"). Don't reintroduce it without a design.
