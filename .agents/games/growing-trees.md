@@ -1,6 +1,6 @@
-# Gesture Notes (`public/games/growing_trees/`)
+# Growing Trees (`public/games/growing_trees/`)
 
-> HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. (Formerly "Growing Trees" — tree planting/rendering was removed entirely; the page is now a gesture→note toy on a plain white background.)
+> HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
 > Current version badge: `v1.7.3` (bottom-left of the page — **bump on every change**).
 
@@ -99,5 +99,5 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 - **Always bump the `#version` badge** (currently `v1.7.3`) after changes.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
-- **No tree code:** tree planting/rendering was removed entirely (formerly "Growing Trees"). Don't reintroduce it without a design.
+- **No tree code:** tree planting/rendering was removed entirely (this is a gesture→note instrument now). Don't reintroduce trees without a design.
 - Keep this guide lean: if the game's internals outgrow it, split deep details into their own `.agents/games/` file rather than padding this one.
