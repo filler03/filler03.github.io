@@ -195,20 +195,21 @@ function chime(level, overrides) {
   }, (tEnd - t0 + 0.5) * 1000);
 }
 
-/* ---- Gesture-attack / decay / release helpers ---- */
+/* ---- Gesture relative-volume helpers (attack / decay / release) ---- */
 function gestureAttackMs() {
-  // ms over which a custom gesture's volume fades in when "Add to gestures" is on
+  // ms over which a custom gesture's relative volume fades in when "Add to gestures" is on
   return GESTURE.gestureAttack ? (FIXED.attack.value || 0) : 0;
 }
 
 function gestureDecayMs() {
-  // ms over which a custom gesture's volume fades out, right after the attack,
-  // when "Add to gestures" is on
+  // ms over which a custom gesture's relative volume fades out, right after the
+  // attack, when "Add to gestures" is on
   return GESTURE.gestureDecay ? (FIXED.decay.value || 0) : 0;
 }
 
-function decayEndVol() {
-  // fraction of the full volume the decay fades down to (FIXED.decay.vol, 0..1)
+function decayEndRelVol() {
+  // relative volume the decay fades down to — the fraction of the base volume
+  // left when the decay finishes (FIXED.decay.vol, 0..1)
   return Math.max(0, Math.min(1, (FIXED.decay.vol || 0) / 100));
 }
 
@@ -225,9 +226,9 @@ function startGestureNote(sx, sy, atkMs, volPct) {
   resumeAudio();
   if (!audioCtx || !masterGain) return;
   const s = CHIME_SETTINGS.start;
-  const vol = volumeFromStartY(sy);
+  const baseVol = baseVolumeFromY(sy);
   const atk = Math.max(0.005, (atkMs || TAP_ATTACK_MS) / 1000);
-  const peak = vol * (volPct != null ? Math.max(0, Math.min(100, volPct)) / 100 : 1);
+  const peak = baseVol * (volPct != null ? Math.max(0, Math.min(100, volPct)) / 100 : 1);
   const t0 = audioCtx.currentTime;
   const gain = audioCtx.createGain();
   const g = gain.gain;
@@ -244,7 +245,7 @@ function startGestureNote(sx, sy, atkMs, volPct) {
 
   const atkDurMs = Math.round(atk * 1000);
   const note = {
-    osc, gain, vol, level: peak, segEnd: t0 + atk,
+    osc, gain, baseVol, level: peak, segEnd: t0 + atk,
     scheduledSlots: [true, false, false, false],
     slots: [atkDurMs, null, null, null],   // per-phase durations, for the A/D/S/R card
     cleanupTimer: null,
@@ -285,15 +286,15 @@ function scheduleFixedRun(note, fromSlot) {
 function scheduleFixedSlot(note, slot) {
   const name = SLOT_NAMES[slot];
   const f = FIXED[name];
-  const vol = note.vol * (f.vol / 100);   // target level, as % of gain
+  const target = note.baseVol * (f.vol / 100);   // base volume × the component's relative volume
   note.slots[slot] = f.value;             // per-phase duration, for the A/D/S/R card
   note.totalMs += f.value;                // card stays up for the whole envelope
   if (name === 'decay') {
-    scheduleRampTo(note, vol, f.value);
+    scheduleRampTo(note, target, f.value);
   } else if (name === 'hold') {
-    scheduleRampTo(note, vol, f.value);
+    scheduleRampTo(note, target, f.value);
   } else if (name === 'release') {
-    scheduleRampTo(note, vol, f.value);
+    scheduleRampTo(note, target, f.value);
     fadeOutAndStop(note, note.segEnd);
   }
 }
@@ -435,11 +436,11 @@ function initLivePathAudio(ds) {
   const ctx0 = audioCtx.currentTime;
   const gain = audioCtx.createGain();
   const g = gain.gain;
-  const vol0 = volumeFromStartY(ds.pts[0].y);
+  const baseVol0 = baseVolumeFromY(ds.pts[0].y);
   const atkMs = gestureAttackMs();
   // With an attack window the note starts silent and each scheduled point
-  // ramps to its base volume scaled by the fade factor for that moment.
-  g.setValueAtTime(atkMs > 0 ? 0 : vol0, ctx0);
+  // ramps to its base volume scaled by the relative volume for that moment.
+  g.setValueAtTime(atkMs > 0 ? 0 : baseVol0, ctx0);
   gain.connect(masterGain);
   const osc = audioCtx.createOscillator();
   setOscWave(osc, s);
@@ -451,7 +452,7 @@ function initLivePathAudio(ds) {
   ds.gain = g;          // the AudioParam (gain.gain) — scheduling/ramps go through this
   ds.gainNode = gain;   // the GainNode itself — used for cleanup/disconnect
   ds.osc = osc;
-  ds.gainLevel = atkMs > 0 ? 0 : vol0;
+  ds.gainLevel = atkMs > 0 ? 0 : baseVol0;
   ds.atkMs = atkMs;
   ds.decMs = gestureDecayMs();
   ds.lastSched = ctx0;
@@ -465,14 +466,14 @@ function initLivePathAudio(ds) {
 function scheduleLivePoint(ds) {
   if (!ds.gain) return;
   const pt = ds.pts[ds.pts.length - 1];
-  // The envelope is applied in place: the base volume is scaled by the attack
-  // fade over the first atkMs and by the decay fade over the decMs right after
-  // it. Each point is scaled by the fade progress at the moment it is drawn;
-  // the progress never steps backward when a held gesture resumes drawing.
+  // The relative volume is applied in place: the base volume is scaled by the
+  // attack fade over the first atkMs and by the decay fade over the decMs right
+  // after it. Each point is scaled by the relative volume at the moment it is
+  // drawn; the progress never steps backward when a held gesture resumes drawing.
   const prog = liveFadeProgress(ds);
-  const target = volumeFromStartY(pt.y)
-    * attackFactor(prog, ds.atkMs || 0)
-    * decayFactor(prog, ds.atkMs || 0, ds.decMs || 0);
+  const target = baseVolumeFromY(pt.y)
+    * attackRelVol(prog, ds.atkMs || 0)
+    * decayRelVol(prog, ds.atkMs || 0, ds.decMs || 0);
   const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
   const now = audioCtx.currentTime;
   if (targetT > now + 0.005) {
@@ -489,10 +490,10 @@ function scheduleLivePoint(ds) {
 // A held finger adds no new path points, so no volume automation is scheduled
 // and the attack fade would stall mid-fade. Each frame, while a live note is
 // inside its attack window and the finger isn't drawing, schedule the gain
-// toward the fingertip's level along the real-time fade curve so the volume
-// keeps rising during a hold. The decay fade works the same way right after
-// the attack: once the fade progress passes atkMs, the held note fades down
-// toward the decay's end volume.
+// toward the fingertip's level along the real-time fade curve so the relative
+// volume keeps rising during a hold. The decay fade works the same way right
+// after the attack: once the fade progress passes atkMs, the held note fades
+// down toward the decay's end relative volume.
 function tickLiveHold(ds) {
   if (!ds.gain || ds.finished) return;
   const atkMs = ds.atkMs || 0, decMs = ds.decMs || 0;
@@ -503,10 +504,10 @@ function tickLiveHold(ds) {
   const prog = liveFadeProgress(ds);
   const decEnd = (atkMs > 0 ? atkMs : 0) + decMs;
   if (prog >= atkMs && prog >= decEnd) return;                 // both fades complete
-  const base = volumeFromStartY(ds.pts[ds.pts.length - 1].y);
+  const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
   const horizon = 0.04;                                        // seconds of fade scheduled per frame
   const progF = prog + horizon * 1000;
-  const target = base * attackFactor(progF, atkMs) * decayFactor(progF, atkMs, decMs);
+  const target = baseVol * attackRelVol(progF, atkMs) * decayRelVol(progF, atkMs, decMs);
   ds.gain.cancelScheduledValues(at);
   ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), at);
   ds.gain.linearRampToValueAtTime(target, at + horizon);

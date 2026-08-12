@@ -54,52 +54,52 @@ function pathStateAtTime(pts, cum, t) {
   return { x: pts[n - 1].x, y: pts[n - 1].y, idx: n - 1, frac: 1 };
 }
 
-// While the tap-note attack is enabled for gestures, the volume is faded in
-// over the first `attackMs` of the gesture's own timeline: each ms plays
-// base volume × (t / attackMs), so a fluctuating base is scaled by the
-// fade factor at every moment. After the window the factor is 1.
-function attackFactor(tMs, atkMs) {
+// While the tap-note attack is enabled for gestures, the relative volume is
+// faded in over the first `attackMs` of the gesture's own timeline: each ms
+// plays base volume × (t / attackMs), so a fluctuating base volume is scaled by
+// the relative volume at every moment. After the window the relative volume is 1.
+function attackRelVol(tMs, atkMs) {
   return atkMs > 0 ? Math.min(1, tMs / atkMs) : 1;
 }
 
 // Decay mirrors the attack and is applied right after it: the attack fades the
-// volume IN from 0 to the gesture's own volume over the first `atkMs`, then the
-// decay fades it OUT from the 100% volume point (where the attack ends) down to
-// the decay's end volume over `decMs`. `fadeProg` is how far the note's fade
-// domain has progressed in ms. Without an attack the decay starts right away at
-// the note's start (the 100% volume point is the very beginning).
-function decayFactor(fadeProg, atkMs, decMs) {
+// relative volume IN from 0 to 1 over the first `atkMs`, then the decay fades
+// it OUT from 1 down to the decay's end relative volume over `decMs`.
+// `fadeProg` is how far the note's fade domain has progressed in ms. Without an
+// attack the decay starts right away at the note's start (1 is the beginning).
+function decayRelVol(fadeProg, atkMs, decMs) {
   if (!(decMs > 0)) return 1;
   const start = atkMs > 0 ? atkMs : 0;
   const p = Math.min(1, Math.max(0, (fadeProg - start) / decMs));
-  return 1 - (1 - decayEndVol()) * p;
+  return 1 - (1 - decayEndRelVol()) * p;
 }
 
-// How far a live note's fade domain has progressed in ms — the attack occupies
-// the first atkMs and the decay the decMs right after it. Like the attack's
-// progress, it follows the gesture's note time while drawing and keeps moving
-// with real time during a hold.
+// How far a live note's relative-volume fade domain has progressed in ms — the
+// attack occupies the first atkMs and the decay the decMs right after it. Like
+// the attack's progress, it follows the gesture's note time while drawing and
+// keeps moving with real time during a hold.
 function liveFadeProgress(ds) {
   return Math.max(ds.totalMs || 0, performance.now() - (ds.startedAt || 0));
 }
 
-// Sample the volume the path produces at N evenly-spaced times across its
-// duration. The attack and decay fades are baked into each sample. For
-// near-vertical paths (almost no time) the samples walk the path by index
-// instead so the note still sweeps its Y range in a short blip.
+// Sample the gain the gesture produces at N evenly-spaced times across its
+// duration: the base volume at each point scaled by the attack and decay
+// relative volumes. For near-vertical paths (almost no time) the samples walk
+// the path by index instead so the note still sweeps its Y range in a short
+// blip.
 function buildVolumeCurve(pts, cum, totalMs, N, atkMs, decMs) {
   const curve = new Float32Array(N);
   if (totalMs < MIN_GESTURE_MS) {
     for (let k = 0; k < N; k++) {
       const idx = Math.min(pts.length - 1, Math.round((k / (N - 1)) * (pts.length - 1)));
       const t = totalMs * k / (N - 1);
-      curve[k] = volumeFromStartY(pts[idx].y) * attackFactor(t, atkMs) * decayFactor(t, atkMs, decMs);
+      curve[k] = baseVolumeFromY(pts[idx].y) * attackRelVol(t, atkMs) * decayRelVol(t, atkMs, decMs);
     }
     return curve;
   }
   for (let k = 0; k < N; k++) {
     const t = (totalMs * k) / (N - 1);
-    curve[k] = volumeFromStartY(pathStateAtTime(pts, cum, t).y) * attackFactor(t, atkMs) * decayFactor(t, atkMs, decMs);
+    curve[k] = baseVolumeFromY(pathStateAtTime(pts, cum, t).y) * attackRelVol(t, atkMs) * decayRelVol(t, atkMs, decMs);
   }
   return curve;
 }
@@ -212,82 +212,135 @@ function cancelDragState(ds) {
 const GESTURE_GREEN = '#3ecb5a';   // glowing green for the played portion
 const GESTURE_AMBER = '#f5a623';   // amber while the attack fades the volume in
 
-// The screen Y a path point is drawn at so the line shows the volume actually
-// being output: the gesture's own volume at that point scaled by the attack and
-// decay fades, mapped back to screen Y. Silence (below VOL_MIN) lands on the
-// bottom edge. Release-tail points already encode their volume drop spatially,
-// so they keep their y.
-function envelopeY(pt, tMs, atkMs, decMs, onOwnPath) {
-  if (!onOwnPath) return pt.y;
-  const vol = volumeFromStartY(pt.y) * attackFactor(tMs, atkMs) * decayFactor(tMs, atkMs, decMs);
-  return yForVolume(Math.max(VOL_MIN, Math.min(VOL_MAX, vol)));
+// The gesture path is always drawn at the finger's own Y. The line's thickness
+// conveys the relative volume at that point — the percentage of the path's base
+// volume actually being output: the attack and decay fades scale the base
+// volume, and the release tail fades it down to the release's end relative
+// volume. A relative volume of 0 draws the thinnest line, 1 the fullest.
+const SOLID_MAX_W = 6, SOLID_MIN_W = 1;        // played solid line (amber + green)
+const DOTTED_MAX_W = 3.2, DOTTED_MIN_W = 0.7;  // dotted lines (live path, unplayed tail)
+
+function ownPathRelVol(tMs, atkMs, decMs) {
+  return attackRelVol(tMs, atkMs) * decayRelVol(tMs, atkMs, decMs);
+}
+
+// The release fade's relative volume: 1 right at the tail's start, falling to
+// FIXED.release.vol/100 over `relMs`.
+function releaseRelVol(progMs, relMs) {
+  if (!(relMs > 0)) return 1;
+  const p = Math.min(1, Math.max(0, progMs / relMs));
+  return 1 - (1 - (FIXED.release.vol || 0) / 100) * p;
+}
+
+// Relative volume at the path point with index `i`. Points before tailEnd are
+// the gesture's own path (attack + decay fades); points from tailEnd on are the
+// appended release tail.
+function pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs) {
+  if (i < tailEnd) return ownPathRelVol(cum[i], atkMs, decMs);
+  const pathMs = tailEnd > 0 ? (cum[tailEnd - 1] || 0) : 0;
+  return releaseRelVol((cum[i] || 0) - pathMs, relMs);
+}
+
+// Same, for an interpolated playback state ({ idx, frac }).
+function stateRelVol(cum, st, tailEnd, atkMs, decMs, relMs) {
+  const t = cumAtState(cum, st);
+  if (st.idx < tailEnd) return ownPathRelVol(t, atkMs, decMs);
+  const pathMs = tailEnd > 0 ? (cum[tailEnd - 1] || 0) : 0;
+  return releaseRelVol(t - pathMs, relMs);
+}
+
+// Line width for a given relative volume (0 = thinnest, 1 = fullest).
+function widthForRelVol(relVol, minW, maxW) {
+  return minW + (maxW - minW) * Math.max(0, Math.min(1, relVol));
 }
 
 // The note-time (ms) at the playback state `st` ({ idx, frac }): interpolated
-// between the neighboring cum entries so the circle lines up with the envelope
-// the line itself was drawn with.
+// between the neighboring cum entries so the circle lines up with the thickness
+// the line was drawn with.
 function cumAtState(cum, st) {
   const i = Math.max(0, Math.min(st.idx, cum.length - 1));
   const j = Math.min(i + 1, cum.length - 1);
   return mix(cum[i] || 0, cum[j] || 0, st.frac);
 }
 
-// Index of the first path point at or past the attack window's end (cum >=
-// atkMs). Points before it are inside the attack fade. 0 when there is no
-// attack; the whole path stays inside the window when it is shorter than it.
-function attackEndIdx(cum, atkMs) {
-  if (!(atkMs > 0)) return 0;
-  for (let i = 0; i < cum.length; i++) if (cum[i] >= atkMs) return i;
+// Index of the first path point at or past the relative-volume window's end
+// (cum >= ms, where ms is the attack + decay duration). Points before it are
+// inside the attack/decay fade, where the relative volume is below 1. 0 when
+// there is no attack/decay; the whole path stays inside the window when it is
+// shorter than it.
+function relVolWindowEndIdx(cum, ms) {
+  if (!(ms > 0)) return 0;
+  for (let i = 0; i < cum.length; i++) if (cum[i] >= ms) return i;
   return cum.length - 1;
 }
 
 function drawDottedPath(pts, cum, atkMs, decMs) {
   ctx.strokeStyle = 'rgba(46,93,52,0.55)';
-  ctx.lineWidth = 2.5;
   ctx.setLineDash([7, 9]);
   ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, envelopeY(pts[0], cum[0], atkMs, decMs, true));
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, envelopeY(pts[i], cum[i], atkMs, decMs, true));
-  ctx.stroke();
+  // Each segment is stroked at the finger's own Y with a width that tracks the
+  // attack/decay relative volume at that point. lineDashOffset keeps the
+  // dash pattern continuous across segments.
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const relVol = pointRelVol(cum, i, pts.length, atkMs, decMs, 0);
+    ctx.lineWidth = widthForRelVol(relVol, DOTTED_MIN_W, DOTTED_MAX_W);
+    ctx.lineDashOffset = -len;
+    ctx.beginPath();
+    ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+    ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  }
   ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
   ctx.fillStyle = 'rgba(46,93,52,0.7)';
   ctx.beginPath();
-  ctx.arc(pts[0].x, envelopeY(pts[0], cum[0], atkMs, decMs, true), 4, 0, Math.PI * 2);
+  ctx.arc(pts[0].x, pts[0].y, 2 + 2 * pointRelVol(cum, 0, pts.length, atkMs, decMs, 0), 0, Math.PI * 2);
   ctx.fill();
 }
 
 // Solid glowing line from the path's start up to the playback point `st`.
-// The part inside the attack + decay envelope window and the appended release
-// tail (from envEnd / tailEnd on) are amber; the gesture's own played path
+// The part inside the attack + decay window and the appended release tail (from
+// relVolWindowEnd / tailEnd on) are amber; the gesture's own played path
 // between them is green.
-function drawGreenPath(pts, cum, st, envEnd, tailEnd, atkMs, decMs) {
+function drawGreenPath(pts, cum, st, relVolWindowEnd, tailEnd, atkMs, decMs, relMs) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.lineWidth = 4;
   const N = pts.length;
   if (tailEnd == null) tailEnd = N;
-  const hasEnv = envEnd > 0 && envEnd < N;
-  // Green starts after the envelope window (or at the path start with no
+  const hasRelVolWindow = relVolWindowEnd > 0 && relVolWindowEnd < N;
+  // Green starts after the attack + decay window (or at the path start with no
   // attack/decay) and ends where the release tail begins.
-  const greenFrom = hasEnv ? Math.min(envEnd, tailEnd) : 0;
+  const greenFrom = hasRelVolWindow ? Math.min(relVolWindowEnd, tailEnd) : 0;
 
   const seg = (from, to, amber) => {
     if (from > to) return;
     ctx.strokeStyle = amber ? GESTURE_AMBER : GESTURE_GREEN;
     ctx.shadowColor = amber ? 'rgba(245,166,35,0.9)' : 'rgba(62,203,90,0.9)';
     ctx.shadowBlur = 14;
-    ctx.beginPath();
-    const yAt = (pt, i) => envelopeY(pt, cum[i], atkMs, decMs, i < tailEnd);
-    ctx.moveTo(pts[Math.max(0, from)].x, yAt(pts[Math.max(0, from)], Math.max(0, from)));
-    for (let i = Math.max(1, from + 1); i <= to && i < N; i++) ctx.lineTo(pts[i].x, yAt(pts[i], i));
-    if (to === st.idx && st.idx < N - 1) ctx.lineTo(st.x, envelopeY(st, cumAtState(cum, st), atkMs, decMs, st.idx < tailEnd));
-    ctx.stroke();
+    // Each segment is stroked at the path's own Y with a width that tracks the
+    // relative volume at that point (attack + decay on the own path, the
+    // release fade on the tail).
+    for (let i = Math.max(1, from + 1); i <= to && i < N; i++) {
+      ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
+      ctx.beginPath();
+      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+      ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+    if (to === st.idx && st.idx < N - 1) {
+      ctx.lineWidth = widthForRelVol(stateRelVol(cum, st, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
+      ctx.beginPath();
+      ctx.moveTo(pts[st.idx].x, pts[st.idx].y);
+      ctx.lineTo(st.x, st.y);
+      ctx.stroke();
+    }
   };
 
   const playedTo = st.idx;
   if (playedTo < greenFrom) {
-    // Playback still inside the attack/decay envelope window: all amber.
+    // Playback still inside the attack/decay window: all amber.
     seg(0, playedTo, true);
   } else {
     seg(0, greenFrom - 1, true);                                  // attack + decay window
@@ -298,37 +351,47 @@ function drawGreenPath(pts, cum, st, envEnd, tailEnd, atkMs, decMs) {
 }
 
 // Dotted line for the portion ahead of the playback point. The unplayed path
-// inside the attack + decay envelope window and the appended release tail (from
-// envEnd / tailEnd on) are faint amber; the rest of the gesture's own unplayed
-// path keeps the normal dotted color.
-function drawDottedTail(pts, cum, st, envEnd, tailEnd, atkMs, decMs) {
+// inside the attack + decay window and the appended release tail (from
+// relVolWindowEnd / tailEnd on) are faint amber; the rest of the gesture's own
+// unplayed path keeps the normal dotted color.
+function drawDottedTail(pts, cum, st, relVolWindowEnd, tailEnd, atkMs, decMs, relMs) {
   if (st.idx >= pts.length - 1) return;
+  // Absolute distance along the polyline from pts[0] to each point, used to
+  // anchor the dash phase to the path itself. Anchoring to the drawn range
+  // instead would shift the dots every frame as the played range advances.
+  const cumLen = new Float64Array(pts.length);
+  for (let i = 1; i < pts.length; i++) {
+    cumLen[i] = cumLen[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  }
   const seg = (from, to, color, dash) => {
     if (from > to) return;
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2.5;
     ctx.setLineDash(dash);
     ctx.lineCap = 'round';
-    ctx.beginPath();
-    const yAt = (pt, i) => envelopeY(pt, cum[i], atkMs, decMs, i < tailEnd);
-    ctx.moveTo(pts[from - 1].x, yAt(pts[from - 1], from - 1));
-    for (let i = from; i <= to; i++) ctx.lineTo(pts[i].x, yAt(pts[i], i));
-    ctx.stroke();
+    for (let i = from; i <= to; i++) {
+      ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs), DOTTED_MIN_W, DOTTED_MAX_W);
+      ctx.lineDashOffset = -cumLen[i - 1];
+      ctx.beginPath();
+      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+      ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
   };
-  const amberTo = Math.min(envEnd, tailEnd) - 1;
-  if (envEnd > 0 && st.idx < amberTo) seg(st.idx + 1, amberTo, 'rgba(245,166,35,0.5)', [4, 10]);
-  if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, envEnd), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
+  const amberTo = Math.min(relVolWindowEnd, tailEnd) - 1;
+  if (relVolWindowEnd > 0 && st.idx < amberTo) seg(st.idx + 1, amberTo, 'rgba(245,166,35,0.5)', [4, 10]);
+  if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, relVolWindowEnd), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
   if (st.idx < pts.length - 1) seg(Math.max(st.idx + 1, tailEnd), pts.length - 1, 'rgba(245,166,35,0.5)', [4, 10]);
   ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
 }
 
 // Build the playback path a gesture's note follows: the gesture's own path,
 // then an appended release tail. The attack and decay no longer add a tail —
-// they fade the volume in place over the path's first `attackMs` and the
-// `decayMs` right after it, so they add no time. The release tail is a straight
-// line in X=time / Y=volume space stretched over its duration of horizontal
-// travel, starting from the envelope level the note reaches at the gesture's
-// end (decayed, if the decay is applied). Returns { pts, cum, tailEnd }.
+// they fade the relative volume in place over the path's first `attackMs` and
+// the `decayMs` right after it, so they add no time. The release tail is a
+// straight line in X=time space stretched over its duration of horizontal
+// travel; it stays at the finger's end Y and its thickness fades out instead of
+// dropping in Y. Returns { pts, cum, tailEnd }.
 function buildGesturePlaybackPath(pts, cum, pathMs, atkMs, decMs, relMs) {
   if (!pts.length) return { pts, cum, tailEnd: pts.length };
   const end = pts[pts.length - 1];
@@ -338,31 +401,31 @@ function buildGesturePlaybackPath(pts, cum, pathMs, atkMs, decMs, relMs) {
   let tailEnd = out.length;
   if (relMs > 0) {
     const px = relMs / (TIME_PER_W * GESTURE.timeMult) * W / 100;
-    const base = volumeFromStartY(end.y);
-    const envAtEnd = attackFactor(pathMs, atkMs) * decayFactor(pathMs, atkMs, decMs);
-    const startY = yForVolume(base * envAtEnd);
-    const endY = yForVolume(base * envAtEnd * (FIXED.release.vol / 100));
-    for (let i = 1; i <= RELEASE_TAIL_STEPS; i++) {
+    // The first tail point sits exactly at the finger's end position so the
+    // solid played line flows straight into the tail with no gap.
+    for (let i = 0; i <= RELEASE_TAIL_STEPS; i++) {
       const t = i / RELEASE_TAIL_STEPS;
-      out.push({ x: end.x + px * t, y: startY + (endY - startY) * t });
+      out.push({ x: end.x + px * t, y: end.y });
       outc.push(pathMs + relMs * t);
     }
   }
   return { pts: out, cum: outc, tailEnd };
 }
 
-function drawPlaybackCircle(x, y, alpha) {
+function drawPlaybackCircle(x, y, alpha, relVol) {
+  const v = Math.max(0, Math.min(1, relVol == null ? 1 : relVol));
+  const r = 2 + 4 * v;
   ctx.fillStyle = `rgba(255,255,255,${alpha})`;
   ctx.beginPath();
-  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = GESTURE_GREEN;
   ctx.globalAlpha = alpha;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = Math.max(1.5, 3 * v);
   ctx.shadowColor = 'rgba(62,203,90,0.9)';
   ctx.shadowBlur = 14;
   ctx.beginPath();
-  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
