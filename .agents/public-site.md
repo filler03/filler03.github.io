@@ -11,7 +11,7 @@ The `public/` directory is the GitHub Pages web root. Everything here is served 
 
 ## Games (`public/games/`)
 
-Self-contained single-file HTML games using the Canvas API:
+Self-contained HTML games using the Canvas API. Most are single-file; Growing Trees is split into JS modules under its own folder (see note below):
 
 | Path | Game | Notes |
 |------|------|-------|
@@ -19,7 +19,7 @@ Self-contained single-file HTML games using the Canvas API:
 | `games/basketball/basketball.html` | Basketball | Single-player (the original, pre-multiplayer version) |
 | `games/soccer/soccer.html` | Soccer | Single-player |
 | `games/football.html` | Football | Single-player, lives directly in `games/` |
-| `games/growing_trees.html` | Growing Trees | Gesture → synthesized note + tree growth (see guide below) |
+| `games/growing_trees/` | Growing Trees | Gesture → synthesized note instrument on a white background (trees removed; see guide below). Multi-file: `index.html` + `js/{app,audio,gesture,ui,main}.js` |
 | `games/orbit/orbit.html` | Orbit | Orbital mechanics game |
 | `games/worms/worms.html` | Worms | Slither.io-style game with chunk-based exploration |
 
@@ -31,7 +31,7 @@ Detailed, indexed write-ups for individual games live in [`.agents/games/`](game
 
 | Game | Guide |
 |------|-------|
-| Growing Trees | [`.agents/games/growing-trees.md`](games/growing-trees.md) — freehand gesture→note model (X = time, Y = volume), live/wait playback, tap defaults, tree growth phases, HUD, settings, architecture index |
+| Growing Trees | [`.agents/games/growing-trees.md`](games/growing-trees.md) — freehand gesture→note model (X = time, Y = volume), live/wait playback, tap defaults, HUD, settings, architecture index |
 
 ## Test Builds (`public/test/`)
 

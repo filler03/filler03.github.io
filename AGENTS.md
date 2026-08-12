@@ -43,9 +43,9 @@ Per-game write-ups live in [`.agents/games/`](.agents/games/); the canonical lis
 
 ## Quick Rules for Agents
 
-1. **No build system for static content.** Files in `public/` are self-contained HTML — edit and push.
+1. **No build system for static content.** Files in `public/` are edited directly and pushed to GitHub Pages — no bundler, no package.json, no dependencies.
 2. **Zero npm dependencies for multiplayer servers.** `apps/basketball/` and `apps/soccer/` use a hand-rolled WebSocket server (`ws-lite.js`). Don't add dependencies.
 3. **Server is authoritative.** All game physics run server-side. Clients are pure renderers. Don't move game logic to the client.
 4. **Test before deploying multiplayer changes.** Each app has a `test-server.js` — run it with `node test-server.js`.
-5. **Keep HTML self-contained.** Games and tools are single-file HTML apps with inline CSS and JS. Don't split them into separate files unless explicitly asked.
+5. **Keep static pages deployable without a build step.** Small games/tools should stay single-file HTML, but splitting into multiple files is allowed when it aids maintainability (e.g. Growing Trees is a multi-file game under `games/growing_trees/`). If you split: use classic `<script src>` tags (no ES modules, so pages still open over `file://`), keep all referenced files committed in the same folder, and load shared state before the modules that use it.
 6. **Report the current branch.** Whenever you make (or are about to make) edits in this repo, tell the user which git branch you are currently on (e.g. `git branch --show-current`).

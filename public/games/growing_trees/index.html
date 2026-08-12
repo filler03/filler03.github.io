@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Don't cache: always revalidate so phones pick up the latest version. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Click to Play a Note 🎵</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+    background: #ffffff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    cursor: crosshair;
+  }
+  /* Force landscape: while held upright, a rotate prompt covers the game, so
+     it only plays in landscape. No transforms are applied to the page, which
+     keeps every control's hit area intact. */
+  #rotateOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    color: #2e5d34;
+    text-align: center;
+    padding: 24px;
+  }
+  #rotateOverlay .rotate-msg {
+    background: rgba(255,255,255,0.88);
+    border-radius: 18px;
+    padding: 26px 30px;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.5;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+  }
+  #rotateOverlay .rotate-msg .rot { font-size: 42px; display: block; margin-bottom: 8px; }
+  #rotateOverlay .rotate-msg .rotate-version {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(46,93,52,0.7);
+    margin-top: 12px;
+  }
+  @media (orientation: portrait) {
+    #rotateOverlay { display: flex; }
+  }
+  #soundOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(30, 60, 35, 0.3);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #soundOverlay.hidden { display: none; }
+  #soundOverlay .sound-msg {
+    background: rgba(255,255,255,0.94);
+    border-radius: 18px;
+    padding: 28px 34px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #2e5d34;
+    text-align: center;
+    line-height: 1.4;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+  }
+  #soundOverlay .sound-msg .snd { font-size: 42px; display: block; margin-bottom: 8px; }
+  #soundOverlay .sound-sub { font-size: 13px; font-weight: 600; color: rgba(46,93,52,0.7); margin-top: 10px; }
+  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; touch-action: none; }
+  #statHud {
+    position: fixed;
+    top: calc(48px + env(safe-area-inset-top));
+    left: calc(16px + env(safe-area-inset-left));
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #statHud > div {
+    color: #2e5d34;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.75);
+    padding: 5px 12px;
+    border-radius: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    width: fit-content;
+  }
+  .hud-bar {
+    height: 5px;
+    margin-top: 5px;
+    background: rgba(46,93,52,0.15);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .hud-fill {
+    height: 100%;
+    width: 0;
+    background: #2e5d34;
+    border-radius: 3px;
+    transition: width 0.1s linear;
+  }
+  .adsr {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 88px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    margin-bottom: 2px;
+  }
+  .adsr-letter {
+    color: rgba(138,109,31,0.4);
+    transition: color 0.12s, transform 0.12s;
+  }
+  .adsr-letter.active {
+    color: #8a6d1f;
+    transform: scale(1.3);
+  }
+  .note-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+  }
+  #statHud > div.live {
+    background: rgba(255,255,255,0.92);
+    outline: 1px dashed #3a5ba0;
+  }
+  #statHud > div.hud-fixed {
+    background: rgba(252, 232, 178, 0.92);
+    color: #8a6d1f;
+    outline: 1px solid rgba(138,109,31,0.4);
+  }
+  #statHud > div.hud-fixed .hud-fill {
+    background: #8a6d1f;
+  }
+  #settingsBtn {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top));
+    right: calc(16px + env(safe-area-inset-right));
+    width: 48px;
+    height: 48px;
+    background: rgba(255,255,255,0.85);
+    border: none;
+    border-radius: 50%;
+    font-size: 22px;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 40;
+  }
+  #settingsBtn:hover { background: #fff; }
+  #settingsPanel {
+    position: fixed;
+    inset: 0;
+    box-sizing: border-box;
+    background: rgba(255,255,255,0.97);
+    padding: calc(16px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+             calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+    color: #2e5d34;
+    font-size: 13px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-cols {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 28px;
+    align-items: start;
+    overflow-y: auto;
+  }
+  .panel-col { min-width: 0; }
+  .panel-col.actions { align-self: stretch; display: flex; flex-direction: column; }
+  .panel-col.actions .panel-actions { margin-top: auto; }
+  .fx-section { grid-column: 1 / -1; min-width: 0; }
+  .panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .panel-actions button { margin-bottom: 0; }
+  #settingsPanel.hidden { display: none; }
+  #settingsPanel::-webkit-scrollbar { width: 10px; }
+  #settingsPanel::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
+  #settingsPanel::-webkit-scrollbar-thumb { background: #2e5d34; border-radius: 5px; border: 2px solid #fff; }
+  #settingsPanel::-webkit-scrollbar-thumb:hover { background: #3c7a45; }
+  #settingsPanel { scrollbar-width: thin; scrollbar-color: #2e5d34 rgba(46,93,52,0.06); }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 10px;
+  }
+  .panel-head button {
+    background: none;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+    color: #2e5d34;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    gap: 9px 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .grid label { font-weight: 600; }
+  .grid select, .grid input[type=range] { width: 100%; }
+  .line-max {
+    margin-bottom: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #3a5ba0;
+    background: rgba(58,91,160,0.08);
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
+  .fx-block {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: start;
+    margin-bottom: 12px;
+  }
+  .fx-item {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f7fdf0;
+  }
+  .fx-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2e5d34;
+    margin-bottom: 4px;
+  }
+  .fx-head label { display: flex; align-items: center; gap: 6px; }
+  .fx-head input[type=checkbox] { accent-color: #2e5d34; }
+  .fx-item input[type=range] { width: 100%; margin-bottom: 6px; }
+  .val { font-weight: 700; }
+  .vec-head {
+    font-weight: 700;
+    font-size: 12px;
+    color: #3c7a45;
+    border-top: 1px solid #cdeab3;
+    padding-top: 10px;
+    margin: 4px 0 10px;
+  }
+  .vec-sel.flash { border-color: #d9534f; background: #fdecea; }
+  .mm-legend {
+    display: grid;
+    grid-template-columns: 78px 1fr 52px 1fr 52px;
+    gap: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #3c7a45;
+    margin-bottom: 2px;
+  }
+  .grid.mm { grid-template-columns: 78px 1fr 52px 1fr 52px; }
+  #modeBtn {
+    position: fixed;
+    left: calc(16px + env(safe-area-inset-left));
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    padding: 13px 20px;
+    border: none;
+    border-radius: 26px;
+    background: #2e5d34;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    z-index: 40;
+  }
+  #modeBtn:hover { background: #3c7a45; }
+  #modeBtn.nav { background: #3a5ba0; }
+  #modeBtn.nav:hover { background: #4a6db0; }
+  #waitBtn {
+    position: fixed;
+    left: calc(16px + env(safe-area-inset-left));
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    padding: 11px 16px;
+    border: none;
+    border-radius: 22px;
+    background: rgba(255,255,255,0.9);
+    color: #2e5d34;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    z-index: 40;
+  }
+  #waitBtn:hover { background: #fff; }
+  #waitBtn.on { background: #b3462c; color: #fff; }
+  #version {
+    position: fixed;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    color: rgba(46,93,52,0.75);
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.6);
+    padding: 4px 10px;
+    border-radius: 10px;
+    z-index: 10;
+  }
+  #clear {
+    width: 100%;
+    padding: 9px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  #clear:hover { background: #e7f4d7; }
+  #testSound {
+    width: 100%;
+    padding: 9px;
+    border: none;
+    border-radius: 10px;
+    background: #2e5d34;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  #testSound:hover { background: #3c7a45; }
+  #resetDefaults {
+    width: 100%;
+    padding: 9px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  #resetDefaults:hover { background: #e7f4d7; }
+</style>
+</head>
+<body>
+<div id="rotateOverlay"><div class="rotate-msg"><span class="rot">📱🔄</span>Please rotate your device to landscape<div class="rotate-version" id="rotateVersion"></div></div></div>
+<div id="soundOverlay"><div class="sound-msg"><span class="snd">🔊</span>Tap to enable sound<div class="sound-sub">Tap anywhere to start · browsers only let your first note play after a tap</div></div></div>
+<div id="statHud"></div>
+<button id="settingsBtn" title="Sound settings">⚙️</button>
+<div id="settingsPanel" class="hidden">
+  <div class="panel-head">
+    <span>Sound settings</span>
+    <button id="closeSettings">✕</button>
+  </div>
+  <div class="panel-cols">
+  <div class="panel-col">
+  <div class="vec-head">Default values</div>
+  <div class="grid">
+    <label for="startMode">Start mode</label>
+    <select id="startMode">
+      <option value="plant">Planting 🌱</option>
+      <option value="nav">Navigating 🧭</option>
+    </select>
+    <label for="note">Key</label>
+    <select id="note"></select>
+    <!-- COMMENTED OUT - the gesture now determines the sound's wave, blend,
+         volume, attack, decay, sustain, hold, and release. Only the key
+         (root pitch) and start mode stay manual.
+    <label for="wave">Wave</label>
+    <select id="wave">
+      <option value="sine">Sine</option>
+      <option value="triangle">Triangle</option>
+      <option value="square">Square</option>
+      <option value="sawtooth">Sawtooth</option>
+    </select>
+    <label for="blend">Wave blend <b class="val" id="blendVal"></b></label>
+    <input type="range" id="blend" min="0" max="100" step="1">
+    <label for="blendTo">Blend to</label>
+    <select id="blendTo">
+      <option value="sine">Sine</option>
+      <option value="triangle">Triangle</option>
+      <option value="square">Square</option>
+      <option value="sawtooth">Sawtooth</option>
+    </select>
+    <label for="volume">Volume <b class="val" id="volumeVal"></b></label>
+    <input type="range" id="volume">
+    <label for="attack">Attack <b class="val" id="attackVal"></b></label>
+    <input type="range" id="attack">
+    <label for="decay">Decay <b class="val" id="decayVal"></b></label>
+    <input type="range" id="decay" min="0" max="1000" step="10">
+    <label for="sustain">Sustain <b class="val" id="sustainVal"></b></label>
+    <input type="range" id="sustain" min="0" max="100" step="1">
+    <label for="hold">Hold <b class="val" id="holdVal"></b></label>
+    <input type="range" id="hold">
+    <label for="release">Release <b class="val" id="releaseVal"></b></label>
+    <input type="range" id="release" min="0" max="2000" step="10">
+    -->
+  </div>
+  <div class="vec-head">Gesture timing</div>
+  <div class="grid">
+    <label for="timeMult">Time multiplier <b class="val" id="timeMultVal"></b></label>
+    <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
+  </div>
+  <div class="line-max">A gesture's note lasts as long as its horizontal travel — a full screen width ≈ ⏳ <b id="lineMaxTime"></b>ms · screen Y = volume (top loud, bottom quiet)</div>
+  </div>
+  <div class="panel-col actions">
+  <div class="panel-actions">
+    <button id="clear">Stop sounds 🛑</button>
+    <button id="testSound">▶ Play test</button>
+    <button id="resetDefaults">↺ Reset defaults</button>
+  </div>
+  </div>
+  <div class="fx-section">
+  <div class="vec-head">Tap note defaults — played when you tap without drawing a gesture</div>
+  <div class="fx-block">
+    <div class="fx-item">
+      <div class="fx-head"><span>Attack</span><b class="val" id="fx-attackTVal"></b> ms</div>
+      <input type="range" id="fx-attackT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val">100%</b></div>
+      <div class="fx-head"><label title="Fade each custom gesture's volume in over this attack time (the path shows amber while it applies)"><input type="checkbox" id="fx-attackGesture"> Add to gestures</label></div>
+    </div>
+    <div class="fx-item">
+      <div class="fx-head"><span>Decay</span><b class="val" id="fx-decayTVal"></b> ms</div>
+      <input type="range" id="fx-decayT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-decayVolVal"></b></div>
+      <input type="range" id="fx-decayVol" min="0" max="100" step="1">
+      <div class="fx-head"><label title="Fade each custom gesture's volume out over this decay time, applied right after the attack (the path shows amber while it applies)"><input type="checkbox" id="fx-decayGesture"> Add to gestures</label></div>
+    </div>
+    <div class="fx-item">
+      <div class="fx-head"><span>Hold</span><b class="val" id="fx-holdTVal"></b> ms</div>
+      <input type="range" id="fx-holdT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-holdVolVal"></b></div>
+      <input type="range" id="fx-holdVol" min="0" max="100" step="1">
+    </div>
+    <div class="fx-item">
+      <div class="fx-head"><span>Release</span><b class="val" id="fx-releaseTVal"></b> ms</div>
+      <input type="range" id="fx-releaseT" min="1" max="5000" step="10">
+      <div class="fx-head"><span>End vol</span><b class="val" id="fx-releaseVolVal"></b></div>
+      <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
+      <div class="fx-head"><label title="Append this release value to the end of every custom gesture"><input type="checkbox" id="fx-releaseGesture"> Add to gestures</label></div>
+    </div>
+  </div>
+  </div>
+  </div>
+  <!-- COMMENTED OUT - sensitivity is now hardcoded.
+  <div class="vec-head">Sensitivity (units per 100px)</div>
+  <div class="grid">
+    <label for="sens-volume">Volume <b class="val" id="sens-volumeVal"></b></label>
+    <input type="range" id="sens-volume">
+    <label for="sens-attack">Attack <b class="val" id="sens-attackVal"></b></label>
+    <input type="range" id="sens-attack">
+    <label for="sens-decay">Decay <b class="val" id="sens-decayVal"></b></label>
+    <input type="range" id="sens-decay">
+    <label for="sens-sustain">Sustain <b class="val" id="sens-sustainVal"></b></label>
+    <input type="range" id="sens-sustain">
+    <label for="sens-hold">Hold <b class="val" id="sens-holdVal"></b></label>
+    <input type="range" id="sens-hold">
+    <label for="sens-release">Release <b class="val" id="sens-releaseVal"></b></label>
+    <input type="range" id="sens-release">
+  </div>
+  -->
+  <!-- COMMENTED OUT - gesture values are clamped to sensible built-in ranges.
+  <div class="vec-head">Min / Max per quality (gesture values clamp here)</div>
+  <div class="mm-legend">
+    <span></span><span>Min</span><span></span><span>Max</span><span></span>
+  </div>
+  <div class="grid mm">
+    <label for="min-volume">Volume</label>
+    <input type="range" id="min-volume"><b class="val" id="min-volumeVal"></b>
+    <input type="range" id="max-volume"><b class="val" id="max-volumeVal"></b>
+    <label for="min-attack">Attack</label>
+    <input type="range" id="min-attack"><b class="val" id="min-attackVal"></b>
+    <input type="range" id="max-attack"><b class="val" id="max-attackVal"></b>
+    <label for="min-decay">Decay</label>
+    <input type="range" id="min-decay"><b class="val" id="min-decayVal"></b>
+    <input type="range" id="max-decay"><b class="val" id="max-decayVal"></b>
+    <label for="min-sustain">Sustain</label>
+    <input type="range" id="min-sustain"><b class="val" id="min-sustainVal"></b>
+    <input type="range" id="max-sustain"><b class="val" id="max-sustainVal"></b>
+    <label for="min-hold">Hold</label>
+    <input type="range" id="min-hold"><b class="val" id="min-holdVal"></b>
+    <input type="range" id="max-hold"><b class="val" id="max-holdVal"></b>
+    <label for="min-release">Release</label>
+    <input type="range" id="min-release"><b class="val" id="min-releaseVal"></b>
+    <input type="range" id="max-release"><b class="val" id="max-releaseVal"></b>
+  </div>
+  -->
+</div>
+
+<canvas id="scene"></canvas>
+<button id="modeBtn" title="Switch between planting and navigating">🌱 Planting</button>
+<button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
+<div id="version">v1.7.1</div>
+
+<script src="js/app.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/gesture.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
