@@ -30,18 +30,25 @@ function gestureNoteCardHtml(now, p) {
   const elapsed = Math.min(now - p.startedAt, p.totalMs || 0);
   const total = Math.round(p.totalMs || 0);
   const st = pathStateAtTime(p.pts, p.cumTime, elapsed);
-  // Show the true volume at this moment: the path's volume scaled by the attack
-  // fade over the first atkMs and the decay fade over the decMs right after it.
   // Live notes share the audio's fade progress (which also advances while the
   // finger is held); wait-mode notes use their playback timeline position.
   const prog = (p.ds && p.ds.gain) ? liveFadeProgress(p.ds) : elapsed;
-  // The release tail already encodes its own volume drop spatially, so the
-  // decay factor only scales the gesture's own path (before tailEnd).
-  const onOwnPath = p.tailEnd == null || st.idx < p.tailEnd;
-  const vol = volumeFromStartY(st.y) * attackFactor(prog, p.atkMs || 0)
-    * (onOwnPath ? decayFactor(prog, p.atkMs || 0, p.decMs || 0) : 1);
-  const pct = total > 0 ? (elapsed / total * 100).toFixed(1) : 100;
-  return `<div class="live"><div class="note-stats">${EMOJI_TIME} ${total}ms ${EMOJI_VOL} ${Math.round(vol / VOL_MAX * 100)}%</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
+  // A held live note's path time freezes but the note keeps playing, so show
+  // real elapsed time while held; once released, stop at the full duration.
+  const timeMs = p.released ? Math.min(prog, p.totalMs || 0) : prog;
+  const pct = total > 0 ? (Math.min(elapsed, total) / total * 100).toFixed(1) : 100;
+  // The readout shows base volume (a number, 100 = highest, from the path's Y),
+  // relative volume (the % of base volume in use from attack/decay/release),
+  // and the resulting current volume level (base × relative).
+  const tailEnd = p.tailEnd != null ? p.tailEnd : (p.pts ? p.pts.length : 0);
+  const relVol = st.idx < tailEnd
+    ? attackRelVol(prog, p.atkMs || 0) * decayRelVol(prog, p.atkMs || 0, p.decMs || 0)
+    : releaseRelVol(prog - (p.cumTime[tailEnd - 1] || 0), p.relMs || 0);
+  const baseVol = baseVolumeFromY(st.y);
+  const baseNum = Math.round(baseVol / BASE_VOL_MAX * 100);
+  const relPct = Math.round(relVol * 100);
+  const curNum = Math.round(baseVol * relVol / BASE_VOL_MAX * 100);
+  return `<div class="live"><div class="note-stats">${EMOJI_TIME}${Math.round(timeMs)}ms</div><div class="vol-stats">${EMOJI_VOL} base: ${baseNum} · relative: ${relPct}% · true: ${curNum}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
 
 // Refresh the top-left display each frame: one card per running tap note plus

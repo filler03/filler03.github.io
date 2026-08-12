@@ -60,14 +60,16 @@ const TAP_THRESHOLD = 8;      // px of total movement before a drag counts
 const PAN_SENS = 2;          // camera movement multiplier
 const PINCH_SENS = 0.4;      // pinch zoom dampening (<1 = less sensitive)
 
-// Volume (gain) comes from where the gesture starts vertically on screen: top
-// is loudest, bottom is quietest.
-const VOL_MIN = 0.01, VOL_MAX = 0.5;
-function volumeFromStartY(sy) {
-  return mix(VOL_MIN, VOL_MAX, clamp01(1 - sy / H));
+// Base volume (gain) comes from where the gesture sits vertically on screen:
+// top is loudest, bottom is quietest. The relative volume — the percentage of
+// this base volume actually being output — comes from the attack/decay/release
+// components and drives the gesture line's thickness.
+const BASE_VOL_MIN = 0.01, BASE_VOL_MAX = 0.5;
+function baseVolumeFromY(sy) {
+  return mix(BASE_VOL_MIN, BASE_VOL_MAX, clamp01(1 - sy / H));
 }
-function yForVolume(v) {
-  return H * (1 - (v - VOL_MIN) / (VOL_MAX - VOL_MIN));
+function yForBaseVolume(v) {
+  return H * (1 - (v - BASE_VOL_MIN) / (BASE_VOL_MAX - BASE_VOL_MIN));
 }
 
 // Which envelope phase each tap-default slot drives, for the A/D/S/R card.
@@ -82,12 +84,14 @@ const DEFAULT_GESTURE = {
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
   timeMult: 1,             // × the base time rate (TIME_PER_W ms per % of width)
   allowTapNotes: true,     // when off, tapping the screen plays no note
-  gestureAttack: false,    // when on, custom gestures fade their volume in over the tap-note attack time
-  gestureDecay: false,     // when on, custom gestures fade their volume out over the tap-note decay time, right after the attack
+  gestureAttack: false,    // when on, custom gestures fade their relative volume in over the tap-note attack time
+  gestureDecay: false,     // when on, custom gestures fade their relative volume out over the tap-note decay time, right after the attack
   gestureRelease: false,   // when on, the tap-note release value is appended to custom gestures
 };
 var GESTURE = clone(DEFAULT_GESTURE);
 
+// FIXED presets: each component's duration (`value`, ms) and the relative
+// volume it drives the note toward (`vol`, as a % of the base volume).
 const DEFAULT_FIXED = {
   attack:  { on: true,  value: 250,  vol: 100 },
   decay:   { on: true,  value: 250,  vol: 60 },

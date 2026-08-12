@@ -84,26 +84,26 @@
     left: calc(16px + env(safe-area-inset-left));
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     z-index: 10;
     opacity: 0;
     transition: opacity 0.3s;
   }
   #statHud > div {
     color: #2e5d34;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     background: rgba(255,255,255,0.75);
-    padding: 5px 12px;
-    border-radius: 14px;
+    padding: 3px 8px;
+    border-radius: 11px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     width: fit-content;
   }
   .hud-bar {
-    height: 5px;
-    margin-top: 5px;
+    height: 4px;
+    margin-top: 3px;
     background: rgba(46,93,52,0.15);
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
   }
   .hud-fill {
@@ -117,11 +117,11 @@
     display: flex;
     justify-content: space-between;
     width: 100%;
-    min-width: 88px;
-    font-size: 12px;
+    min-width: 78px;
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 3px;
-    margin-bottom: 2px;
+    letter-spacing: 2px;
+    margin-bottom: 1px;
   }
   .adsr-letter {
     color: rgba(138,109,31,0.4);
@@ -134,12 +134,19 @@
   .note-stats {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
+    gap: 5px;
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.5px;
-    margin-bottom: 2px;
+    letter-spacing: 0.3px;
+    margin-bottom: 1px;
     white-space: nowrap;
+  }
+  .vol-stats {
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    opacity: 0.85;
   }
   #statHud > div.live {
     background: rgba(255,255,255,0.92);
@@ -502,7 +509,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.7.6</div>
+<div id="version">v1.7.7</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
