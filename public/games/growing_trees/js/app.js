@@ -89,8 +89,8 @@ const DEFAULT_GESTURE = {
 var GESTURE = clone(DEFAULT_GESTURE);
 
 const DEFAULT_FIXED = {
-  attack:  { on: true,  value: 5,    vol: 100 },
-  decay:   { on: true,  value: 120,  vol: 60 },
+  attack:  { on: true,  value: 250,  vol: 100 },
+  decay:   { on: true,  value: 250,  vol: 60 },
   hold:    { on: true,  value: 250,  vol: 60 },
   release: { on: true,  value: 1200, vol: 0 },
 };

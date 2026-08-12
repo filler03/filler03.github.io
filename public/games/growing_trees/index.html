@@ -502,12 +502,20 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.7.3</div>
+<div id="version">v1.7.6</div>
 
-<script src="js/app.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/gesture.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/main.js"></script>
+<script>
+  // Never cache the JS: each load appends a fresh timestamp, so the browser
+  // can't reuse a cached copy of any module (classic scripts, order preserved
+  // via document.write during parse).
+  (function () {
+    var t = Date.now();
+    document.write('<script src="js/app.js?t=' + t + '"></' + 'script>');
+    document.write('<script src="js/audio.js?t=' + t + '"></' + 'script>');
+    document.write('<script src="js/gesture.js?t=' + t + '"></' + 'script>');
+    document.write('<script src="js/ui.js?t=' + t + '"></' + 'script>');
+    document.write('<script src="js/main.js?t=' + t + '"></' + 'script>');
+  })();
+</script>
 </body>
 </html>

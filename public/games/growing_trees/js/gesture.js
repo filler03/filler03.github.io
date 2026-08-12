@@ -212,6 +212,26 @@ function cancelDragState(ds) {
 const GESTURE_GREEN = '#3ecb5a';   // glowing green for the played portion
 const GESTURE_AMBER = '#f5a623';   // amber while the attack fades the volume in
 
+// The screen Y a path point is drawn at so the line shows the volume actually
+// being output: the gesture's own volume at that point scaled by the attack and
+// decay fades, mapped back to screen Y. Silence (below VOL_MIN) lands on the
+// bottom edge. Release-tail points already encode their volume drop spatially,
+// so they keep their y.
+function envelopeY(pt, tMs, atkMs, decMs, onOwnPath) {
+  if (!onOwnPath) return pt.y;
+  const vol = volumeFromStartY(pt.y) * attackFactor(tMs, atkMs) * decayFactor(tMs, atkMs, decMs);
+  return yForVolume(Math.max(VOL_MIN, Math.min(VOL_MAX, vol)));
+}
+
+// The note-time (ms) at the playback state `st` ({ idx, frac }): interpolated
+// between the neighboring cum entries so the circle lines up with the envelope
+// the line itself was drawn with.
+function cumAtState(cum, st) {
+  const i = Math.max(0, Math.min(st.idx, cum.length - 1));
+  const j = Math.min(i + 1, cum.length - 1);
+  return mix(cum[i] || 0, cum[j] || 0, st.frac);
+}
+
 // Index of the first path point at or past the attack window's end (cum >=
 // atkMs). Points before it are inside the attack fade. 0 when there is no
 // attack; the whole path stays inside the window when it is shorter than it.
@@ -221,19 +241,19 @@ function attackEndIdx(cum, atkMs) {
   return cum.length - 1;
 }
 
-function drawDottedPath(pts) {
+function drawDottedPath(pts, cum, atkMs, decMs) {
   ctx.strokeStyle = 'rgba(46,93,52,0.55)';
   ctx.lineWidth = 2.5;
   ctx.setLineDash([7, 9]);
   ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.moveTo(pts[0].x, envelopeY(pts[0], cum[0], atkMs, decMs, true));
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, envelopeY(pts[i], cum[i], atkMs, decMs, true));
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = 'rgba(46,93,52,0.7)';
   ctx.beginPath();
-  ctx.arc(pts[0].x, pts[0].y, 4, 0, Math.PI * 2);
+  ctx.arc(pts[0].x, envelopeY(pts[0], cum[0], atkMs, decMs, true), 4, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -241,7 +261,7 @@ function drawDottedPath(pts) {
 // The part inside the attack + decay envelope window and the appended release
 // tail (from envEnd / tailEnd on) are amber; the gesture's own played path
 // between them is green.
-function drawGreenPath(pts, st, envEnd, tailEnd) {
+function drawGreenPath(pts, cum, st, envEnd, tailEnd, atkMs, decMs) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = 4;
@@ -258,9 +278,10 @@ function drawGreenPath(pts, st, envEnd, tailEnd) {
     ctx.shadowColor = amber ? 'rgba(245,166,35,0.9)' : 'rgba(62,203,90,0.9)';
     ctx.shadowBlur = 14;
     ctx.beginPath();
-    ctx.moveTo(pts[Math.max(0, from)].x, pts[Math.max(0, from)].y);
-    for (let i = Math.max(1, from + 1); i <= to && i < N; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    if (to === st.idx && st.idx < N - 1) ctx.lineTo(st.x, st.y);
+    const yAt = (pt, i) => envelopeY(pt, cum[i], atkMs, decMs, i < tailEnd);
+    ctx.moveTo(pts[Math.max(0, from)].x, yAt(pts[Math.max(0, from)], Math.max(0, from)));
+    for (let i = Math.max(1, from + 1); i <= to && i < N; i++) ctx.lineTo(pts[i].x, yAt(pts[i], i));
+    if (to === st.idx && st.idx < N - 1) ctx.lineTo(st.x, envelopeY(st, cumAtState(cum, st), atkMs, decMs, st.idx < tailEnd));
     ctx.stroke();
   };
 
@@ -280,7 +301,7 @@ function drawGreenPath(pts, st, envEnd, tailEnd) {
 // inside the attack + decay envelope window and the appended release tail (from
 // envEnd / tailEnd on) are faint amber; the rest of the gesture's own unplayed
 // path keeps the normal dotted color.
-function drawDottedTail(pts, cum, st, envEnd, tailEnd) {
+function drawDottedTail(pts, cum, st, envEnd, tailEnd, atkMs, decMs) {
   if (st.idx >= pts.length - 1) return;
   const seg = (from, to, color, dash) => {
     if (from > to) return;
@@ -289,8 +310,9 @@ function drawDottedTail(pts, cum, st, envEnd, tailEnd) {
     ctx.setLineDash(dash);
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(pts[from - 1].x, pts[from - 1].y);
-    for (let i = from; i <= to; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    const yAt = (pt, i) => envelopeY(pt, cum[i], atkMs, decMs, i < tailEnd);
+    ctx.moveTo(pts[from - 1].x, yAt(pts[from - 1], from - 1));
+    for (let i = from; i <= to; i++) ctx.lineTo(pts[i].x, yAt(pts[i], i));
     ctx.stroke();
   };
   const amberTo = Math.min(envEnd, tailEnd) - 1;

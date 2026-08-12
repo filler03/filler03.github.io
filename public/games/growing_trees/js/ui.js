@@ -82,7 +82,7 @@ waitBtn.addEventListener('click', () => {
 });
 
 /* ---------- Persistence ---------- */
-const STORAGE_KEY = 'growingTrees.settings.v5';
+const STORAGE_KEY = 'growingTrees.settings.v6';
 
 function saveSettings() {
   try {

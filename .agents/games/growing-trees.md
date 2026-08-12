@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.7.3` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.7.6` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -31,12 +31,12 @@
 A gesture is one continuous freehand path. Any number of fingers can gesture at once — each pointer gets its own `dragState` in `dragStates` (keyed by `pointerId`), and lifting one finger only finishes that finger's gesture.
 
 - **Time (X)**: each path step adds `(|Δx| / W * 100) * TIME_PER_W * timeMult` ms of note time. Left and right both count (`|Δx|`), so a purely vertical line is ~0 ms and a long horizontal one makes a long note. `cumTime[]` accumulates this along the path; `totalMs = cumTime[last]`.
-- **Volume (Y)**: absolute screen Y — `volumeFromStartY(y)` (top = loud `0.5`, bottom = quiet `0.01`).
+- **Volume (Y)**: absolute screen Y — `volumeFromStartY(y)` (top = loud `0.5`, bottom = quiet `0.01`). When "Add to gestures" attack/decay are on, the drawn line is placed at the Y of the **output** volume: each point's Y is remapped through the attack/decay envelope (`envelopeY`), so the fade-in rises from the bottom edge and the decay dips back down — the shape of the sound, not just the finger's raw Y. Release-tail points already encode their volume drop spatially, so they keep their Y.
 - **Pitch**: from the gesture's horizontal X via `pitchFor(sx, sy)` (major pentatonic, an octave below the key).
 
 ### Playback visualization
 
-While drawing the path is a **dotted line**. During playback a small **glowing circle** travels along the path at the point whose `cumTime` equals the elapsed note time, turning the traveled portion into a **glowing green solid line** (`GESTURE_GREEN = #3ecb5a`); the unplayed portion stays dotted. When the note finishes the whole path stays green and fades out after `LINGER_MS = 800`.
+While drawing the path is a **dotted line**. During playback a small **glowing circle** travels along the path at the point whose `cumTime` equals the elapsed note time, turning the traveled portion into a **glowing green solid line** (`GESTURE_GREEN = #3ecb5a`); the unplayed portion stays dotted. When the note finishes the whole path stays green and fades out after `LINGER_MS = 800`. Every drawn point (dotted or solid, plus the circle) sits at the **output-volume Y** (`envelopeY` remap) rather than the finger's raw Y, so the attack/decay fades are visible as vertical movement as well as the amber window color.
 
 Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps overlap too (each is its own note in `tapNotes[]`); only a global cancel on blur/cancel/clear stops everything (`stopGestureNote`).
 
@@ -96,7 +96,8 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.7.3`) after changes.
+- **Always bump the `#version` badge** (currently `v1.7.6`) after changes.
+- **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
 - **No tree code:** tree planting/rendering was removed entirely (this is a gesture→note instrument now). Don't reintroduce trees without a design.
