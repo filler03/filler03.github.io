@@ -147,6 +147,7 @@ var CHIME_SETTINGS = clone(DEFAULT_CHIME);
 // default spans two octaves centered on the key octave.
 const DEFAULT_PITCH_ZONES = {
   show: true,           // render the on-screen color bands
+  labelMode: 'note',    // band labels: 'note' (note names) or 'degree' (degree numbers)
   lowDegree: 1, lowOctave: -1,   // lowest pitch (degree + octave)
   highDegree: 7, highOctave: 1,  // highest pitch
 };

@@ -148,18 +148,26 @@ function pitchPositions() {
   return out;
 }
 
+// Index into pitchPositions() for a screen X: which scale position plays there.
+function pitchIndexForX(sx) {
+  const positions = pitchPositions();
+  const n = positions.length;
+  return Math.max(0, Math.min(n - 1, Math.floor(clamp01(sx / W) * n)));
+}
+
+// The note name (e.g. "C4") of a scale position ({ octave, degree }), where
+// octave is relative to the key note's octave.
+function noteNameForPos(pos) {
+  const semitone = 12 * pos.octave + SCALE_DEGREES[pos.degree - 1];
+  return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone);
+}
+
 // Pitch comes from the horizontal position (screen X), not the gesture:
 // far left plays the low end of the configured pitch range, far right the high
 // end, snapped to the 7-degree diatonic scale. Different horizontal positions
 // layer into a melody/chord.
 function pitchFor(sx, sy) {
-  const positions = pitchPositions();
-  const n = positions.length;
-  const p = clamp01(sx / W);                      // 0 far left .. 1 far right
-  const idx = Math.max(0, Math.min(n - 1, Math.floor(p * n)));
-  const pos = positions[idx];
-  const semitone = 12 * pos.octave + SCALE_DEGREES[pos.degree - 1];
-  return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone);
+  return noteNameForPos(pitchPositions()[pitchIndexForX(sx)]);
 }
 
 function setOscWave(osc, s) {

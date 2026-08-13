@@ -17,7 +17,8 @@ function gestureMoved(g) {
 // so cumTime grows along the path: a vertical line is near-instant, a long
 // horizontal one makes a long note. The path's absolute screen Y sets the
 // volume. While the note plays a small circle travels along the path turning
-// the played portion into a glowing green solid line.
+// the played portion into a glowing solid line colored by the scale degree it
+// plays at each point (the vibrant version of the pitch-zone band color).
 
 function addPathPoint(ds, x, y) {
   const last = ds.pts[ds.pts.length - 1];
@@ -119,6 +120,7 @@ function schedulePathPlayback(ds) {
   playbacks.push({
     pts: tail.pts, cumTime: tail.cum, atkMs, decMs, tailEnd: tail.tailEnd,
     totalMs: totalMs + relMs, relMs, startedAt: performance.now(), released: true,
+    color: degreeColorForX(ds.startX),
   });
   ensureAudioRunning(() => schedulePathAudio(ds, totalMs, atkMs, decMs, relMs), Date.now() + 30000);
 }
@@ -136,7 +138,7 @@ function startLivePathNote(ds) {
   // The visual shows immediately; only the audio waits for the AudioContext
   // to be running, since a freshly-created context is still suspended on the
   // very first load and events scheduled at currentTime 0 would be missed.
-  ds.playback = { ds, pts: [], cumTime: [], atkMs: gestureAttackMs(), totalMs: 0, decMs: gestureDecayMs(), relMs: 0, startedAt: performance.now(), released: false };
+  ds.playback = { ds, pts: [], cumTime: [], atkMs: gestureAttackMs(), totalMs: 0, decMs: gestureDecayMs(), relMs: 0, startedAt: performance.now(), released: false, color: degreeColorForX(ds.startX) };
   syncLivePlaybackPath(ds);
   playbacks.push(ds.playback);
   ensureLiveAudio(ds, Date.now() + 30000);
@@ -209,8 +211,13 @@ function cancelDragState(ds) {
 }
 
 /* ---- Path drawing (screen space) ---- */
-const GESTURE_GREEN = '#3ecb5a';   // glowing green for the played portion
-const GESTURE_AMBER = '#f5a623';   // amber while the attack fades the volume in
+
+// The vibrant color of the scale degree played at screen X — the same color
+// family as the faint pitch-zone bands, at full strength.
+function degreeColorForX(sx) {
+  const positions = pitchPositions();
+  return DEGREE_COLORS[positions[pitchIndexForX(sx)].degree - 1];
+}
 
 // Faint, screen-space color zones showing which scale degree each horizontal
 // position plays (screen X = pitch). Drawn behind the gestures. Each equal-
@@ -233,6 +240,21 @@ function drawPitchZones() {
       ctx.fillRect(i * bw, 0, 1, H);
     }
   }
+  // Band labels at the bottom of each band, in black: either the note name
+  // (letter only) or the scale degree, per PITCH_ZONES.labelMode. Skipped when
+  // the band is too narrow for the label to fit without overlapping its
+  // neighbor.
+  ctx.fillStyle = '#000';
+  ctx.font = '600 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < n; i++) {
+    const label = PITCH_ZONES.labelMode === 'degree'
+      ? String(positions[i].degree)
+      : noteNameForPos(positions[i]).replace(/\d+$/, '');
+    if (ctx.measureText(label).width > bw - 4) continue;
+    ctx.fillText(label, i * bw + bw / 2, H - 6);
+  }
 }
 
 // The gesture path is always drawn at the finger's own Y. The line's thickness
@@ -240,7 +262,7 @@ function drawPitchZones() {
 // volume actually being output: the attack and decay fades scale the base
 // volume, and the release tail fades it down to the release's end relative
 // volume. A relative volume of 0 draws the thinnest line, 1 the fullest.
-const SOLID_MAX_W = 6, SOLID_MIN_W = 1;        // played solid line (amber + green)
+const SOLID_MAX_W = 6, SOLID_MIN_W = 1;        // played solid line
 const DOTTED_MAX_W = 3.2, DOTTED_MIN_W = 0.7;  // dotted lines (live path, unplayed tail)
 
 function ownPathRelVol(tMs, atkMs, decMs) {
@@ -286,17 +308,6 @@ function cumAtState(cum, st) {
   return mix(cum[i] || 0, cum[j] || 0, st.frac);
 }
 
-// Index of the first path point at or past the relative-volume window's end
-// (cum >= ms, where ms is the attack + decay duration). Points before it are
-// inside the attack/decay fade, where the relative volume is below 1. 0 when
-// there is no attack/decay; the whole path stays inside the window when it is
-// shorter than it.
-function relVolWindowEndIdx(cum, ms) {
-  if (!(ms > 0)) return 0;
-  for (let i = 0; i < cum.length; i++) if (cum[i] >= ms) return i;
-  return cum.length - 1;
-}
-
 function drawDottedPath(pts, cum, atkMs, decMs) {
   ctx.strokeStyle = 'rgba(46,93,52,0.55)';
   ctx.setLineDash([7, 9]);
@@ -323,61 +334,45 @@ function drawDottedPath(pts, cum, atkMs, decMs) {
   ctx.fill();
 }
 
-// Solid glowing line from the path's start up to the playback point `st`.
-// The part inside the attack + decay window and the appended release tail (from
-// relVolWindowEnd / tailEnd on) are amber; the gesture's own played path
-// between them is green.
-function drawGreenPath(pts, cum, st, relVolWindowEnd, tailEnd, atkMs, decMs, relMs) {
+// Solid glowing line from the path's start up to the playback point `st`,
+// colored by the scale degree of the color band the gesture began in — the
+// vibrant version of that band's faint color, held for the whole gesture. The
+// line's thickness conveys the relative volume at that point (the attack +
+// decay fades on the own path, the release fade on the tail), so the component
+// volumes still shape the width.
+function drawGreenPath(pts, cum, st, tailEnd, atkMs, decMs, relMs, color) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   const N = pts.length;
   if (tailEnd == null) tailEnd = N;
-  const hasRelVolWindow = relVolWindowEnd > 0 && relVolWindowEnd < N;
-  // Green starts after the attack + decay window (or at the path start with no
-  // attack/decay) and ends where the release tail begins.
-  const greenFrom = hasRelVolWindow ? Math.min(relVolWindowEnd, tailEnd) : 0;
 
-  const seg = (from, to, amber) => {
-    if (from > to) return;
-    ctx.strokeStyle = amber ? GESTURE_AMBER : GESTURE_GREEN;
-    ctx.shadowColor = amber ? 'rgba(245,166,35,0.9)' : 'rgba(62,203,90,0.9)';
-    ctx.shadowBlur = 14;
-    // Each segment is stroked at the path's own Y with a width that tracks the
-    // relative volume at that point (attack + decay on the own path, the
-    // release fade on the tail).
-    for (let i = Math.max(1, from + 1); i <= to && i < N; i++) {
-      ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
-      ctx.beginPath();
-      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
-      ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
-    }
-    if (to === st.idx && st.idx < N - 1) {
-      ctx.lineWidth = widthForRelVol(stateRelVol(cum, st, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
-      ctx.beginPath();
-      ctx.moveTo(pts[st.idx].x, pts[st.idx].y);
-      ctx.lineTo(st.x, st.y);
-      ctx.stroke();
-    }
-  };
-
-  const playedTo = st.idx;
-  if (playedTo < greenFrom) {
-    // Playback still inside the attack/decay window: all amber.
-    seg(0, playedTo, true);
-  } else {
-    seg(0, greenFrom - 1, true);                                  // attack + decay window
-    seg(greenFrom, Math.min(playedTo, tailEnd - 1), false);       // own played path
-    seg(tailEnd, playedTo, true);                                 // release tail
+  ctx.shadowBlur = 14;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = withAlpha(color, 0.9);
+  // Each segment is stroked at the path's own Y with a width that tracks the
+  // relative volume at that point (attack + decay on the own path, the
+  // release fade on the tail).
+  for (let i = 1; i <= st.idx && i < N; i++) {
+    ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
+    ctx.beginPath();
+    ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+    ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+  if (st.idx < N - 1) {
+    ctx.lineWidth = widthForRelVol(stateRelVol(cum, st, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
+    ctx.beginPath();
+    ctx.moveTo(pts[st.idx].x, pts[st.idx].y);
+    ctx.lineTo(st.x, st.y);
+    ctx.stroke();
   }
   ctx.shadowBlur = 0;
 }
 
-// Dotted line for the portion ahead of the playback point. The unplayed path
-// inside the attack + decay window and the appended release tail (from
-// relVolWindowEnd / tailEnd on) are faint amber; the rest of the gesture's own
-// unplayed path keeps the normal dotted color.
-function drawDottedTail(pts, cum, st, relVolWindowEnd, tailEnd, atkMs, decMs, relMs) {
+// Dotted line for the portion ahead of the playback point, so the unplayed
+// path stays visible until the note reaches it. It uses the gesture's own
+// color, drawn very thin.
+function drawDottedTail(pts, cum, st, tailEnd, color) {
   if (st.idx >= pts.length - 1) return;
   // Absolute distance along the polyline from pts[0] to each point, used to
   // anchor the dash phase to the path itself. Anchoring to the drawn range
@@ -386,24 +381,17 @@ function drawDottedTail(pts, cum, st, relVolWindowEnd, tailEnd, atkMs, decMs, re
   for (let i = 1; i < pts.length; i++) {
     cumLen[i] = cumLen[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
   }
-  const seg = (from, to, color, dash) => {
-    if (from > to) return;
-    ctx.strokeStyle = color;
-    ctx.setLineDash(dash);
-    ctx.lineCap = 'round';
-    for (let i = from; i <= to; i++) {
-      ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs), DOTTED_MIN_W, DOTTED_MAX_W);
-      ctx.lineDashOffset = -cumLen[i - 1];
-      ctx.beginPath();
-      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
-      ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
-    }
-  };
-  const amberTo = Math.min(relVolWindowEnd, tailEnd) - 1;
-  if (relVolWindowEnd > 0 && st.idx < amberTo) seg(st.idx + 1, amberTo, 'rgba(245,166,35,0.5)', [4, 10]);
-  if (st.idx < tailEnd - 1) seg(Math.max(st.idx + 1, relVolWindowEnd), tailEnd - 1, 'rgba(46,93,52,0.55)', [7, 9]);
-  if (st.idx < pts.length - 1) seg(Math.max(st.idx + 1, tailEnd), pts.length - 1, 'rgba(245,166,35,0.5)', [4, 10]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([7, 9]);
+  ctx.lineCap = 'round';
+  for (let i = Math.max(st.idx + 1, 1); i < pts.length; i++) {
+    ctx.lineDashOffset = -cumLen[i - 1];
+    ctx.beginPath();
+    ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+    ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
   ctx.setLineDash([]);
   ctx.lineDashOffset = 0;
 }
@@ -435,17 +423,17 @@ function buildGesturePlaybackPath(pts, cum, pathMs, atkMs, decMs, relMs) {
   return { pts: out, cum: outc, tailEnd };
 }
 
-function drawPlaybackCircle(x, y, alpha, relVol) {
+function drawPlaybackCircle(x, y, alpha, relVol, color) {
   const v = Math.max(0, Math.min(1, relVol == null ? 1 : relVol));
   const r = 2 + 4 * v;
   ctx.fillStyle = `rgba(255,255,255,${alpha})`;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = GESTURE_GREEN;
+  ctx.strokeStyle = color;
   ctx.globalAlpha = alpha;
   ctx.lineWidth = Math.max(1.5, 3 * v);
-  ctx.shadowColor = 'rgba(62,203,90,0.9)';
+  ctx.shadowColor = withAlpha(color, 0.9);
   ctx.shadowBlur = 14;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);

@@ -130,6 +130,7 @@ function loadSavedSettings() {
     const pz = clone(DEFAULT_PITCH_ZONES);
     if (d.pitchZones) {
       if (d.pitchZones.show != null) pz.show = !!d.pitchZones.show;
+      if (d.pitchZones.labelMode === 'note' || d.pitchZones.labelMode === 'degree') pz.labelMode = d.pitchZones.labelMode;
       if (d.pitchZones.lowDegree != null) pz.lowDegree = Math.max(1, Math.min(7, +d.pitchZones.lowDegree));
       if (d.pitchZones.lowOctave != null) pz.lowOctave = Math.max(-2, Math.min(2, +d.pitchZones.lowOctave));
       if (d.pitchZones.highDegree != null) pz.highDegree = Math.max(1, Math.min(7, +d.pitchZones.highDegree));
@@ -209,6 +210,7 @@ noteSel.addEventListener('change', () => {
 /* ---- Pitch color zones ---- */
 const DEGREE_COLOR_NAMES = ['red', 'orange', 'yellow', 'green', 'light blue', 'dark blue', 'pink'];
 const zonesShowEl = document.getElementById('zonesShow');
+const zonesLabelsEl = document.getElementById('zonesLabels');
 const zonesLowOctEl = document.getElementById('zonesLowOct');
 const zonesLowDegEl = document.getElementById('zonesLowDeg');
 const zonesHighOctEl = document.getElementById('zonesHighOct');
@@ -225,21 +227,14 @@ for (let d = 1; d <= 7; d++) {
   zonesHighDegEl.add(new Option(label, d));
 }
 
-function pitchNameForPos(octave, degree) {
-  const semitone = 12 * octave + SCALE_DEGREES[degree - 1];
-  return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone);
-}
-
 function updateZonesRange() {
-  document.getElementById('zonesRangeVal').textContent =
-    pitchNameForPos(+zonesLowOctEl.value, +zonesLowDegEl.value) + ' → ' +
-    pitchNameForPos(+zonesHighOctEl.value, +zonesHighDegEl.value);
   document.getElementById('zonesLowOctVal').textContent = zonesLowOctEl.value;
   document.getElementById('zonesHighOctVal').textContent = zonesHighOctEl.value;
 }
 
 function syncPitchZonesUI() {
   zonesShowEl.checked = !!PITCH_ZONES.show;
+  zonesLabelsEl.value = PITCH_ZONES.labelMode;
   zonesLowOctEl.value = PITCH_ZONES.lowOctave;
   zonesLowDegEl.value = PITCH_ZONES.lowDegree;
   zonesHighOctEl.value = PITCH_ZONES.highOctave;
@@ -249,6 +244,10 @@ function syncPitchZonesUI() {
 
 zonesShowEl.addEventListener('change', () => {
   PITCH_ZONES.show = zonesShowEl.checked;
+  saveSettings();
+});
+zonesLabelsEl.addEventListener('change', () => {
+  PITCH_ZONES.labelMode = zonesLabelsEl.value;
   saveSettings();
 });
 for (const el of [zonesLowOctEl, zonesLowDegEl, zonesHighOctEl, zonesHighDegEl]) {
@@ -378,19 +377,13 @@ syncSensUI();
 
 /* ---- Time multiplier (ms per % of horizontal travel) ---- */
 const timeMultEl = document.getElementById('timeMult');
-// The note length a full-screen-width horizontal gesture delivers, shown live.
-function syncLineMax() {
-  document.getElementById('lineMaxTime').textContent = Math.round(100 * TIME_PER_W * GESTURE.timeMult);
-}
 function syncLineUI() {
   timeMultEl.value = GESTURE.timeMult;
   document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
-  syncLineMax();
 }
 timeMultEl.addEventListener('input', () => {
   GESTURE.timeMult = +timeMultEl.value;
   document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
-  syncLineMax();
 });
 
 /* ---- Tap note defaults ---- */

@@ -201,15 +201,15 @@
     overflow-y: auto;
   }
   .panel-col { min-width: 0; }
-  .panel-col.actions { align-self: stretch; display: flex; flex-direction: column; }
-  .panel-col.actions .panel-actions { margin-top: auto; }
-  .fx-section { grid-column: 1 / -1; min-width: 0; }
+  .fx-section { min-width: 0; }
   .panel-actions {
+    grid-column: 1 / -1;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 8px;
   }
-  .panel-actions button { margin-bottom: 0; }
+  .panel-actions button { margin-bottom: 0; flex: 1; }
+  .panel-actions.top { margin-bottom: 10px; }
   #settingsPanel.hidden { display: none; }
   #settingsPanel::-webkit-scrollbar { width: 10px; }
   #settingsPanel::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
@@ -248,15 +248,6 @@
     margin-bottom: 9px;
   }
   .zone-toggle input[type=checkbox] { accent-color: #2e5d34; }
-  .line-max {
-    margin-bottom: 12px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #3a5ba0;
-    background: rgba(58,91,160,0.08);
-    border-radius: 8px;
-    padding: 7px 10px;
-  }
   .fx-block {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -382,6 +373,10 @@
     <span>Sound settings</span>
     <button id="closeSettings">✕</button>
   </div>
+  <div class="panel-actions top">
+    <button id="clear">Stop sounds 🛑</button>
+    <button id="resetDefaults">↺ Reset defaults</button>
+  </div>
   <div class="panel-cols">
   <div class="panel-col">
   <div class="vec-head">Default values</div>
@@ -426,10 +421,14 @@
     <label for="timeMult">Time multiplier <b class="val" id="timeMultVal"></b></label>
     <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
   </div>
-  <div class="line-max">A gesture's note lasts as long as its horizontal travel — a full screen width ≈ ⏳ <b id="lineMaxTime"></b>ms · screen Y = volume (top loud, bottom quiet)</div>
   <div class="vec-head">Pitch color zones</div>
   <label class="zone-toggle"><input type="checkbox" id="zonesShow"> Show color zones</label>
   <div class="grid">
+    <label for="zonesLabels">Band labels</label>
+    <select id="zonesLabels">
+      <option value="note">Note names</option>
+      <option value="degree">Degree numbers</option>
+    </select>
     <label for="zonesLowOct">Low octave <b class="val" id="zonesLowOctVal"></b></label>
     <select id="zonesLowOct"></select>
     <label for="zonesLowDeg">Low degree</label>
@@ -439,15 +438,8 @@
     <label for="zonesHighDeg">High degree</label>
     <select id="zonesHighDeg"></select>
   </div>
-  <div class="line-max">Screen X = pitch: the strip you touch is the degree you hear · octave 0 = key octave (the middle ground) · range: <b id="zonesRangeVal"></b></div>
   </div>
-  <div class="panel-col actions">
-  <div class="panel-actions">
-    <button id="clear">Stop sounds 🛑</button>
-    <button id="testSound">▶ Play test</button>
-    <button id="resetDefaults">↺ Reset defaults</button>
-  </div>
-  </div>
+  <div class="panel-col">
   <div class="fx-section">
   <div class="vec-head">Tap note defaults — played when you tap without drawing a gesture</div>
   <div class="fx-block">
@@ -481,6 +473,10 @@
       <div class="fx-head"><label title="When off, a tap plays a very short gesture note (the default tap note is disabled)"><input type="checkbox" id="allowTapNotes"> Allow tap notes</label></div>
     </div>
   </div>
+  </div>
+  </div>
+  <div class="panel-actions">
+    <button id="testSound">▶ Play test</button>
   </div>
   </div>
   <!-- COMMENTED OUT - sensitivity is now hardcoded.
@@ -530,7 +526,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.8.1</div>
+<div id="version">v1.8.2</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser

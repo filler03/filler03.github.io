@@ -203,14 +203,11 @@ function loop(now) {
     const pts = p.pts, cum = p.cumTime;
     const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
     const tailEnd = p.tailEnd != null ? p.tailEnd : pts.length;
-    // The amber attack + decay window covers the own path while the relative
-    // volume is below 1 (the release tail is amber too, drawn separately).
-    const relVolWindowEnd = Math.min(relVolWindowEndIdx(cum, (p.atkMs || 0) + (p.decMs || 0)), tailEnd);
     const cRelVol = stateRelVol(cum, st, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
     ctx.globalAlpha = alpha;
-    drawGreenPath(pts, cum, st, relVolWindowEnd, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
-    drawDottedTail(pts, cum, st, relVolWindowEnd, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
-    drawPlaybackCircle(st.x, st.y, alpha, cRelVol);
+    drawGreenPath(pts, cum, st, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0, p.color);
+    drawDottedTail(pts, cum, st, tailEnd, p.color);
+    drawPlaybackCircle(st.x, st.y, alpha, cRelVol, p.color);
     ctx.globalAlpha = 1;
   }
 
