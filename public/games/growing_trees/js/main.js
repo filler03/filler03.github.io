@@ -30,6 +30,7 @@ loadSavedSettings();
 syncWaitBtn();
 syncLineUI();
 syncFixedUI();
+syncPitchZonesUI();
 
 /* ---- Pointer handling ---- */
 
@@ -177,6 +178,7 @@ function loop(now) {
   // gesture that is still playing (or lingering) keeps its path on screen.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (mode === 'plant') {
+    drawPitchZones();   // faint degree-color bands, one per scale degree
     // Held live-sound gestures keep their attack fade advancing in real time;
     // without this the fade stalls the moment the finger stops drawing.
     for (const ds of dragStates.values()) {

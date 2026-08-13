@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.7.6` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.8.1` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -32,7 +32,7 @@ A gesture is one continuous freehand path. Any number of fingers can gesture at 
 
 - **Time (X)**: each path step adds `(|Δx| / W * 100) * TIME_PER_W * timeMult` ms of note time. Left and right both count (`|Δx|`), so a purely vertical line is ~0 ms and a long horizontal one makes a long note. `cumTime[]` accumulates this along the path; `totalMs = cumTime[last]`.
 - **Volume (Y)**: absolute screen Y — `volumeFromStartY(y)` (top = loud `0.5`, bottom = quiet `0.01`). When "Add to gestures" attack/decay are on, the drawn line is placed at the Y of the **output** volume: each point's Y is remapped through the attack/decay envelope (`envelopeY`), so the fade-in rises from the bottom edge and the decay dips back down — the shape of the sound, not just the finger's raw Y. Release-tail points already encode their volume drop spatially, so they keep their Y.
-- **Pitch**: from the gesture's horizontal X via `pitchFor(sx, sy)` (major pentatonic, an octave below the key).
+- **Pitch**: from the gesture's horizontal X via `pitchFor(sx, sy)` — snapped to the **7-note diatonic major scale** (degrees 1–7 = the major scale degrees) over a **configurable pitch range** (see Pitch color zones below).
 
 ### Playback visualization
 
@@ -64,9 +64,18 @@ Stacked **note cards**, one per running tap and one per active gesture playback,
 |---------|----------|
 | Default values | Key (root note) |
 | Gesture timing | Time multiplier (`timeMult` — ms per % of horizontal travel) |
+| Pitch color zones | Show zones (checkbox), Low octave + degree, High octave + degree |
 | Tap note defaults | Allow tap notes (checkbox), Attack / Decay / Hold / Release ms + End vol sliders |
 
 Settings persist on every change via `saveSettings()`; `resetToDefaults()` clears the saved key and restores the defaults. (The former **Growth speed** slider was removed along with the tree logic.)
+
+### Pitch color zones
+
+Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**, one per scale degree in the configured range — degree 1 red, 2 orange, 3 yellow, 4 green, 5 light blue, 6 dark blue, 7 pink. The bands are drawn in screen space behind the gestures (`drawPitchZones` in `gesture.js`), and each band maps to the exact same pitch as `pitchFor` (equal-width, `idx = floor(p * count)`), so the strip you touch is the degree you hear.
+
+- **Octave semantics**: octave numbers are **relative to the key note's octave**. Octave **0 is the key octave** (the "middle ground", default C4 = middle C), with −1/−2 below and +1/+2 above.
+- **Default range**: degree 1 @ octave −1 → degree 7 @ octave +1 (two octaves centered on the key octave).
+- State lives in `PITCH_ZONES` (`app.js`), persisted under the `pitchZones` key; `pitchPositions()` (in `audio.js`) enumerates the ordered `{octave, degree}` positions between the bounds (auto-swapping if reversed) and drives both the audio mapping and the band rendering.
 
 ## Architecture Index
 
@@ -74,10 +83,10 @@ Settings persist on every change via `saveSettings()`; `resetToDefaults()` clear
 
 | Module | Functions |
 |--------|-----------|
-| `app.js` | `resize`, `toWorld`, `zoomAt`, `clampCamY`, `volumeFromStartY`/`yForVolume`; shared state (`playbacks`, `gestureNotes`, `tapNotes`, `cam`, `mode`, `dragStates`, `CHIME_SETTINGS`, `GESTURE`, `FIXED`) |
-| `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
-| `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
-| `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring |
+| `app.js` | `resize`, `toWorld`, `zoomAt`, `clampCamY`, `volumeFromStartY`/`yForVolume`, `withAlpha`; shared state (`playbacks`, `gestureNotes`, `tapNotes`, `cam`, `mode`, `dragStates`, `CHIME_SETTINGS`, `GESTURE`, `FIXED`, `PITCH_ZONES`) |
+| `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`pitchPositions`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
+| `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawPitchZones`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
+| `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring (incl. `syncPitchZonesUI`) |
 | `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
 
 ### Key constants

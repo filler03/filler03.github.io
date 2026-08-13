@@ -212,6 +212,29 @@ function cancelDragState(ds) {
 const GESTURE_GREEN = '#3ecb5a';   // glowing green for the played portion
 const GESTURE_AMBER = '#f5a623';   // amber while the attack fades the volume in
 
+// Faint, screen-space color zones showing which scale degree each horizontal
+// position plays (screen X = pitch). Drawn behind the gestures. Each equal-
+// width band matches pitchFor exactly: touching a band plays that degree.
+function drawPitchZones() {
+  if (!PITCH_ZONES.show) return;
+  const positions = pitchPositions();
+  const n = positions.length;
+  const bw = W / n;
+  for (let i = 0; i < n; i++) {
+    const color = DEGREE_COLORS[positions[i].degree - 1];
+    ctx.fillStyle = withAlpha(color, ZONE_FILL_ALPHA);
+    ctx.fillRect(i * bw, 0, Math.max(1, bw), H);
+  }
+  // A slightly stronger line where a new octave begins, so octave 0 (the key
+  // octave) stays readable across the repeating degree colors.
+  for (let i = 1; i < n; i++) {
+    if (positions[i].degree === 1) {
+      ctx.fillStyle = 'rgba(46,93,52,' + OCTAVE_BOUND_ALPHA + ')';
+      ctx.fillRect(i * bw, 0, 1, H);
+    }
+  }
+}
+
 // The gesture path is always drawn at the finger's own Y. The line's thickness
 // conveys the relative volume at that point — the percentage of the path's base
 // volume actually being output: the attack and decay fades scale the base

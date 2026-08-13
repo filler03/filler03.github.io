@@ -240,6 +240,14 @@
   }
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
+  .zone-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    margin-bottom: 9px;
+  }
+  .zone-toggle input[type=checkbox] { accent-color: #2e5d34; }
   .line-max {
     margin-bottom: 12px;
     font-size: 12px;
@@ -419,6 +427,19 @@
     <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
   </div>
   <div class="line-max">A gesture's note lasts as long as its horizontal travel — a full screen width ≈ ⏳ <b id="lineMaxTime"></b>ms · screen Y = volume (top loud, bottom quiet)</div>
+  <div class="vec-head">Pitch color zones</div>
+  <label class="zone-toggle"><input type="checkbox" id="zonesShow"> Show color zones</label>
+  <div class="grid">
+    <label for="zonesLowOct">Low octave <b class="val" id="zonesLowOctVal"></b></label>
+    <select id="zonesLowOct"></select>
+    <label for="zonesLowDeg">Low degree</label>
+    <select id="zonesLowDeg"></select>
+    <label for="zonesHighOct">High octave <b class="val" id="zonesHighOctVal"></b></label>
+    <select id="zonesHighOct"></select>
+    <label for="zonesHighDeg">High degree</label>
+    <select id="zonesHighDeg"></select>
+  </div>
+  <div class="line-max">Screen X = pitch: the strip you touch is the degree you hear · octave 0 = key octave (the middle ground) · range: <b id="zonesRangeVal"></b></div>
   </div>
   <div class="panel-col actions">
   <div class="panel-actions">
@@ -509,7 +530,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.7.7</div>
+<div id="version">v1.8.1</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
