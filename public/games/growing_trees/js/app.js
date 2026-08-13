@@ -30,24 +30,46 @@ let masterGain = null;
 function stageX(e) { return e.clientX; }
 function stageY(e) { return e.clientY; }
 
+// iOS can fire resize with transient/degenerate sizes while a rotation or
+// toolbar change is settling. A wrong value can STICK — the final, correct
+// resize event sometimes never arrives — leaving the canvas shorter than the
+// visible screen, which cuts off the bottom of the scene (e.g. the color
+// bands vanish before the bottom edge). So every resize re-checks the
+// viewport size a moment later, once things have settled, and re-applies it
+// if it drifted.
+let resizeVerifyTimer = null;
+function scheduleSizeVerify() {
+  clearTimeout(resizeVerifyTimer);
+  resizeVerifyTimer = setTimeout(() => {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (w !== W || h !== H) resize();
+  }, 400);
+}
 function resize() {
-  // iOS can fire resize with transient/degenerate sizes while overlays and
-  // toolbars are settling — keep the last good size instead of corrupting the
-  // canvas backing store (which would squish the scene's background).
   const w = window.innerWidth, h = window.innerHeight;
   if (!w || !h || !isFinite(w) || !isFinite(h)) return;
   if (w === W && h === H) return;
   W = canvas.width  = w;
   H = canvas.height = h;
   HORIZON = H * 0.56;              // where ground meets sky (matches CSS)
+  scheduleSizeVerify();
 }
 window.addEventListener('resize', resize);
+// Rotation itself isn't always followed by a settle-time resize event, so
+// schedule an explicit re-check when the orientation flips.
+window.addEventListener('orientationchange', scheduleSizeVerify);
 resize();
 
 /* ---------- Small shared helpers ---------- */
 const mix = (a, b, t) => a + (b - a) * t;
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const clone = o => JSON.parse(JSON.stringify(o));
+// Append an alpha channel (0..1) to a #rrggbb color, for translucent fills.
+function withAlpha(hex, a) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 /* ---------- Shared constants ---------- */
 const TIME_PER_W = 50;    // ms of time per % of screen width at 1x time multiplier
@@ -59,6 +81,15 @@ const TAP_ATTACK_MS = 60; // quick attack for a tap with no line
 const TAP_THRESHOLD = 8;      // px of total movement before a drag counts
 const PAN_SENS = 2;          // camera movement multiplier
 const PINCH_SENS = 0.4;      // pinch zoom dampening (<1 = less sensitive)
+
+// Pitch scale: 7-note diatonic major. Each degree's semitone offset (1-indexed
+// via the mapping helpers) comes from SCALE_DEGREES[degree - 1].
+const SCALE_DEGREES = [0, 2, 4, 5, 7, 9, 11];
+// Color per scale degree, for the on-screen pitch zones: 1 red, 2 orange,
+// 3 yellow, 4 green, 5 light blue, 6 dark blue, 7 pink.
+const DEGREE_COLORS = ['#c62828', '#f57c00', '#f9a825', '#43a047', '#4fc3f7', '#1e88e5', '#f06292'];
+const ZONE_FILL_ALPHA = 0.15;   // faintness of a degree's color band (0..1)
+const OCTAVE_BOUND_ALPHA = 0.35;  // slightly stronger line where a new octave begins
 
 // Base volume (gain) comes from where the gesture sits vertically on screen:
 // top is loudest, bottom is quietest. The relative volume — the percentage of
@@ -109,6 +140,18 @@ const DEFAULT_CHIME = {
   finish: { note: 'C4', wave: 'sine', blend: 0, blendTo: null, attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
 };
 var CHIME_SETTINGS = clone(DEFAULT_CHIME);
+
+// Pitch color zones: the range of scale degrees shown as faint color bands on
+// screen (screen X = pitch). Octaves are relative to the key note's octave —
+// 0 is the key octave (the "middle ground"), -1/-2 below, +1/+2 above. The
+// default spans two octaves centered on the key octave.
+const DEFAULT_PITCH_ZONES = {
+  show: true,           // render the on-screen color bands
+  labelMode: 'note',    // band labels: 'note' (note names) or 'degree' (degree numbers)
+  lowDegree: 1, lowOctave: -1,   // lowest pitch (degree + octave)
+  highDegree: 7, highOctave: 1,  // highest pitch
+};
+var PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
 
 /* ---------- Camera (pan + zoom) ---------- */
 const MIN_ZOOM = 0.3, MAX_ZOOM = 3.0;

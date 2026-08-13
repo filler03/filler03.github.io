@@ -131,17 +131,43 @@ function midiToName(m) {
   return NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
 }
 
+// Enumerate the scale positions between the configured low and high pitch
+// bounds (inclusive), each { octave, degree } where octave is relative to the
+// key note's octave. The bounds are swapped if reversed, so the range always
+// reads low-to-high.
+function pitchPositions() {
+  let lo = { o: Math.max(-2, Math.min(2, PITCH_ZONES.lowOctave)), d: Math.max(1, Math.min(7, PITCH_ZONES.lowDegree)) };
+  let hi = { o: Math.max(-2, Math.min(2, PITCH_ZONES.highOctave)), d: Math.max(1, Math.min(7, PITCH_ZONES.highDegree)) };
+  if (lo.o > hi.o || (lo.o === hi.o && lo.d > hi.d)) { const t = lo; lo = hi; hi = t; }
+  const out = [];
+  for (let o = lo.o; o <= hi.o; o++) {
+    const dStart = o === lo.o ? lo.d : 1;
+    const dEnd = o === hi.o ? hi.d : 7;
+    for (let d = dStart; d <= dEnd; d++) out.push({ octave: o, degree: d });
+  }
+  return out;
+}
+
+// Index into pitchPositions() for a screen X: which scale position plays there.
+function pitchIndexForX(sx) {
+  const positions = pitchPositions();
+  const n = positions.length;
+  return Math.max(0, Math.min(n - 1, Math.floor(clamp01(sx / W) * n)));
+}
+
+// The note name (e.g. "C4") of a scale position ({ octave, degree }), where
+// octave is relative to the key note's octave.
+function noteNameForPos(pos) {
+  const semitone = 12 * pos.octave + SCALE_DEGREES[pos.degree - 1];
+  return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone);
+}
+
 // Pitch comes from the horizontal position (screen X), not the gesture:
-// far left plays the low end of the scale, far right the high end, snapped to
-// the chosen pentatonic scale. Different horizontal positions layer into a
-// melody/chord.
+// far left plays the low end of the configured pitch range, far right the high
+// end, snapped to the 7-degree diatonic scale. Different horizontal positions
+// layer into a melody/chord.
 function pitchFor(sx, sy) {
-  const p = clamp01(sx / W);                      // 0 far left .. 1 far right
-  const SCALE = [0, 2, 4, 7, 9];                  // major pentatonic semitone offsets
-  const degree = Math.round(p * SCALE.length * 2);  // 0..10 across 2 octaves
-  const octaveOffset = Math.floor(degree / SCALE.length);
-  const semitone = SCALE[Math.min(SCALE.length - 1, degree % SCALE.length)] + 12 * octaveOffset;
-  return midiToName(noteToMidi(CHIME_SETTINGS.start.note) + semitone - 12);   // an octave lower
+  return noteNameForPos(pitchPositions()[pitchIndexForX(sx)]);
 }
 
 function setOscWave(osc, s) {

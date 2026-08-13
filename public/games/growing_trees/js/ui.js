@@ -93,7 +93,7 @@ const STORAGE_KEY = 'growingTrees.settings.v6';
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, fixed: FIXED }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, fixed: FIXED, pitchZones: PITCH_ZONES }));
     return true;
   } catch (e) { return false; }
 }
@@ -127,6 +127,16 @@ function loadSavedSettings() {
     for (const name of SLOT_NAMES) fx[name].on = true;
     fx.attack.vol = 100;   // the attack always ramps to full gain
     FIXED = fx;
+    const pz = clone(DEFAULT_PITCH_ZONES);
+    if (d.pitchZones) {
+      if (d.pitchZones.show != null) pz.show = !!d.pitchZones.show;
+      if (d.pitchZones.labelMode === 'note' || d.pitchZones.labelMode === 'degree') pz.labelMode = d.pitchZones.labelMode;
+      if (d.pitchZones.lowDegree != null) pz.lowDegree = Math.max(1, Math.min(7, +d.pitchZones.lowDegree));
+      if (d.pitchZones.lowOctave != null) pz.lowOctave = Math.max(-2, Math.min(2, +d.pitchZones.lowOctave));
+      if (d.pitchZones.highDegree != null) pz.highDegree = Math.max(1, Math.min(7, +d.pitchZones.highDegree));
+      if (d.pitchZones.highOctave != null) pz.highOctave = Math.max(-2, Math.min(2, +d.pitchZones.highOctave));
+    }
+    PITCH_ZONES = pz;
     return true;
   } catch (e) { return false; }
 }
@@ -135,10 +145,12 @@ function resetToDefaults() {
   CHIME_SETTINGS = clone(DEFAULT_CHIME);
   GESTURE = clone(DEFAULT_GESTURE);
   FIXED = clone(DEFAULT_FIXED);
+  PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
   syncFixedUI();
+  syncPitchZonesUI();
   syncWaitBtn();
 }
 
@@ -194,6 +206,60 @@ noteSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].note = noteSel.value + NOTE_OCTAVE;
   previewChime();
 });
+
+/* ---- Pitch color zones ---- */
+const DEGREE_COLOR_NAMES = ['red', 'orange', 'yellow', 'green', 'light blue', 'dark blue', 'pink'];
+const zonesShowEl = document.getElementById('zonesShow');
+const zonesLabelsEl = document.getElementById('zonesLabels');
+const zonesLowOctEl = document.getElementById('zonesLowOct');
+const zonesLowDegEl = document.getElementById('zonesLowDeg');
+const zonesHighOctEl = document.getElementById('zonesHighOct');
+const zonesHighDegEl = document.getElementById('zonesHighDeg');
+
+for (let o = -2; o <= 2; o++) {
+  const label = o === 0 ? '0 (key)' : String(o);
+  zonesLowOctEl.add(new Option(label, o));
+  zonesHighOctEl.add(new Option(label, o));
+}
+for (let d = 1; d <= 7; d++) {
+  const label = d + ' · ' + DEGREE_COLOR_NAMES[d - 1];
+  zonesLowDegEl.add(new Option(label, d));
+  zonesHighDegEl.add(new Option(label, d));
+}
+
+function updateZonesRange() {
+  document.getElementById('zonesLowOctVal').textContent = zonesLowOctEl.value;
+  document.getElementById('zonesHighOctVal').textContent = zonesHighOctEl.value;
+}
+
+function syncPitchZonesUI() {
+  zonesShowEl.checked = !!PITCH_ZONES.show;
+  zonesLabelsEl.value = PITCH_ZONES.labelMode;
+  zonesLowOctEl.value = PITCH_ZONES.lowOctave;
+  zonesLowDegEl.value = PITCH_ZONES.lowDegree;
+  zonesHighOctEl.value = PITCH_ZONES.highOctave;
+  zonesHighDegEl.value = PITCH_ZONES.highDegree;
+  updateZonesRange();
+}
+
+zonesShowEl.addEventListener('change', () => {
+  PITCH_ZONES.show = zonesShowEl.checked;
+  saveSettings();
+});
+zonesLabelsEl.addEventListener('change', () => {
+  PITCH_ZONES.labelMode = zonesLabelsEl.value;
+  saveSettings();
+});
+for (const el of [zonesLowOctEl, zonesLowDegEl, zonesHighOctEl, zonesHighDegEl]) {
+  el.addEventListener('change', () => {
+    PITCH_ZONES.lowOctave = +zonesLowOctEl.value;
+    PITCH_ZONES.lowDegree = +zonesLowDegEl.value;
+    PITCH_ZONES.highOctave = +zonesHighOctEl.value;
+    PITCH_ZONES.highDegree = +zonesHighDegEl.value;
+    updateZonesRange();
+    saveSettings();
+  });
+}
 /* COMMENTED OUT - wave/blend/ADSR defaults are gesture-driven now.
 waveSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].wave = waveSel.value;
@@ -311,19 +377,13 @@ syncSensUI();
 
 /* ---- Time multiplier (ms per % of horizontal travel) ---- */
 const timeMultEl = document.getElementById('timeMult');
-// The note length a full-screen-width horizontal gesture delivers, shown live.
-function syncLineMax() {
-  document.getElementById('lineMaxTime').textContent = Math.round(100 * TIME_PER_W * GESTURE.timeMult);
-}
 function syncLineUI() {
   timeMultEl.value = GESTURE.timeMult;
   document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
-  syncLineMax();
 }
 timeMultEl.addEventListener('input', () => {
   GESTURE.timeMult = +timeMultEl.value;
   document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
-  syncLineMax();
 });
 
 /* ---- Tap note defaults ---- */
@@ -453,6 +513,7 @@ settingsBtn.addEventListener('click', () => {
     /* loadGestureUI(); */
     syncLineUI();
     syncFixedUI();
+    syncPitchZonesUI();
   } else {
     closeSettingsPanel();
   }

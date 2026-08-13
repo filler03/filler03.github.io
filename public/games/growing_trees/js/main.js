@@ -30,6 +30,7 @@ loadSavedSettings();
 syncWaitBtn();
 syncLineUI();
 syncFixedUI();
+syncPitchZonesUI();
 
 /* ---- Pointer handling ---- */
 
@@ -177,6 +178,7 @@ function loop(now) {
   // gesture that is still playing (or lingering) keeps its path on screen.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (mode === 'plant') {
+    drawPitchZones();   // faint degree-color bands, one per scale degree
     // Held live-sound gestures keep their attack fade advancing in real time;
     // without this the fade stalls the moment the finger stops drawing.
     for (const ds of dragStates.values()) {
@@ -201,14 +203,11 @@ function loop(now) {
     const pts = p.pts, cum = p.cumTime;
     const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
     const tailEnd = p.tailEnd != null ? p.tailEnd : pts.length;
-    // The amber attack + decay window covers the own path while the relative
-    // volume is below 1 (the release tail is amber too, drawn separately).
-    const relVolWindowEnd = Math.min(relVolWindowEndIdx(cum, (p.atkMs || 0) + (p.decMs || 0)), tailEnd);
     const cRelVol = stateRelVol(cum, st, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
     ctx.globalAlpha = alpha;
-    drawGreenPath(pts, cum, st, relVolWindowEnd, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
-    drawDottedTail(pts, cum, st, relVolWindowEnd, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
-    drawPlaybackCircle(st.x, st.y, alpha, cRelVol);
+    drawGreenPath(pts, cum, st, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0, p.color);
+    drawDottedTail(pts, cum, st, tailEnd, p.color);
+    drawPlaybackCircle(st.x, st.y, alpha, cRelVol, p.color);
     ctx.globalAlpha = 1;
   }
 
