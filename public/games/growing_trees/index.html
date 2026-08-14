@@ -17,7 +17,13 @@
     background: #ffffff;
     font-family: 'Segoe UI', system-ui, sans-serif;
     cursor: crosshair;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
   }
+  /* Keep text fields editable/selectable despite the global user-select: none. */
+  input, textarea { -webkit-user-select: text; user-select: text; }
   /* Force landscape: while held upright, a rotate prompt covers the game, so
      it only plays in landscape. No transforms are applied to the page, which
      keeps every control's hit area intact. */
@@ -77,7 +83,7 @@
   }
   #soundOverlay .sound-msg .snd { font-size: 42px; display: block; margin-bottom: 8px; }
   #soundOverlay .sound-sub { font-size: 13px; font-weight: 600; color: rgba(46,93,52,0.7); margin-top: 10px; }
-  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; touch-action: none; }
+  canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #statHud {
     position: fixed;
     top: calc(48px + env(safe-area-inset-top));
@@ -113,24 +119,6 @@
     border-radius: 3px;
     transition: width 0.1s linear;
   }
-  .adsr {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-    min-width: 78px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    margin-bottom: 1px;
-  }
-  .adsr-letter {
-    color: rgba(138,109,31,0.4);
-    transition: color 0.12s, transform 0.12s;
-  }
-  .adsr-letter.active {
-    color: #8a6d1f;
-    transform: scale(1.3);
-  }
   .note-stats {
     display: flex;
     align-items: center;
@@ -152,14 +140,6 @@
     background: rgba(255,255,255,0.92);
     outline: 1px dashed #3a5ba0;
   }
-  #statHud > div.hud-fixed {
-    background: rgba(252, 232, 178, 0.92);
-    color: #8a6d1f;
-    outline: 1px solid rgba(138,109,31,0.4);
-  }
-  #statHud > div.hud-fixed .hud-fill {
-    background: #8a6d1f;
-  }
   #settingsBtn {
     position: fixed;
     top: calc(16px + env(safe-area-inset-top));
@@ -180,7 +160,9 @@
   #settingsBtn:hover { background: #fff; }
   #settingsPanel {
     position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
     inset: 0;
+    overflow: hidden;
     box-sizing: border-box;
     background: rgba(255,255,255,0.97);
     padding: calc(16px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
@@ -192,16 +174,41 @@
     flex-direction: column;
   }
   .panel-cols {
-    flex: 1;
-    min-height: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px 28px;
+    grid-template-columns: 1fr;
+    gap: 10px 28px;
     align-items: start;
-    overflow-y: auto;
   }
   .panel-col { min-width: 0; }
   .fx-section { min-width: 0; }
+  .tab-scroll {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .panel-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #cdeab3;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 5px 6px;
+    border: 1px solid #cdeab3;
+    border-radius: 8px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-weight: 700;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .tab-btn.active { background: #2e5d34; color: #fff; border-color: #2e5d34; }
+  .tab-panel { flex: none; }
+  .tab-panel.hidden { display: none; }
   .panel-actions {
     grid-column: 1 / -1;
     display: flex;
@@ -209,14 +216,15 @@
     gap: 8px;
   }
   .panel-actions button { margin-bottom: 0; flex: 1; }
-  .panel-actions.top { margin-bottom: 10px; }
+  .panel-actions.top { margin-bottom: 6px; }
   #settingsPanel.hidden { display: none; }
-  #settingsPanel::-webkit-scrollbar { width: 10px; }
-  #settingsPanel::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
-  #settingsPanel::-webkit-scrollbar-thumb { background: #2e5d34; border-radius: 5px; border: 2px solid #fff; }
-  #settingsPanel::-webkit-scrollbar-thumb:hover { background: #3c7a45; }
-  #settingsPanel { scrollbar-width: thin; scrollbar-color: #2e5d34 rgba(46,93,52,0.06); }
+  .tab-scroll::-webkit-scrollbar { width: 10px; }
+  .tab-scroll::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
+  .tab-scroll::-webkit-scrollbar-thumb { background: #2e5d34; border-radius: 5px; border: 2px solid #fff; }
+  .tab-scroll::-webkit-scrollbar-thumb:hover { background: #3c7a45; }
+  .tab-scroll { scrollbar-width: thin; scrollbar-color: #2e5d34 rgba(46,93,52,0.06); }
   .panel-head {
+    flex: none;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -234,9 +242,9 @@
   .grid {
     display: grid;
     grid-template-columns: 78px 1fr;
-    gap: 9px 10px;
+    gap: 6px 10px;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
@@ -245,7 +253,7 @@
     align-items: center;
     gap: 6px;
     font-weight: 600;
-    margin-bottom: 9px;
+    margin-bottom: 6px;
   }
   .zone-toggle input[type=checkbox] { accent-color: #2e5d34; }
   .fx-block {
@@ -256,8 +264,8 @@
     margin-bottom: 12px;
   }
   .fx-item {
-    margin-bottom: 10px;
-    padding: 8px 10px;
+    margin-bottom: 6px;
+    padding: 6px 8px;
     border: 1px solid #cdeab3;
     border-radius: 10px;
     background: #f7fdf0;
@@ -275,13 +283,124 @@
   .fx-head input[type=checkbox] { accent-color: #2e5d34; }
   .fx-item input[type=range] { width: 100%; margin-bottom: 6px; }
   .val { font-weight: 700; }
+  .env-actions { display: flex; gap: 6px; margin-bottom: 5px; }
+  .env-actions button {
+    flex: 1;
+    padding: 5px 8px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f7fdf0;
+    color: #2e5d34;
+    font-weight: 600;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .env-actions button:hover { background: #eaf9dc; }
+  .env-note {
+    font-size: 10px;
+    color: #6b8e5a;
+    margin: 0 0 6px;
+    line-height: 1.3;
+  }
+  .env-row {
+    margin-bottom: 5px;
+    padding: 5px 8px;
+    border: 1px solid #cdeab3;
+    border-radius: 10px;
+    background: #f7fdf0;
+  }
+  .env-row.release-row { border-color: #e7c8a0; background: #fdf7ee; }
+  .env-row.hold-row { border-color: #b9d9c0; background: #f0f9f2; }
+  .env-row-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .env-name {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    border: 1px solid #cdeab3;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    color: #2e5d34;
+    background: #fff;
+  }
+  .env-name:focus { outline: 2px solid #3c7a45; outline-offset: 1px; }
+  .env-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .env-tag.tag-release { background: #e7c8a0; color: #6b4a1f; }
+  .env-tag.tag-hold { background: #b9d9c0; color: #2e5d34; }
+  .env-btns { display: flex; gap: 4px; flex-shrink: 0; }
+  .env-btns button {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid #cdeab3;
+    border-radius: 6px;
+    background: #fff;
+    color: #2e5d34;
+    font-size: 10px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .env-btns button:disabled { opacity: 0.35; cursor: default; }
+  .env-btns button:hover:not(:disabled) { background: #eaf9dc; }
+  .env-markers {
+    display: flex;
+    flex-shrink: 0;
+    gap: 4px;
+    margin: 0;
+  }
+  .env-m {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #2e5d34;
+    padding: 2px 6px;
+    border: 1px solid #cdeab3;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .env-m input[type=radio] { accent-color: #2e5d34; margin: 0; }
+  .env-m.checked { background: #2e5d34; color: #fff; border-color: #2e5d34; }
+  .env-m.disabled { opacity: 0.4; cursor: default; }
+  .env-secs {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 3px 8px;
+    align-items: center;
+  }
+  .env-sec {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #2e5d34;
+    min-width: 0;
+  }
+  .env-sec input[type=range] { flex: 1; min-width: 0; margin: 0; width: auto; }
+  .env-sec b { white-space: nowrap; min-width: 30px; text-align: right; }
+  .env-sec.env-start-ro { color: #6b8e5a; }
   .vec-head {
     font-weight: 700;
     font-size: 12px;
     color: #3c7a45;
     border-top: 1px solid #cdeab3;
-    padding-top: 10px;
-    margin: 4px 0 10px;
+    padding-top: 6px;
+    margin: 2px 0 6px;
   }
   .vec-sel.flash { border-color: #d9534f; background: #fdecea; }
   .mm-legend {
@@ -373,11 +492,16 @@
     <span>Sound settings</span>
     <button id="closeSettings">✕</button>
   </div>
+  <div class="tab-scroll">
+  <div class="panel-tabs">
+    <button type="button" class="tab-btn active" data-tab="tab-sound">Sound</button>
+    <button type="button" class="tab-btn" data-tab="tab-components">Components</button>
+  </div>
+  <div class="panel-cols tab-panel" id="tab-sound">
   <div class="panel-actions top">
     <button id="clear">Stop sounds 🛑</button>
     <button id="resetDefaults">↺ Reset defaults</button>
   </div>
-  <div class="panel-cols">
   <div class="panel-col">
   <div class="vec-head">Default values</div>
   <div class="grid">
@@ -416,11 +540,6 @@
     <input type="range" id="release" min="0" max="2000" step="10">
     -->
   </div>
-  <div class="vec-head">Gesture timing</div>
-  <div class="grid">
-    <label for="timeMult">Time multiplier <b class="val" id="timeMultVal"></b></label>
-    <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
-  </div>
   <div class="vec-head">Pitch color zones</div>
   <label class="zone-toggle"><input type="checkbox" id="zonesShow"> Show color zones</label>
   <div class="grid">
@@ -439,44 +558,27 @@
     <select id="zonesHighDeg"></select>
   </div>
   </div>
-  <div class="panel-col">
-  <div class="fx-section">
-  <div class="vec-head">Tap note defaults — played when you tap without drawing a gesture</div>
-  <div class="fx-block">
-    <div class="fx-item">
-      <div class="fx-head"><span>Attack</span><b class="val" id="fx-attackTVal"></b> ms</div>
-      <input type="range" id="fx-attackT" min="1" max="5000" step="10">
-      <div class="fx-head"><span>End vol</span><b class="val">100%</b></div>
-      <div class="fx-head"><label title="Fade each custom gesture's volume in over this attack time (the path shows amber while it applies)"><input type="checkbox" id="fx-attackGesture"> Add to gestures</label></div>
-    </div>
-    <div class="fx-item">
-      <div class="fx-head"><span>Decay</span><b class="val" id="fx-decayTVal"></b> ms</div>
-      <input type="range" id="fx-decayT" min="1" max="5000" step="10">
-      <div class="fx-head"><span>End vol</span><b class="val" id="fx-decayVolVal"></b></div>
-      <input type="range" id="fx-decayVol" min="0" max="100" step="1">
-      <div class="fx-head"><label title="Fade each custom gesture's volume out over this decay time, applied right after the attack (the path shows amber while it applies)"><input type="checkbox" id="fx-decayGesture"> Add to gestures</label></div>
-    </div>
-    <div class="fx-item">
-      <div class="fx-head"><span>Hold</span><b class="val" id="fx-holdTVal"></b> ms</div>
-      <input type="range" id="fx-holdT" min="1" max="5000" step="10">
-      <div class="fx-head"><span>End vol</span><b class="val" id="fx-holdVolVal"></b></div>
-      <input type="range" id="fx-holdVol" min="0" max="100" step="1">
-    </div>
-    <div class="fx-item">
-      <div class="fx-head"><span>Release</span><b class="val" id="fx-releaseTVal"></b> ms</div>
-      <input type="range" id="fx-releaseT" min="1" max="5000" step="10">
-      <div class="fx-head"><span>End vol</span><b class="val" id="fx-releaseVolVal"></b></div>
-      <input type="range" id="fx-releaseVol" min="0" max="100" step="1">
-      <div class="fx-head"><label title="Append this release value to the end of every custom gesture"><input type="checkbox" id="fx-releaseGesture"> Add to gestures</label></div>
-    </div>
-    <div class="fx-item">
-      <div class="fx-head"><label title="When off, a tap plays a very short gesture note (the default tap note is disabled)"><input type="checkbox" id="allowTapNotes"> Allow tap notes</label></div>
-    </div>
-  </div>
-  </div>
-  </div>
   <div class="panel-actions">
     <button id="testSound">▶ Play test</button>
+  </div>
+  </div>
+  <div class="tab-panel hidden" id="tab-components">
+  <div class="panel-col">
+  <div class="vec-head">Playhead speed</div>
+  <div class="grid">
+    <label for="timeMult">Playhead speed <b class="val" id="timeMultVal"></b></label>
+    <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
+  </div>
+  <div class="fx-section">
+  <div class="vec-head">Envelope — how a note's value changes over time</div>
+  <div class="env-actions">
+    <button id="envAdd">➕ Add component</button>
+    <button id="envReset">↺ Reset envelope</button>
+  </div>
+  <div class="env-note">The <b>⟳ Hold</b> range loops while the finger stays down; <b>▶ Release</b> always starts on the card right after <b>Hold to</b> and plays when the finger lifts. <b>✂ Cut</b> marks how far an early lift plays before jumping to Release. Start values chain: every card starts where the previous one ends, so only the first card has a Start slider.</div>
+  <div id="envList"></div>
+  </div>
+  </div>
   </div>
   </div>
   <!-- COMMENTED OUT - sensitivity is now hardcoded.

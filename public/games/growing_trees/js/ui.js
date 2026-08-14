@@ -3,34 +3,13 @@
    ============================================================ */
 
 /* ---- Top-left HUD ---- */
-// Which envelope phase (0=A, 1=D, 2=S, 3=R) `elapsed` ms sits in, for a tap
-// note whose per-slot durations live in n.slots[].
-function tapPhase(n, elapsed) {
-  let acc = 0;
-  for (let i = 0; i < 4; i++) {
-    if (n.slots[i] == null) continue;
-    acc += n.slots[i];
-    if (elapsed < acc) return i;
-  }
-  return 3;
-}
-
-// A tap note card: the A D S R phases in a line, with a progress bar that
-// moves through them as the note plays.
-function tapNoteCardHtml(n, elapsed) {
-  const pct = n.totalMs > 0 ? (Math.min(elapsed, n.totalMs) / n.totalMs * 100).toFixed(1) : 100;
-  const phase = tapPhase(n, elapsed);
-  const letters = ['A', 'D', 'S', 'R']
-    .map((l, i) => `<span class="adsr-letter${phase === i ? ' active' : ''}">${l}</span>`)
-    .join('');
-  return `<div class="hud-fixed"><div class="adsr">${letters}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
-}
-
+// A gesture playback card: the note's total time, its base/relative/current
+// volume, and a progress bar that moves through the note.
 function gestureNoteCardHtml(now, p) {
   const elapsed = Math.min(now - p.startedAt, p.totalMs || 0);
   const total = Math.round(p.totalMs || 0);
   const st = pathStateAtTime(p.pts, p.cumTime, elapsed);
-  // Live notes share the audio's fade progress (which also advances while the
+  // Live notes share the audio's playhead (which also advances while the
   // finger is held); wait-mode notes use their playback timeline position.
   const prog = (p.ds && p.ds.gain) ? liveFadeProgress(p.ds) : elapsed;
   // A held live note's path time freezes but the note keeps playing, so show
@@ -38,12 +17,12 @@ function gestureNoteCardHtml(now, p) {
   const timeMs = p.released ? Math.min(prog, p.totalMs || 0) : prog;
   const pct = total > 0 ? (Math.min(elapsed, total) / total * 100).toFixed(1) : 100;
   // The readout shows base volume (a number, 100 = highest, from the path's Y),
-  // relative volume (the % of base volume in use from attack/decay/release),
-  // and the resulting current volume level (base × relative).
+  // relative volume (the % of base volume in use from the envelope), and the
+  // resulting current volume level (base × relative).
   const tailEnd = p.tailEnd != null ? p.tailEnd : (p.pts ? p.pts.length : 0);
   const relVol = st.idx < tailEnd
-    ? attackRelVol(prog, p.atkMs || 0) * decayRelVol(prog, p.atkMs || 0, p.decMs || 0)
-    : releaseRelVol(prog - (p.cumTime[tailEnd - 1] || 0), p.relMs || 0);
+    ? relValueBody(ENVELOPE, prog, !!p.looped)
+    : relValueRelease(ENVELOPE, prog - (p.cumTime[tailEnd - 1] || 0));
   const baseVol = baseVolumeFromY(st.y);
   const baseNum = Math.round(baseVol / BASE_VOL_MAX * 100);
   const relPct = Math.round(relVol * 100);
@@ -51,17 +30,10 @@ function gestureNoteCardHtml(now, p) {
   return `<div class="live"><div class="note-stats">${EMOJI_TIME}${Math.round(timeMs)}ms</div><div class="vol-stats">${EMOJI_VOL} base: ${baseNum} · relative: ${relPct}% · true: ${curNum}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
 
-// Refresh the top-left display each frame: one card per running tap note plus
-// one per active gesture playback, stacked. Cards leave when their note is
-// done.
+// Refresh the top-left display each frame: one card per active gesture
+// playback, stacked. Cards leave when their note is done.
 function refreshHud(now) {
   const blocks = [];
-  for (let i = tapNotes.length - 1; i >= 0; i--) {
-    const n = tapNotes[i];
-    const elapsed = now - n.noteStart;
-    if (elapsed >= n.totalMs) { tapNotes.splice(i, 1); continue; }
-    blocks.push(tapNoteCardHtml(n, elapsed));
-  }
   for (const p of playbacks) blocks.push(gestureNoteCardHtml(now, p));
   if (blocks.length) {
     statHud.innerHTML = blocks.join('');
@@ -89,11 +61,11 @@ waitBtn.addEventListener('click', () => {
 });
 
 /* ---------- Persistence ---------- */
-const STORAGE_KEY = 'growingTrees.settings.v6';
+const STORAGE_KEY = 'growingTrees.settings.v7';
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, fixed: FIXED, pitchZones: PITCH_ZONES }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES }));
     return true;
   } catch (e) { return false; }
 }
@@ -111,22 +83,38 @@ function loadSavedSettings() {
     if (d.gesture) {
       if (d.gesture.waitForGesture != null) g.waitForGesture = !!d.gesture.waitForGesture;
       if (d.gesture.timeMult != null) g.timeMult = Math.max(0.1, Math.min(4, d.gesture.timeMult));
-      if (d.gesture.allowTapNotes != null) g.allowTapNotes = !!d.gesture.allowTapNotes;
-      if (d.gesture.gestureAttack != null) g.gestureAttack = !!d.gesture.gestureAttack;
-      if (d.gesture.gestureDecay != null) g.gestureDecay = !!d.gesture.gestureDecay;
-      if (d.gesture.gestureRelease != null) g.gestureRelease = !!d.gesture.gestureRelease;
     }
     GESTURE = g;
-    const fx = clone(DEFAULT_FIXED);
-    if (d.fixed) {
-      for (const name of SLOT_NAMES) {
-        if (d.fixed[name]) fx[name] = Object.assign({}, fx[name], d.fixed[name]);
-      }
+    const env = clone(DEFAULT_ENVELOPE);
+    if (d.envelope && Array.isArray(d.envelope.components) && d.envelope.components.length) {
+      env.components = d.envelope.components.map((c, i) => ({
+        id: c.id || newCompId(),
+        name: String(c.name || ('Component ' + (i + 1))).slice(0, 24),
+        duration: Math.max(1, Math.min(5000, +c.duration || 250)),
+        startValue: Math.max(0, Math.min(100, +c.startValue || 0)),
+        endValue: Math.max(0, Math.min(100, +c.endValue || 100)),
+      }));
+      if (d.envelope.beginReleaseIndex != null) env.beginReleaseIndex = +d.envelope.beginReleaseIndex;
+      if (d.envelope.holdStartIndex != null) env.holdStartIndex = +d.envelope.holdStartIndex;
+      if (d.envelope.holdEndIndex != null) env.holdEndIndex = +d.envelope.holdEndIndex;
+      if (d.envelope.earlyCutIndex != null) env.earlyCutIndex = +d.envelope.earlyCutIndex;
+    } else if (d.fixed) {
+      // v6 → v7 migration: map the old fixed ADSR phases onto the envelope.
+      const fx = d.fixed;
+      const dur = f => Math.max(1, Math.min(5000, (f && f.value) || 250));
+      const vol = (f, fb) => Math.max(0, Math.min(100, (f && f.vol != null) ? f.vol : fb));
+      env.components = [
+        { id: 'comp-1', name: 'Attack',  duration: dur(fx.attack),  startValue: 0,   endValue: 100 },
+        { id: 'comp-2', name: 'Decay',   duration: dur(fx.decay),   startValue: 100, endValue: vol(fx.decay, 60) },
+        { id: 'comp-3', name: 'Sustain', duration: dur(fx.hold),    startValue: vol(fx.hold, 60), endValue: vol(fx.hold, 60) },
+        { id: 'comp-4', name: 'Release', duration: dur(fx.release), startValue: 100, endValue: vol(fx.release, 0) },
+      ];
+      env.beginReleaseIndex = 3;
+      env.holdStartIndex = 2;
+      env.holdEndIndex = 2;
     }
-    // Every component is a tap default now: no "skip via gesture line" mode.
-    for (const name of SLOT_NAMES) fx[name].on = true;
-    fx.attack.vol = 100;   // the attack always ramps to full gain
-    FIXED = fx;
+    ENVELOPE = env;
+    clampEnvelopeIndexes();
     const pz = clone(DEFAULT_PITCH_ZONES);
     if (d.pitchZones) {
       if (d.pitchZones.show != null) pz.show = !!d.pitchZones.show;
@@ -144,12 +132,12 @@ function loadSavedSettings() {
 function resetToDefaults() {
   CHIME_SETTINGS = clone(DEFAULT_CHIME);
   GESTURE = clone(DEFAULT_GESTURE);
-  FIXED = clone(DEFAULT_FIXED);
+  ENVELOPE = clone(DEFAULT_ENVELOPE);
   PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
-  syncFixedUI();
+  syncEnvelopeUI();
   syncPitchZonesUI();
   syncWaitBtn();
 }
@@ -196,10 +184,14 @@ function loadLevelUI(level) {
   */
 }
 
+// Preview the current envelope as a very short gesture (a tap) so the test
+// button and key changes play the same path the fingers play.
 function previewChime() {
   initAudio();
   resumeAudio();
-  chime(currentLevel);
+  const x = W / 2, y = H * 0.55;
+  const ds = { pts: [{ x, y }, { x, y }], cumTime: [0, 0], totalMs: 0, startX: x, startY: y };
+  schedulePathPlayback(ds);
 }
 
 noteSel.addEventListener('change', () => {
@@ -375,7 +367,7 @@ syncSensUI();
 
 /* ---- Gesture value mapping is pure screen proportions (see lineTimeForSlot) ---- */
 
-/* ---- Time multiplier (ms per % of horizontal travel) ---- */
+/* ---- Playhead speed (ms per % of horizontal travel) ---- */
 const timeMultEl = document.getElementById('timeMult');
 function syncLineUI() {
   timeMultEl.value = GESTURE.timeMult;
@@ -386,56 +378,207 @@ timeMultEl.addEventListener('input', () => {
   document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
 });
 
-/* ---- Tap note defaults ---- */
-for (const name of SLOT_NAMES) {
-  const tEl = document.getElementById('fx-' + name + 'T');
-  const volEl = name === 'attack' ? null : document.getElementById('fx-' + name + 'Vol');
-  tEl.addEventListener('input', () => {
-    FIXED[name].value = +tEl.value;
-    document.getElementById('fx-' + name + 'TVal').textContent = tEl.value + 'ms';
-  });
-  if (volEl) volEl.addEventListener('input', () => {
-    FIXED[name].vol = +volEl.value;
-    document.getElementById('fx-' + name + 'VolVal').textContent = volEl.value + '%';
-  });
+/* ---- Envelope editor ---- */
+const envAddBtn = document.getElementById('envAdd');
+const envResetBtn = document.getElementById('envReset');
+const envListEl = document.getElementById('envList');
+
+let ENV_ID = 0;
+function newCompId() { return 'c' + (++ENV_ID) + Math.random().toString(36).slice(2, 6); }
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-const attackGestureEl = document.getElementById('fx-attackGesture');
-attackGestureEl.addEventListener('change', () => {
-  GESTURE.gestureAttack = attackGestureEl.checked;
-  saveSettings();
-});
-const releaseGestureEl = document.getElementById('fx-releaseGesture');
-releaseGestureEl.addEventListener('change', () => {
-  GESTURE.gestureRelease = releaseGestureEl.checked;
-  saveSettings();
-});
-const decayGestureEl = document.getElementById('fx-decayGesture');
-decayGestureEl.addEventListener('change', () => {
-  GESTURE.gestureDecay = decayGestureEl.checked;
-  saveSettings();
-});
-const allowTapNotesEl = document.getElementById('allowTapNotes');
-allowTapNotesEl.addEventListener('change', () => {
-  GESTURE.allowTapNotes = allowTapNotesEl.checked;
-  saveSettings();
-});
-function syncFixedUI() {
-  for (const name of SLOT_NAMES) {
-    FIXED[name].on = true;   // every component is always a tap default
-    const tEl = document.getElementById('fx-' + name + 'T');
-    tEl.value = FIXED[name].value = Math.max(1, Math.min(5000, FIXED[name].value));
-    document.getElementById('fx-' + name + 'TVal').textContent = FIXED[name].value + 'ms';
-    if (name !== 'attack') {
-      const volEl = document.getElementById('fx-' + name + 'Vol');
-      volEl.value = FIXED[name].vol;
-      document.getElementById('fx-' + name + 'VolVal').textContent = FIXED[name].vol + '%';
-    }
+
+// Keep the envelope's markers sane after any add/delete/reorder: the release
+// always starts right after the hold range ends (so no component is ever
+// skipped) and the hold range is non-empty and lies before the release. Start
+// values chain into the next component, so only the first one keeps an
+// independent start.
+function clampEnvelopeIndexes() {
+  const n = ENVELOPE.components.length;
+  if (n <= 1) {
+    // A lone component is the whole release: no hold, no body.
+    ENVELOPE.holdStartIndex = 0;
+    ENVELOPE.holdEndIndex = 0;
+    ENVELOPE.beginReleaseIndex = 0;
+    ENVELOPE.earlyCutIndex = 0;
+    chainStartValues(ENVELOPE);
+    return;
   }
-  attackGestureEl.checked = !!GESTURE.gestureAttack;
-  decayGestureEl.checked = !!GESTURE.gestureDecay;
-  releaseGestureEl.checked = !!GESTURE.gestureRelease;
-  allowTapNotesEl.checked = !!GESTURE.allowTapNotes;
+  ENVELOPE.holdEndIndex = Math.max(0, Math.min(n - 2, ENVELOPE.holdEndIndex));
+  ENVELOPE.holdStartIndex = Math.max(0, Math.min(ENVELOPE.holdEndIndex, ENVELOPE.holdStartIndex));
+  ENVELOPE.beginReleaseIndex = ENVELOPE.holdEndIndex + 1;
+  ENVELOPE.earlyCutIndex = Math.max(0, Math.min(ENVELOPE.beginReleaseIndex - 1, ENVELOPE.earlyCutIndex));
+  chainStartValues(ENVELOPE);
 }
+
+// Markers on each card: begin release and the hold range.
+function markerRadio(name, cls, checked, disabled, label, title) {
+  return `<label class="env-m ${cls}${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}" title="${title}">
+    <input type="radio" name="${name}" value="1"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}>${label}</label>`;
+}
+
+function renderEnvelopeEditor() {
+  clampEnvelopeIndexes();
+  const n = ENVELOPE.components.length;
+  const b = ENVELOPE.beginReleaseIndex;
+
+  let rows = '';
+  for (let i = 0; i < n; i++) {
+    const c = ENVELOPE.components[i];
+    const isRelease = i >= b;
+    const inHold = i >= ENVELOPE.holdStartIndex && i <= ENVELOPE.holdEndIndex;
+    const markers = [
+      markerRadio('envRelease', 'env-m-release', b === i, n > 1 && i === 0, 'Release', 'Release starts here — the card before it becomes the last Hold'),
+      markerRadio('envHoldFrom', 'env-m-holdfrom', ENVELOPE.holdStartIndex === i, i >= b, 'Hold from', 'Hold range starts here'),
+      markerRadio('envHoldTo', 'env-m-holdto', ENVELOPE.holdEndIndex === i, i >= b, 'Hold to', 'Hold range ends here — release always starts on the next card'),
+      markerRadio('envCut', 'env-m-cut', ENVELOPE.earlyCutIndex === i, i >= b, 'Cut', 'Early lift: the sound plays through this card, then jumps to Release')
+    ].join('');
+    const startCell = i === 0
+      ? `<div class="env-sec"><span>Start</span><input type="range" data-f="startValue" min="0" max="100" step="1" value="${c.startValue}"><b data-v="startValue">${c.startValue}%</b></div>`
+      : `<div class="env-sec env-start-ro" title="Starts where the previous component ends"><span>Start</span><b data-v="startValue">${c.startValue}%</b></div>`;
+    rows += `<div class="fx-item env-row${isRelease ? ' release-row' : (inHold ? ' hold-row' : '')}" data-idx="${i}">
+      <div class="env-row-head">
+        <input type="text" class="env-name" value="${esc(c.name)}" maxlength="24" spellcheck="false" aria-label="Component name">
+        <div class="env-markers">${markers}</div>
+        <div class="env-btns">
+          <button class="env-up" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button class="env-down" title="Move down" ${i === n - 1 ? 'disabled' : ''}>▼</button>
+          <button class="env-del" title="Delete component" ${n <= 1 ? 'disabled' : ''}>✕</button>
+        </div>
+      </div>
+      <div class="env-secs">
+        <div class="env-sec"><span>Duration</span><input type="range" data-f="duration" min="1" max="5000" step="10" value="${c.duration}"><b data-v="duration">${c.duration}ms</b></div>
+        ${startCell}
+        <div class="env-sec"><span>End</span><input type="range" data-f="endValue" min="0" max="100" step="1" value="${c.endValue}"><b data-v="endValue">${c.endValue}%</b></div>
+      </div>
+    </div>`;
+  }
+  envListEl.innerHTML = rows;
+}
+
+// Values typed straight into a row update ENVELOPE live (no re-render).
+envListEl.addEventListener('input', e => {
+  const row = e.target.closest('.env-row');
+  if (!row) return;
+  const c = ENVELOPE.components[+row.dataset.idx];
+  if (!c) return;
+  if (e.target.classList.contains('env-name')) {
+    c.name = e.target.value.slice(0, 24);
+    return;
+  }
+  const f = e.target.dataset.f;
+  if (!f) return;
+  c[f] = Math.max(f === 'duration' ? 1 : 0, Math.min(f === 'duration' ? 5000 : 100, +e.target.value));
+  const vEl = row.querySelector('[data-v="' + f + '"]');
+  if (vEl) vEl.textContent = c[f] + (f === 'duration' ? ' ms' : '%');
+  if (f === 'endValue') {
+    // An end feeds the next component's start: chain it and update that card's
+    // read-only Start readout live.
+    chainStartValues(ENVELOPE);
+    const nextRow = row.nextElementSibling;
+    const nextStart = nextRow && nextRow.querySelector('.env-start-ro b');
+    if (nextStart) nextStart.textContent = c[f] + '%';
+  }
+});
+
+envListEl.addEventListener('change', e => {
+  const row = e.target.closest('.env-row');
+  if (!row) return;
+  const idx = +row.dataset.idx;
+  const c = ENVELOPE.components[idx];
+  if (!c) return;
+
+  if (e.target.classList.contains('env-name')) {
+    c.name = e.target.value.slice(0, 24);
+    saveSettings();
+    return;
+  }
+
+  // Card markers: a radio sets the envelope's release/hold position.
+  if (e.target.type === 'radio') {
+    const mark = e.target.closest('.env-m');
+    if (!mark || mark.classList.contains('disabled')) return;
+    if (mark.classList.contains('env-m-release')) ENVELOPE.holdEndIndex = idx - 1;
+    else if (mark.classList.contains('env-m-holdfrom')) {
+      ENVELOPE.holdStartIndex = idx;
+      if (ENVELOPE.holdEndIndex < idx) ENVELOPE.holdEndIndex = idx;
+    } else if (mark.classList.contains('env-m-holdto')) {
+      ENVELOPE.holdEndIndex = idx;
+      if (ENVELOPE.holdStartIndex > idx) ENVELOPE.holdStartIndex = idx;
+    } else if (mark.classList.contains('env-m-cut')) {
+      ENVELOPE.earlyCutIndex = idx;
+    }
+    clampEnvelopeIndexes();
+    renderEnvelopeEditor();
+    saveSettings();
+    return;
+  }
+
+  // Range sliders fire 'change' on thumb release (after live 'input' updates);
+  // persist whatever was last edited.
+  const f = e.target.dataset.f;
+  if (f) {
+    c[f] = Math.max(f === 'duration' ? 1 : 0, Math.min(f === 'duration' ? 5000 : 100, +e.target.value));
+    const vEl = row.querySelector('[data-v="' + f + '"]');
+    if (vEl) vEl.textContent = c[f] + (f === 'duration' ? 'ms' : '%');
+    if (f === 'endValue') chainStartValues(ENVELOPE);
+  }
+  saveSettings();
+});
+
+// Structural edits: reorder, delete, add. All re-render and persist.
+envListEl.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const row = btn.closest('.env-row');
+  const idx = row ? +row.dataset.idx : -1;
+  if (btn.classList.contains('env-up') || btn.classList.contains('env-down')) {
+    const j = btn.classList.contains('env-up') ? idx - 1 : idx + 1;
+    const arr = ENVELOPE.components;
+    if (j < 0 || j >= arr.length) return;
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+  } else if (btn.classList.contains('env-del')) {
+    ENVELOPE.components.splice(idx, 1);
+  }
+  clampEnvelopeIndexes();
+  renderEnvelopeEditor();
+  saveSettings();
+});
+
+envAddBtn.addEventListener('click', () => {
+  ENVELOPE.components.push({ id: newCompId(), name: 'Component', duration: 250, startValue: 100, endValue: 100 });
+  clampEnvelopeIndexes();
+  renderEnvelopeEditor();
+  saveSettings();
+});
+envResetBtn.addEventListener('click', () => {
+  ENVELOPE = clone(DEFAULT_ENVELOPE);
+  renderEnvelopeEditor();
+  saveSettings();
+});
+
+function syncEnvelopeUI() {
+  renderEnvelopeEditor();
+}
+
+/* ---- Settings window tabs ---- */
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabPanels = {
+  'tab-sound': document.getElementById('tab-sound'),
+  'tab-components': document.getElementById('tab-components')
+};
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+    for (const id in tabPanels) {
+      tabPanels[id].classList.toggle('hidden', id !== btn.dataset.tab);
+    }
+    const scroller = document.querySelector('.tab-scroll');
+    if (scroller) scroller.scrollTop = 0;
+  });
+});
 
 /* COMMENTED OUT - new lines are started by a direction change only.
 const pauseEl = document.getElementById('pause');
@@ -512,7 +655,7 @@ settingsBtn.addEventListener('click', () => {
     loadLevelUI(currentLevel);
     /* loadGestureUI(); */
     syncLineUI();
-    syncFixedUI();
+    syncEnvelopeUI();
     syncPitchZonesUI();
   } else {
     closeSettingsPanel();
