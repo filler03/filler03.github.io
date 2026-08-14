@@ -3,14 +3,6 @@
    drawing, and note scheduling.
    ============================================================ */
 
-// A gesture "moved" when the finger travelled far enough from its start to be
-// a drag rather than a tap.
-function gestureMoved(g) {
-  const n = g.pts.length;
-  if (n === 0) return false;
-  return Math.abs(g.pts[n - 1].x - g.startX) + Math.abs(g.pts[n - 1].y - g.startY) > TAP_THRESHOLD;
-}
-
 // ---- Freehand path gestures ----
 // A gesture is one continuous freehand path recorded while the finger is
 // down. Each point's horizontal travel adds time (left and right both count),
@@ -19,13 +11,15 @@ function gestureMoved(g) {
 // volume. While the note plays a small circle travels along the path turning
 // the played portion into a glowing solid line colored by the scale degree it
 // plays at each point (the vibrant version of the pitch-zone band color).
+// Every touch is a gesture — a tap is just a very short one (near-zero
+// horizontal travel), sharing the exact same start/play/release flow.
 
 function addPathPoint(ds, x, y) {
   const last = ds.pts[ds.pts.length - 1];
   const dx = x - last.x, dy = y - last.y;
   if (Math.abs(dx) + Math.abs(dy) < 3) return;        // throttle: ~3px of travel per point
   const wPct = Math.abs(dx) / Math.max(1, W) * 100;   // horizontal travel, % of width
-  const dt = wPct * TIME_PER_W * GESTURE.timeMult;    // ms this step adds
+  const dt = wPct * TIME_PER_W / GESTURE.timeMult;    // ms this step adds
   ds.pts.push({ x, y });
   ds.cumTime.push(ds.totalMs + dt);
   ds.totalMs += dt;
@@ -55,90 +49,73 @@ function pathStateAtTime(pts, cum, t) {
   return { x: pts[n - 1].x, y: pts[n - 1].y, idx: n - 1, frac: 1 };
 }
 
-// While the tap-note attack is enabled for gestures, the relative volume is
-// faded in over the first `attackMs` of the gesture's own timeline: each ms
-// plays base volume × (t / attackMs), so a fluctuating base volume is scaled by
-// the relative volume at every moment. After the window the relative volume is 1.
-function attackRelVol(tMs, atkMs) {
-  return atkMs > 0 ? Math.min(1, tMs / atkMs) : 1;
-}
-
-// Decay mirrors the attack and is applied right after it: the attack fades the
-// relative volume IN from 0 to 1 over the first `atkMs`, then the decay fades
-// it OUT from 1 down to the decay's end relative volume over `decMs`.
-// `fadeProg` is how far the note's fade domain has progressed in ms. Without an
-// attack the decay starts right away at the note's start (1 is the beginning).
-function decayRelVol(fadeProg, atkMs, decMs) {
-  if (!(decMs > 0)) return 1;
-  const start = atkMs > 0 ? atkMs : 0;
-  const p = Math.min(1, Math.max(0, (fadeProg - start) / decMs));
-  return 1 - (1 - decayEndRelVol()) * p;
-}
-
-// How far a live note's relative-volume fade domain has progressed in ms — the
-// attack occupies the first atkMs and the decay the decMs right after it. Like
-// the attack's progress, it follows the gesture's note time while drawing and
-// keeps moving with real time during a hold.
+// How far a live note's playhead has progressed in ms — the envelope body's
+// relative value follows this. It advances with the gesture's note time while
+// drawing and with real time during a hold, so a held note keeps playing.
 function liveFadeProgress(ds) {
   return Math.max(ds.totalMs || 0, performance.now() - (ds.startedAt || 0));
 }
 
 // Sample the gain the gesture produces at N evenly-spaced times across its
-// duration: the base volume at each point scaled by the attack and decay
-// relative volumes. For near-vertical paths (almost no time) the samples walk
-// the path by index instead so the note still sweeps its Y range in a short
-// blip.
-function buildVolumeCurve(pts, cum, totalMs, N, atkMs, decMs) {
+// body: the base volume at each point scaled by the envelope's pre-release
+// shape (one pass — the value holds once the body domain is exhausted). The
+// caller passes the body's total length (the note length, extended through the
+// early-cut marker), so a tap's components all play before the release section.
+// For near-vertical paths (almost no time) the samples walk the path by index
+// instead so the note still sweeps its Y range in a short blip, and the
+// envelope's relative value still advances over the MINIMUM note length rather
+// than stalling at the attack start.
+function buildVolumeCurve(pts, cum, totalMs, N) {
   const curve = new Float32Array(N);
+  const noteMs = Math.max(MIN_GESTURE_MS, totalMs);
   if (totalMs < MIN_GESTURE_MS) {
     for (let k = 0; k < N; k++) {
       const idx = Math.min(pts.length - 1, Math.round((k / (N - 1)) * (pts.length - 1)));
-      const t = totalMs * k / (N - 1);
-      curve[k] = baseVolumeFromY(pts[idx].y) * attackRelVol(t, atkMs) * decayRelVol(t, atkMs, decMs);
+      const t = noteMs * k / (N - 1);
+      curve[k] = baseVolumeFromY(pts[idx].y) * relValueBody(ENVELOPE, t, false);
     }
     return curve;
   }
   for (let k = 0; k < N; k++) {
     const t = (totalMs * k) / (N - 1);
-    curve[k] = baseVolumeFromY(pathStateAtTime(pts, cum, t).y) * attackRelVol(t, atkMs) * decayRelVol(t, atkMs, decMs);
+    curve[k] = baseVolumeFromY(pathStateAtTime(pts, cum, t).y) * relValueBody(ENVELOPE, t, false);
   }
   return curve;
 }
 
 // WAIT MODE: the whole note is scheduled once the gesture is released. The
-// volume profile is played with a single setValueCurveAtTime (128 samples,
-// attack fade baked in) plus a fade-out tail. The visual shows immediately;
-// the audio waits for the AudioContext to actually be running so the first
-// gesture on a fresh load isn't dropped.
+// body's volume profile is played with a single setValueCurveAtTime (128
+// samples, envelope shape baked in) plus the release section and a fade-out
+// tail. The visual shows immediately; the audio waits for the AudioContext to
+// actually be running so the first gesture on a fresh load isn't dropped.
 function schedulePathPlayback(ds) {
   initAudio();
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
-  const atkMs = gestureAttackMs();
-  const decMs = gestureDecayMs();
-  const relMs = gestureReleaseMs();
-  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, atkMs, decMs, relMs);
+  const relMs = compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
+  const cutMs = earlyCutMs();
+  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
   playbacks.push({
-    pts: tail.pts, cumTime: tail.cum, atkMs, decMs, tailEnd: tail.tailEnd,
-    totalMs: totalMs + relMs, relMs, startedAt: performance.now(), released: true,
+    pts: tail.pts, cumTime: tail.cum, tailEnd: tail.tailEnd,
+    totalMs: Math.max(totalMs, cutMs) + relMs, relMs, startedAt: performance.now(), released: true, looped: false,
     color: degreeColorForX(ds.startX),
   });
-  ensureAudioRunning(() => schedulePathAudio(ds, totalMs, atkMs, decMs, relMs), Date.now() + 30000);
+  ensureAudioRunning(() => schedulePathAudio(ds, totalMs), Date.now() + 30000);
 }
 
-// LIVE MODE: the note begins as soon as the finger moves past the tap
-// threshold. The audio clock is real time, so each newly-recorded path point
-// is scheduled at the audio time its horizontal travel implies. If the circle
-// catches the fingertip (the user is drawing slower than the playback clock),
-// later points schedule in the past and are chased with setTargetAtTime, which
-// makes the sound hold at the fingertip's volume and resume as the finger
-// moves again.
+// LIVE MODE: the note begins the moment the finger touches down (a tap is just
+// a gesture with no travel). The audio clock is real time, so each
+// newly-recorded path point is scheduled at the audio time its horizontal
+// travel implies. If the circle catches the fingertip (the user is drawing
+// slower than the playback clock), later points schedule in the past and are
+// chased with setTargetAtTime, which makes the sound hold at the fingertip's
+// volume and resume as the finger moves again.
 function startLivePathNote(ds) {
   initAudio();
   ds.started = true;   // stop repeated pointermoves from double-starting the note
   // The visual shows immediately; only the audio waits for the AudioContext
   // to be running, since a freshly-created context is still suspended on the
   // very first load and events scheduled at currentTime 0 would be missed.
-  ds.playback = { ds, pts: [], cumTime: [], atkMs: gestureAttackMs(), totalMs: 0, decMs: gestureDecayMs(), relMs: 0, startedAt: performance.now(), released: false, color: degreeColorForX(ds.startX) };
+  ds.playback = { ds, pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true, color: degreeColorForX(ds.startX) };
   syncLivePlaybackPath(ds);
   playbacks.push(ds.playback);
   ensureLiveAudio(ds, Date.now() + 30000);
@@ -148,43 +125,25 @@ function startLivePathNote(ds) {
 // The release tail is added on finger-up.
 function syncLivePlaybackPath(ds) {
   if (!ds.playback) return;
-  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, gestureAttackMs(), ds.decMs || 0, 0);
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, 0);
   ds.playback.pts = path.pts;
   ds.playback.cumTime = path.cum;
   ds.playback.tailEnd = path.tailEnd;
 }
 
 
-// End one plant gesture (one finger lifted). A tap (no real path) plays the
-// default ADSR note; a drag finishes the freehand path — waiting for the
-// gesture to complete in wait mode, or wrapping up the already-running live
-// note. Other fingers' gestures keep going.
+// End one plant gesture (one finger lifted). In live mode the note has been
+// running since the finger touched down, so just wrap it up; in wait mode the
+// whole note is scheduled now the path is complete. Other fingers' gestures
+// keep going.
 function finishPlantGesture(ds) {
   if (!ds) return;
-  // A live note is already running for this finger — wrap it up no matter where
-  // the finger ended. Otherwise a path that finishes back near its start (or a
-  // slightly-jittery tap) would be read as a tap, and its already-started
-  // oscillator would never be stopped, so the sound would keep playing forever.
   if (ds.started) {
     ds.finished = true;
     finishLivePathNote(ds);
     return;
   }
-  if (!gestureMoved(ds)) {
-    if (GESTURE.allowTapNotes) {
-      // ---- Tap: default ADSR note (taps overlap and each keeps its own HUD) ----
-      ds.attack = FIXED.attack.on ? FIXED.attack.value : TAP_ATTACK_MS;
-      const note = startGestureNote(ds.startX, ds.startY, ds.attack,
-                                    FIXED.attack.on ? FIXED.attack.vol : undefined);
-      scheduleFixedRun(note, 1);
-    } else {
-      // Tap notes disabled: a tap behaves like a ~0-length gesture — a very
-      // short note that follows the same gesture scheduling rules (volume from
-      // the tap's Y, pitch from its X, min note length, playback visualization).
-      schedulePathPlayback(ds);
-    }
-  } else if (GESTURE.waitForGesture) {
-    // ---- Gesture: freehand path (wait mode) ----
+  if (GESTURE.waitForGesture) {
     schedulePathPlayback(ds);
   }
 }
@@ -258,40 +217,33 @@ function drawPitchZones() {
 }
 
 // The gesture path is always drawn at the finger's own Y. The line's thickness
-// conveys the relative volume at that point — the percentage of the path's base
-// volume actually being output: the attack and decay fades scale the base
-// volume, and the release tail fades it down to the release's end relative
-// volume. A relative volume of 0 draws the thinnest line, 1 the fullest.
+// conveys the relative value at that point — the percentage of the path's base
+// volume actually being output: the envelope's body shape scales the base
+// volume, and the release section fades it on the tail. A relative value of 0
+// draws the thinnest line, 1 the fullest.
 const SOLID_MAX_W = 6, SOLID_MIN_W = 1;        // played solid line
 const DOTTED_MAX_W = 3.2, DOTTED_MIN_W = 0.7;  // dotted lines (live path, unplayed tail)
 
-function ownPathRelVol(tMs, atkMs, decMs) {
-  return attackRelVol(tMs, atkMs) * decayRelVol(tMs, atkMs, decMs);
-}
-
-// The release fade's relative volume: 1 right at the tail's start, falling to
-// FIXED.release.vol/100 over `relMs`.
-function releaseRelVol(progMs, relMs) {
-  if (!(relMs > 0)) return 1;
-  const p = Math.min(1, Math.max(0, progMs / relMs));
-  return 1 - (1 - (FIXED.release.vol || 0) / 100) * p;
-}
-
-// Relative volume at the path point with index `i`. Points before tailEnd are
-// the gesture's own path (attack + decay fades); points from tailEnd on are the
-// appended release tail.
-function pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs) {
-  if (i < tailEnd) return ownPathRelVol(cum[i], atkMs, decMs);
+// Relative value at the path point with index `i`. Points before tailEnd are
+// the gesture's own body (the envelope's pre-release shape, looped while the
+// finger is down); points from tailEnd on are the appended release tail.
+function pointRelVol(cum, i, tailEnd, looped) {
+  if (i < tailEnd) return relValueBody(ENVELOPE, cum[i], looped);
   const pathMs = tailEnd > 0 ? (cum[tailEnd - 1] || 0) : 0;
-  return releaseRelVol((cum[i] || 0) - pathMs, relMs);
+  // The release starts from the real-time value the body was playing when the
+  // tail was entered — e.g. the value mid-hold-loop at the lift — never a
+  // static chained start, so the drawn thickness matches the audio's level.
+  const bodyEnd = relValueBody(ENVELOPE, pathMs, looped);
+  return relValueRelease(ENVELOPE, (cum[i] || 0) - pathMs, bodyEnd);
 }
 
 // Same, for an interpolated playback state ({ idx, frac }).
-function stateRelVol(cum, st, tailEnd, atkMs, decMs, relMs) {
+function stateRelVol(cum, st, tailEnd, looped) {
   const t = cumAtState(cum, st);
-  if (st.idx < tailEnd) return ownPathRelVol(t, atkMs, decMs);
+  if (st.idx < tailEnd) return relValueBody(ENVELOPE, t, looped);
   const pathMs = tailEnd > 0 ? (cum[tailEnd - 1] || 0) : 0;
-  return releaseRelVol(t - pathMs, relMs);
+  const bodyEnd = relValueBody(ENVELOPE, pathMs, looped);
+  return relValueRelease(ENVELOPE, t - pathMs, bodyEnd);
 }
 
 // Line width for a given relative volume (0 = thinnest, 1 = fullest).
@@ -308,16 +260,16 @@ function cumAtState(cum, st) {
   return mix(cum[i] || 0, cum[j] || 0, st.frac);
 }
 
-function drawDottedPath(pts, cum, atkMs, decMs) {
+function drawDottedPath(pts, cum) {
   ctx.strokeStyle = 'rgba(46,93,52,0.55)';
   ctx.setLineDash([7, 9]);
   ctx.lineCap = 'round';
   // Each segment is stroked at the finger's own Y with a width that tracks the
-  // attack/decay relative volume at that point. lineDashOffset keeps the
+  // envelope body's relative value at that point. lineDashOffset keeps the
   // dash pattern continuous across segments.
   let len = 0;
   for (let i = 1; i < pts.length; i++) {
-    const relVol = pointRelVol(cum, i, pts.length, atkMs, decMs, 0);
+    const relVol = pointRelVol(cum, i, pts.length, true);
     ctx.lineWidth = widthForRelVol(relVol, DOTTED_MIN_W, DOTTED_MAX_W);
     ctx.lineDashOffset = -len;
     ctx.beginPath();
@@ -330,7 +282,7 @@ function drawDottedPath(pts, cum, atkMs, decMs) {
   ctx.lineDashOffset = 0;
   ctx.fillStyle = 'rgba(46,93,52,0.7)';
   ctx.beginPath();
-  ctx.arc(pts[0].x, pts[0].y, 2 + 2 * pointRelVol(cum, 0, pts.length, atkMs, decMs, 0), 0, Math.PI * 2);
+  ctx.arc(pts[0].x, pts[0].y, 2 + 2 * pointRelVol(cum, 0, pts.length, true), 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -340,7 +292,7 @@ function drawDottedPath(pts, cum, atkMs, decMs) {
 // line's thickness conveys the relative volume at that point (the attack +
 // decay fades on the own path, the release fade on the tail), so the component
 // volumes still shape the width.
-function drawGreenPath(pts, cum, st, tailEnd, atkMs, decMs, relMs, color) {
+function drawGreenPath(pts, cum, st, tailEnd, looped, color) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   const N = pts.length;
@@ -350,17 +302,17 @@ function drawGreenPath(pts, cum, st, tailEnd, atkMs, decMs, relMs, color) {
   ctx.strokeStyle = color;
   ctx.shadowColor = withAlpha(color, 0.9);
   // Each segment is stroked at the path's own Y with a width that tracks the
-  // relative volume at that point (attack + decay on the own path, the
-  // release fade on the tail).
+  // relative value at that point (the envelope body on the own path, the
+  // release section on the tail).
   for (let i = 1; i <= st.idx && i < N; i++) {
-    ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
+    ctx.lineWidth = widthForRelVol(pointRelVol(cum, i, tailEnd, looped), SOLID_MIN_W, SOLID_MAX_W);
     ctx.beginPath();
     ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
     ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
   if (st.idx < N - 1) {
-    ctx.lineWidth = widthForRelVol(stateRelVol(cum, st, tailEnd, atkMs, decMs, relMs), SOLID_MIN_W, SOLID_MAX_W);
+    ctx.lineWidth = widthForRelVol(stateRelVol(cum, st, tailEnd, looped), SOLID_MIN_W, SOLID_MAX_W);
     ctx.beginPath();
     ctx.moveTo(pts[st.idx].x, pts[st.idx].y);
     ctx.lineTo(st.x, st.y);
@@ -397,27 +349,50 @@ function drawDottedTail(pts, cum, st, tailEnd, color) {
 }
 
 // Build the playback path a gesture's note follows: the gesture's own path,
-// then an appended release tail. The attack and decay no longer add a tail —
-// they fade the relative volume in place over the path's first `attackMs` and
-// the `decayMs` right after it, so they add no time. The release tail is a
-// straight line in X=time space stretched over its duration of horizontal
-// travel; it stays at the finger's end Y and its thickness fades out instead of
+// then an appended release tail. The body components don't add time — they
+// scale the relative value in place over the path. When the gesture's body is
+// shorter than the early-cut marker (`cutMs`), a horizontal continuation at the
+// finger's end Y extends the body through the cut so the played line and its
+// thickness animation run as long as the audio body. The release tail is a
+// straight line in X=time space stretched over the release section's duration
+// of horizontal travel, starting at the cut (or the path end if there is none);
+// it stays at the finger's end Y and its thickness fades out instead of
 // dropping in Y. Returns { pts, cum, tailEnd }.
-function buildGesturePlaybackPath(pts, cum, pathMs, atkMs, decMs, relMs) {
+function buildGesturePlaybackPath(pts, cum, pathMs, relMs, cutMs) {
   if (!pts.length) return { pts, cum, tailEnd: pts.length };
   const end = pts[pts.length - 1];
   let out = pts.slice();
   let outc = cum.slice();
+  // Time-to-screen: horizontal travel, same scale as the release tail below
+  // (px per ms of note time).
+  const pxPerMs = (W / 100) * GESTURE.timeMult / TIME_PER_W;
 
   let tailEnd = out.length;
+  let tailStartX = end.x;
+  if (cutMs != null && cutMs > pathMs) {
+    // The audio body plays on through the early-cut marker even though the
+    // drawn path is already done: extend the line horizontally (X = time), at
+    // the finger's end Y, exactly like the release tail, so the playhead keeps
+    // moving and the thickness keeps animating (the envelope body's shape) for
+    // the rest of the body.
+    const contPx = (cutMs - pathMs) * pxPerMs;
+    for (let i = 0; i <= RELEASE_TAIL_STEPS; i++) {
+      const t = i / RELEASE_TAIL_STEPS;
+      out.push({ x: end.x + contPx * t, y: end.y });
+      outc.push(pathMs + (cutMs - pathMs) * t);
+    }
+    tailEnd = out.length;
+    tailStartX = end.x + contPx;
+  }
   if (relMs > 0) {
-    const px = relMs / (TIME_PER_W * GESTURE.timeMult) * W / 100;
+    const tailStartMs = cutMs != null ? Math.max(cutMs, pathMs) : pathMs;
+    const px = relMs * pxPerMs;
     // The first tail point sits exactly at the finger's end position so the
     // solid played line flows straight into the tail with no gap.
     for (let i = 0; i <= RELEASE_TAIL_STEPS; i++) {
       const t = i / RELEASE_TAIL_STEPS;
-      out.push({ x: end.x + px * t, y: end.y });
-      outc.push(pathMs + relMs * t);
+      out.push({ x: tailStartX + px * t, y: end.y });
+      outc.push(tailStartMs + relMs * t);
     }
   }
   return { pts: out, cum: outc, tailEnd };

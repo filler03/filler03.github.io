@@ -29,7 +29,7 @@ soundOverlay.addEventListener('click', dismissSoundOverlay);
 loadSavedSettings();
 syncWaitBtn();
 syncLineUI();
-syncFixedUI();
+syncEnvelopeUI();
 syncPitchZonesUI();
 
 /* ---- Pointer handling ---- */
@@ -40,7 +40,10 @@ canvas.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
   if (mode === 'plant') {
-    // Each finger starts its own independent gesture (path + note).
+    // Each finger starts its own independent gesture (path + note). The note
+    // begins the moment the finger touches down — a tap is just a very short
+    // gesture (no horizontal travel), sharing the same flow. In wait mode the
+    // sound holds until the finger lifts.
     const ds = {
       pointerId: e.pointerId,                 // lets a late audio init check if this drag is still alive
       startX: stageX(e), startY: stageY(e),   // where the gesture started (drives pitch)
@@ -51,14 +54,9 @@ canvas.addEventListener('pointerdown', e => {
       gain: null, osc: null, gainLevel: 0, lastSched: 0, cleanupTimer: null,
       lastMoveAt: 0,                          // when the finger last added a path point
       playback: null,                         // this drag's playback entry (live mode)
-      attack: null, attackRegistered: false,  // tap-default ADSR
-      decay: null, hold: null, release: null,
     };
-    if (FIXED.attack.on) ds.attack = FIXED.attack.value;
-    if (FIXED.decay.on) ds.decay = FIXED.decay.value;
-    if (FIXED.hold.on) ds.hold = FIXED.hold.value;
-    if (FIXED.release.on) ds.release = FIXED.release.value;
     dragStates.set(e.pointerId, ds);
+    if (!GESTURE.waitForGesture) startLivePathNote(ds);
   } else {
     if (pointers.size === 1) {
       navState = { startX: stageX(e), startY: stageY(e), curX: stageX(e), curY: stageY(e) };
@@ -83,7 +81,6 @@ canvas.addEventListener('pointermove', e => {
       addPathPoint(ds, x, y);
       if (ds.pts.length > before) {
         if (!GESTURE.waitForGesture) {
-          if (!ds.started && gestureMoved(ds)) startLivePathNote(ds);
           if (ds.started) scheduleLivePoint(ds);
           if (ds.playback) {
             ds.playback.totalMs = ds.totalMs;   // keep the HUD total live
@@ -186,7 +183,8 @@ function loop(now) {
     }
     for (const ds of dragStates.values()) {
       const currentPlay = playbacks.find(p => p.ds === ds);
-      if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts, ds.cumTime, gestureAttackMs(), gestureDecayMs());
+      if (!currentPlay && ds.pts.length > 1) drawDottedPath(ds.pts, ds.cumTime);
+      if (!currentPlay && ds.pts.length === 1) drawPlaybackCircle(ds.pts[0].x, ds.pts[0].y, 1, 1, degreeColorForX(ds.startX));
     }
   }
   for (let i = playbacks.length - 1; i >= 0; i--) {
@@ -203,9 +201,11 @@ function loop(now) {
     const pts = p.pts, cum = p.cumTime;
     const st = pathStateAtTime(pts, cum, done ? (cum[cum.length - 1] || 0) : elapsed);
     const tailEnd = p.tailEnd != null ? p.tailEnd : pts.length;
-    const cRelVol = stateRelVol(cum, st, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0);
+    const cRelVol = pts.length === 1 && !p.released
+      ? 1   // a stationary press has no path time: the envelope value stays at the attack start, so draw the circle at full size
+      : stateRelVol(cum, st, tailEnd, !!p.looped);
     ctx.globalAlpha = alpha;
-    drawGreenPath(pts, cum, st, tailEnd, p.atkMs || 0, p.decMs || 0, p.relMs || 0, p.color);
+    drawGreenPath(pts, cum, st, tailEnd, !!p.looped, p.color);
     drawDottedTail(pts, cum, st, tailEnd, p.color);
     drawPlaybackCircle(st.x, st.y, alpha, cRelVol, p.color);
     ctx.globalAlpha = 1;

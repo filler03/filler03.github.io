@@ -12,7 +12,6 @@ const statHud = document.getElementById('statHud');
 
 var playbacks = [];      // { pts, cumTime, totalMs, startedAt, released }
 var gestureNotes = [];   // { osc, gain, cleanupTimer } running gesture-note audio
-var tapNotes = [];       // { osc, gain, vol, level, segEnd, noteStart, totalMs, ... }
 
 var mode = 'plant';      // 'plant' | 'nav'
 var navState = null;     // single-finger pan drag in nav mode
@@ -77,8 +76,6 @@ const MIN_GESTURE_MS = 80;  // shortest note a gesture can produce (a vertical l
 const LINGER_MS = 800;      // how long a finished gesture's green path stays before fading
 const RELEASE_TAIL_STEPS = 14;  // subdivisions of the appended release tail
 const FADE_MS = 150;      // smooth fade-out to 0 when a sequence ends (no clip)
-const TAP_ATTACK_MS = 60; // quick attack for a tap with no line
-const TAP_THRESHOLD = 8;      // px of total movement before a drag counts
 const PAN_SENS = 2;          // camera movement multiplier
 const PINCH_SENS = 0.4;      // pinch zoom dampening (<1 = less sensitive)
 
@@ -103,9 +100,6 @@ function yForBaseVolume(v) {
   return H * (1 - (v - BASE_VOL_MIN) / (BASE_VOL_MAX - BASE_VOL_MIN));
 }
 
-// Which envelope phase each tap-default slot drives, for the A/D/S/R card.
-const SLOT_NAMES = ['attack', 'decay', 'hold', 'release'];
-
 // Top-left HUD emoji markers.
 const EMOJI_TIME = '⏳';   // hourglass marks time values
 const EMOJI_VOL  = '🔊';   // speaker marks volume values
@@ -113,23 +107,142 @@ const EMOJI_VOL  = '🔊';   // speaker marks volume values
 /* ---------- Defaults (persisted to localStorage) ---------- */
 const DEFAULT_GESTURE = {
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
-  timeMult: 1,             // × the base time rate (TIME_PER_W ms per % of width)
-  allowTapNotes: true,     // when off, tapping the screen plays no note
-  gestureAttack: false,    // when on, custom gestures fade their relative volume in over the tap-note attack time
-  gestureDecay: false,     // when on, custom gestures fade their relative volume out over the tap-note decay time, right after the attack
-  gestureRelease: false,   // when on, the tap-note release value is appended to custom gestures
+  timeMult: 1,             // ÷ the base time rate (TIME_PER_W ms per % of width)
 };
 var GESTURE = clone(DEFAULT_GESTURE);
 
-// FIXED presets: each component's duration (`value`, ms) and the relative
-// volume it drives the note toward (`vol`, as a % of the base volume).
-const DEFAULT_FIXED = {
-  attack:  { on: true,  value: 250,  vol: 100 },
-  decay:   { on: true,  value: 250,  vol: 60 },
-  hold:    { on: true,  value: 250,  vol: 60 },
-  release: { on: true,  value: 1200, vol: 0 },
+/* ---------- Sound envelope ----------
+   A note's value (volume today) is defined by an envelope: an ordered list of
+   components the user can name, add, delete, and reorder. Each component ramps
+   the relative value (a % of the note's base value) from startValue to
+   endValue over `duration` ms. Start values chain: every component starts where
+   the previous one ended, so only the first component has an independent start.
+   Markers on the list drive the note's lifecycle:
+   - holdStartIndex..holdEndIndex: this range loops while the finger stays down
+     (a single "sustain" component, or several).
+   - beginReleaseIndex: always holdEndIndex + 1, so the release section begins
+     immediately after the hold and no component is ever skipped.
+   - earlyCutIndex: when the finger lifts early (the gesture is still playing),
+     the body plays through this component, then jumps to the release section.
+     The last body component (the default) means the whole body plays out.
+   Playback always enters a component from the value that is currently playing —
+   a chained start, a hold-loop wrap, or a jump to the release section — so every
+   transition is a smooth continuation instead of a step to a design start. */
+const DEFAULT_ENVELOPE = {
+  components: [
+    { id: 'comp-1', name: 'Attack',  duration: 250,  startValue: 0,   endValue: 100 },
+    { id: 'comp-2', name: 'Decay',   duration: 250,  startValue: 100, endValue: 60 },
+    { id: 'comp-3', name: 'Sustain', duration: 250,  startValue: 60,  endValue: 60 },
+    { id: 'comp-4', name: 'Release', duration: 1200, startValue: 60,  endValue: 0 },
+  ],
+  beginReleaseIndex: 3,
+  holdStartIndex: 2,
+  holdEndIndex: 2,
+  earlyCutIndex: 2,
 };
-var FIXED = clone(DEFAULT_FIXED);
+var ENVELOPE = clone(DEFAULT_ENVELOPE);
+
+// Chain start values: each component after the first starts where the previous
+// one ended, so only the first component holds an independent start value.
+function chainStartValues(env) {
+  for (let i = 1; i < env.components.length; i++) {
+    env.components[i].startValue = env.components[i - 1].endValue;
+  }
+}
+
+/* ---- Envelope math (pure) ----
+   Relative component value (0..1) from a 0..100 setting. */
+function compValue(c, v) {
+  return Math.max(0, Math.min(100, v == null ? 100 : v)) / 100;
+}
+
+// Relative value through an ordered component list at time t. Each component
+// ramps from the value that was current when it was entered to its own end
+// value, so a transition into a component — moving to the next one, wrapping a
+// hold loop, or jumping to the release section — always starts from whatever
+// the sound is currently playing, never a design start. `seed` is the value
+// current at t = 0 (defaults to the first component's start value).
+function relValueAtList(comps, t, seed) {
+  if (!comps.length) return 1;
+  let cur = seed == null ? compValue(comps[0], comps[0].startValue) : seed;
+  let acc = 0;
+  for (const c of comps) {
+    const dur = Math.max(0, c.duration);
+    const end = compValue(c, c.endValue);
+    if (t < acc + dur) {
+      const p = dur > 0 ? (t - acc) / dur : 1;
+      return cur + (end - cur) * p;
+    }
+    cur = end;
+    acc += dur;
+  }
+  return cur;
+}
+
+function compsMs(comps) {
+  return comps.reduce((s, c) => s + c.duration, 0);
+}
+function envelopeMs(env) {
+  return compsMs(env.components);
+}
+
+// Start time of the hold loop window and the release section.
+function holdStartTime(env) {
+  return compsMs(env.components.slice(0, env.holdStartIndex));
+}
+function holdEndTime(env) {
+  return compsMs(env.components.slice(0, env.holdEndIndex + 1));
+}
+
+// Relative value over the note's body (everything before the release). With
+// `looped`, once the playhead passes the hold window it loops back into it; the
+// loop restarts from whatever value was playing at the loop's end (not the
+// hold's design start), so the wrap is a smooth continuation. Otherwise the
+// value holds at the window's end for the rest of the body. With no pre-release
+// section the body is silent.
+function relValueBody(env, t, looped) {
+  if (env.beginReleaseIndex <= 0) return 0;
+  const hs = holdStartTime(env), he = holdEndTime(env);
+  if (looped && he > hs && t >= he) {
+    const hold = env.components.slice(env.holdStartIndex, env.holdEndIndex + 1);
+    const loopMs = he - hs;
+    const seed0 = env.holdStartIndex > 0
+      ? compValue(env.components[env.holdStartIndex - 1], env.components[env.holdStartIndex - 1].endValue)
+      : compValue(env.components[0], env.components[0].startValue);
+    const loopEnd = relValueAtList(hold, loopMs, seed0);
+    return relValueAtList(hold, (t - hs) % loopMs, loopEnd);
+  }
+  return relValueAtList(env.components.slice(0, env.beginReleaseIndex), t);
+}
+
+// Relative value through the release section (components at/after beginRelease),
+// as time measured from the release start. The first card starts from whatever
+// value is playing when the release begins — `seed`, the real-time value at the
+// body's end (never a static chained start) — and the rest chain onto it.
+function relValueRelease(env, t, seed) {
+  return relValueAtList(env.components.slice(env.beginReleaseIndex), t, seed);
+}
+
+// Sample an ordered component list into N relative values.
+function sampleComps(comps, N, seed) {
+  const total = compsMs(comps);
+  const curve = new Float32Array(Math.max(2, N));
+  for (let k = 0; k < curve.length; k++) {
+    const t = total * k / (curve.length - 1);
+    curve[k] = relValueAtList(comps, t, seed);
+  }
+  return { curve, totalMs: total };
+}
+
+// Sample the looping body shape over a real-time window (used while holding).
+function sampleRelBody(env, from, to, N) {
+  const curve = new Float32Array(Math.max(2, N));
+  for (let k = 0; k < curve.length; k++) {
+    const t = from + (to - from) * k / (curve.length - 1);
+    curve[k] = relValueBody(env, t, true);
+  }
+  return curve;
+}
 
 // Per-level chime settings: key/root note (pitch), wave type, and ADSR
 // envelope. The pitch is derived from the gesture's position (bottom = key
@@ -144,12 +257,12 @@ var CHIME_SETTINGS = clone(DEFAULT_CHIME);
 // Pitch color zones: the range of scale degrees shown as faint color bands on
 // screen (screen X = pitch). Octaves are relative to the key note's octave —
 // 0 is the key octave (the "middle ground"), -1/-2 below, +1/+2 above. The
-// default spans two octaves centered on the key octave.
+// default spans the key octave and the one above it.
 const DEFAULT_PITCH_ZONES = {
   show: true,           // render the on-screen color bands
   labelMode: 'note',    // band labels: 'note' (note names) or 'degree' (degree numbers)
-  lowDegree: 1, lowOctave: -1,   // lowest pitch (degree + octave)
-  highDegree: 7, highOctave: 1,  // highest pitch
+  lowDegree: 1, lowOctave: 0,   // lowest pitch (degree + octave)
+  highDegree: 5, highOctave: 1,  // highest pitch
 };
 var PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
 

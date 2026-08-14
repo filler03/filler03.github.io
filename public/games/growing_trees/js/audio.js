@@ -1,6 +1,6 @@
 /* ============================================================
    audio.js — synthesized sound: engine, note scheduling, gesture
-   audio (live + wait modes), tap-note ADSR, wave blending.
+   audio (live + wait modes), wave blending.
    ============================================================ */
 
 const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
@@ -221,145 +221,17 @@ function chime(level, overrides) {
   }, (tEnd - t0 + 0.5) * 1000);
 }
 
-/* ---- Gesture relative-volume helpers (attack / decay / release) ---- */
-function gestureAttackMs() {
-  // ms over which a custom gesture's relative volume fades in when "Add to gestures" is on
-  return GESTURE.gestureAttack ? (FIXED.attack.value || 0) : 0;
-}
-
-function gestureDecayMs() {
-  // ms over which a custom gesture's relative volume fades out, right after the
-  // attack, when "Add to gestures" is on
-  return GESTURE.gestureDecay ? (FIXED.decay.value || 0) : 0;
-}
-
-function decayEndRelVol() {
-  // relative volume the decay fades down to — the fraction of the base volume
-  // left when the decay finishes (FIXED.decay.vol, 0..1)
-  return Math.max(0, Math.min(1, (FIXED.decay.vol || 0) / 100));
-}
-
-function gestureReleaseMs() {
-  // ms of release appended to a custom gesture's note when "Add to gestures" is on
-  return GESTURE.gestureRelease ? (FIXED.release.value || 0) : 0;
-}
-
-/* ---- Tap notes: a default ADSR note per tap. Taps overlap — each tap gets
-   its own oscillator + gain node, so several can ring at once. Uses the FIXED
-   presets for attack/decay/hold/release and the touch's screen Y for volume. */
-function startGestureNote(sx, sy, atkMs, volPct) {
-  initAudio();
-  resumeAudio();
-  if (!audioCtx || !masterGain) return;
-  const s = CHIME_SETTINGS.start;
-  const baseVol = baseVolumeFromY(sy);
-  const atk = Math.max(0.005, (atkMs || TAP_ATTACK_MS) / 1000);
-  const peak = baseVol * (volPct != null ? Math.max(0, Math.min(100, volPct)) / 100 : 1);
-  const t0 = audioCtx.currentTime;
-  const gain = audioCtx.createGain();
-  const g = gain.gain;
-  // The note begins with the attack ramping from silence up to its peak level.
-  g.setValueAtTime(0, t0);
-  g.linearRampToValueAtTime(peak, t0 + atk);
-  gain.connect(masterGain);
-
-  const osc = audioCtx.createOscillator();
-  setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(pitchFor(sx, sy));
-  osc.connect(gain);
-  osc.start(t0);
-
-  const atkDurMs = Math.round(atk * 1000);
-  const note = {
-    osc, gain, baseVol, level: peak, segEnd: t0 + atk,
-    scheduledSlots: [true, false, false, false],
-    slots: [atkDurMs, null, null, null],   // per-phase durations, for the A/D/S/R card
-    cleanupTimer: null,
-    releaseScheduled: false,
-    noteStart: performance.now(),
-    totalMs: atkDurMs,
-  };
-  tapNotes.push(note);
-  return note;
-}
-
-// Fixed segments: a generic ramp to a target level, a hold, and a fade-out,
-// all chained onto the running note.
-function scheduleRampTo(note, target, durMs) {
-  if (!note) return;
-  const now = audioCtx.currentTime;
-  const g = note.gain.gain;
-  const startTime = Math.max(now, note.segEnd || now);
-  const startLevel = note.level;
-  const end = startTime + Math.max(0.005, durMs / 1000);
-  g.setValueAtTime(startLevel, startTime);
-  g.linearRampToValueAtTime(target, end);
-  note.level = target;
-  note.segEnd = end;
-}
-
-// Schedule the fixed tap-default slots (decay, hold, release) onto a note.
-function scheduleFixedRun(note, fromSlot) {
-  if (!note) return;
-  for (let slot = fromSlot; slot < 4; slot++) {
-    if (note.scheduledSlots[slot]) continue;
-    if (!FIXED[SLOT_NAMES[slot]].on) return;
-    scheduleFixedSlot(note, slot);
-    note.scheduledSlots[slot] = true;
-  }
-}
-
-function scheduleFixedSlot(note, slot) {
-  const name = SLOT_NAMES[slot];
-  const f = FIXED[name];
-  const target = note.baseVol * (f.vol / 100);   // base volume × the component's relative volume
-  note.slots[slot] = f.value;             // per-phase duration, for the A/D/S/R card
-  note.totalMs += f.value;                // card stays up for the whole envelope
-  if (name === 'decay') {
-    scheduleRampTo(note, target, f.value);
-  } else if (name === 'hold') {
-    scheduleRampTo(note, target, f.value);
-  } else if (name === 'release') {
-    scheduleRampTo(note, target, f.value);
-    fadeOutAndStop(note, note.segEnd);
-  }
-}
-
-// Always end on a smooth fade to 0 so the note never clips when the sequence
-// finishes.
-function fadeOutAndStop(note, fromTime) {
-  if (!note) return;
-  const g = note.gain.gain;
-  const end = fromTime + FADE_MS / 1000;
-  g.linearRampToValueAtTime(0, end);
-  scheduleStop(note, end);
-}
-
-function scheduleStop(note, end) {
-  if (!note) return;
-  note.releaseScheduled = true;
-  const { osc, gain } = note;
-  try { osc.stop(end + 0.05); } catch (e) {}
-  clearTimeout(note.cleanupTimer);
-  note.cleanupTimer = setTimeout(() => {
-    try { osc.disconnect(); gain.disconnect(); } catch (e) {}
-  }, (end - audioCtx.currentTime + 0.5) * 1000);
-}
-
-// Tap finished (finger lift): the release slot normally schedules its own
-// stop; if it never did, fade from the current level.
-function endGestureNote(note) {
-  if (!note) return;
-  if (!note.releaseScheduled) {
-    const now = audioCtx.currentTime;
-    const segEnd = note.segEnd && note.segEnd > now ? note.segEnd : now;
-    note.gain.setValueAtTime(note.level, segEnd);
-    fadeOutAndStop(note, segEnd);
-  }
-}
-
-// Cancel everything (used on blur / cancel / clear): quickly
-// fade every running note out and drop all playback animations.
+/* ---- Gesture note audio ----
+   Every touch is a gesture note. A tap is just a very short gesture (near-zero
+   horizontal travel): in live mode the note starts the moment the finger
+   touches down, in wait mode it is scheduled once the finger lifts.
+   WAIT MODE (schedulePathAudio): the whole note is played with a single
+   setValueCurveAtTime over 128 volume samples (attack fade baked in) plus a
+   fade-out tail.
+   LIVE MODE (initLivePathAudio + scheduleLivePoint + tickLiveHold +
+   finishLivePathNote): the note begins on touch down; each newly-recorded
+   point is scheduled at the audio time its horizontal travel implies, with
+   setTargetAtTime catch-up when the circle catches the fingertip. */
 function stopGestureNote() {
   for (const n of gestureNotes) {
     try {
@@ -376,19 +248,7 @@ function stopGestureNote() {
       setTimeout(() => { try { n.osc.disconnect(); if (node && node.disconnect) node.disconnect(); } catch (e) {} }, 200);
     } catch (e) {}
   }
-  for (const note of tapNotes) {
-    try {
-      const now = audioCtx.currentTime;
-      clearTimeout(note.cleanupTimer);
-      note.gain.cancelScheduledValues(now);
-      note.gain.setValueAtTime(note.gain.gain.value, now);
-      note.gain.linearRampToValueAtTime(0, now + 0.03);
-      note.osc.stop(now + 0.05);
-      setTimeout(() => { try { note.osc.disconnect(); note.gain.disconnect(); } catch (e) {} }, 200);
-    } catch (e) {}
-  }
   gestureNotes = [];
-  tapNotes = [];
   playbacks = [];
 }
 
@@ -397,29 +257,52 @@ function stopGestureNote() {
    setValueCurveAtTime over 128 volume samples (attack fade baked in) plus a
    fade-out tail.
    LIVE MODE (initLivePathAudio + scheduleLivePoint + tickLiveHold +
-   finishLivePathNote): the note begins as soon as the finger moves past the
-   tap threshold; each newly-recorded point is scheduled at the audio time its
-   horizontal travel implies, with setTargetAtTime catch-up when the circle
-   catches the fingertip. */
+   finishLivePathNote): the note begins the moment the finger touches down; each
+   newly-recorded point is scheduled at the audio time its horizontal travel
+   implies, with setTargetAtTime catch-up when the circle catches the fingertip. */
 
-function schedulePathAudio(ds, totalMs, atkMs, decMs, relMs) {
+function schedulePathAudio(ds, totalMs) {
   if (!audioCtx || !masterGain) return;
-  const curve = buildVolumeCurve(ds.pts, ds.cumTime, ds.totalMs, 128, atkMs, decMs);
   const s = CHIME_SETTINGS.start;
   const t0 = audioCtx.currentTime;
-  const pathDur = totalMs / 1000;
+  // The body always plays through the early-cut marker: a tap or short note is
+  // extended so every component up to the cut point plays before the release
+  // section starts.
+  const bodyDurMs = Math.max(totalMs, earlyCutMs());
+  const pathDur = bodyDurMs / 1000;
 
+  // Body: the base volume along the path × the envelope's pre-release shape
+  // (one pass — once the body domain is exhausted the value holds at the hold
+  // window's end), scheduled as a sampled curve.
+  const body = buildVolumeCurve(ds.pts, ds.cumTime, bodyDurMs, 128);
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const curveStart = t0 + 0.002;   // tiny offset: no automation overlap with the setValue below
-  g.setValueAtTime(curve[0], t0);
-  g.setValueCurveAtTime(curve, curveStart, pathDur);
+  g.setValueAtTime(body[0], t0);
+  g.setValueCurveAtTime(body, curveStart, pathDur);
   const curveEnd = curveStart + pathDur;
-  g.setValueAtTime(curve[curve.length - 1], curveEnd);
+
+  // Release tail: the release section, scaled to the path-end base volume. It
+  // continues from whatever the body ended at (a tap's body ends mid-attack),
+  // not the release's design start, so the transition is a smooth continuation
+  // with no jump. The seed is the body's end as a fraction of the end base.
+  const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
+  const relMs = compsMs(relComps);
   if (relMs > 0) {
-    g.linearRampToValueAtTime(curve[curve.length - 1] * (FIXED.release.vol / 100), curveEnd + relMs / 1000);
+    const endBase = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
+    const bodyEnd = body[body.length - 1];
+    const relSeed = endBase > 0.0001 ? Math.max(0, Math.min(1, bodyEnd / endBase)) : 0;
+    const tail = new Float32Array(64);
+    for (let k = 0; k < tail.length; k++) {
+      const t = relMs * k / (tail.length - 1);
+      tail[k] = endBase * relValueAtList(relComps, t, relSeed);
+    }
+    const relStart = curveEnd + 0.002;
+    g.setValueAtTime(tail[0], curveEnd);
+    g.setValueCurveAtTime(tail, relStart, relMs / 1000);
   }
-  g.linearRampToValueAtTime(0, curveEnd + relMs / 1000 + FADE_MS / 1000);
+  const tEnd = curveEnd + relMs / 1000 + FADE_MS / 1000;
+  g.linearRampToValueAtTime(0, tEnd);
   gain.connect(masterGain);
 
   const osc = audioCtx.createOscillator();
@@ -427,9 +310,8 @@ function schedulePathAudio(ds, totalMs, atkMs, decMs, relMs) {
   osc.frequency.value = noteToFreq(pitchFor(ds.startX, ds.startY));
   osc.connect(gain);
   osc.start(t0);
-  const tEnd = curveEnd + relMs / 1000 + FADE_MS / 1000;
   osc.stop(tEnd + 0.05);
-  const note = { osc, gain, cleanupTimer: null };
+  const note = { osc, gain, gainParam: g, cleanupTimer: null };
   gestureNotes.push(note);
   setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} unregisterNote(note); }, (tEnd - t0 + 0.5) * 1000);
 }
@@ -463,10 +345,7 @@ function initLivePathAudio(ds) {
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const baseVol0 = baseVolumeFromY(ds.pts[0].y);
-  const atkMs = gestureAttackMs();
-  // With an attack window the note starts silent and each scheduled point
-  // ramps to its base volume scaled by the relative volume for that moment.
-  g.setValueAtTime(atkMs > 0 ? 0 : baseVol0, ctx0);
+  g.setValueAtTime(baseVol0 * relValueBody(ENVELOPE, 0, true), ctx0);
   gain.connect(masterGain);
   const osc = audioCtx.createOscillator();
   setOscWave(osc, s);
@@ -478,9 +357,7 @@ function initLivePathAudio(ds) {
   ds.gain = g;          // the AudioParam (gain.gain) — scheduling/ramps go through this
   ds.gainNode = gain;   // the GainNode itself — used for cleanup/disconnect
   ds.osc = osc;
-  ds.gainLevel = atkMs > 0 ? 0 : baseVol0;
-  ds.atkMs = atkMs;
-  ds.decMs = gestureDecayMs();
+  ds.gainLevel = baseVol0 * relValueBody(ENVELOPE, 0, true);
   ds.lastSched = ctx0;
   ds.cleanupTimer = null;
   gestureNotes.push(ds);
@@ -492,14 +369,11 @@ function initLivePathAudio(ds) {
 function scheduleLivePoint(ds) {
   if (!ds.gain) return;
   const pt = ds.pts[ds.pts.length - 1];
-  // The relative volume is applied in place: the base volume is scaled by the
-  // attack fade over the first atkMs and by the decay fade over the decMs right
-  // after it. Each point is scaled by the relative volume at the moment it is
-  // drawn; the progress never steps backward when a held gesture resumes drawing.
+  // The relative value is the envelope's body shape at this moment (looped so
+  // a held note cycles the hold range). The progress never steps backward when
+  // a held gesture resumes drawing.
   const prog = liveFadeProgress(ds);
-  const target = baseVolumeFromY(pt.y)
-    * attackRelVol(prog, ds.atkMs || 0)
-    * decayRelVol(prog, ds.atkMs || 0, ds.decMs || 0);
+  const target = baseVolumeFromY(pt.y) * relValueBody(ENVELOPE, prog, true);
   const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
   const now = audioCtx.currentTime;
   if (targetT > now + 0.005) {
@@ -514,70 +388,141 @@ function scheduleLivePoint(ds) {
 }
 
 // A held finger adds no new path points, so no volume automation is scheduled
-// and the attack fade would stall mid-fade. Each frame, while a live note is
-// inside its attack window and the finger isn't drawing, schedule the gain
-// toward the fingertip's level along the real-time fade curve so the relative
-// volume keeps rising during a hold. The decay fade works the same way right
-// after the attack: once the fade progress passes atkMs, the held note fades
-// down toward the decay's end relative volume.
+// and the envelope shape would stall. Each frame, while a live note is idle,
+// schedule the body shape (looped through the hold range) ahead over a short
+// horizon so the relative value keeps moving during a hold.
 function tickLiveHold(ds) {
   if (!ds.gain || ds.finished) return;
-  const atkMs = ds.atkMs || 0, decMs = ds.decMs || 0;
-  if (!(atkMs > 0) && !(decMs > 0)) return;
+  if (ENVELOPE.beginReleaseIndex <= 0) return;
   if (performance.now() - (ds.lastMoveAt || 0) < 50) return;   // finger is still drawing
   const at = audioCtx.currentTime;
   if (at < ds.lastSched - 0.005) return;                       // scheduled automation is still ahead
-  const prog = liveFadeProgress(ds);
-  const decEnd = (atkMs > 0 ? atkMs : 0) + decMs;
-  if (prog >= atkMs && prog >= decEnd) return;                 // both fades complete
+  const hs = holdStartTime(ENVELOPE), he = holdEndTime(ENVELOPE);
+  const schedProg = (ds.lastSched - ds.ctx0) * 1000;
+  if (schedProg >= he && !(he > hs)) return;                   // body done, no loop to cycle
   const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
-  const horizon = 0.04;                                        // seconds of fade scheduled per frame
-  const progF = prog + horizon * 1000;
-  const target = baseVol * attackRelVol(progF, atkMs) * decayRelVol(progF, atkMs, decMs);
+  const horizon = Math.max(0.06, Math.min(0.3, (he > hs ? he - hs : 200) / 1000));   // seconds of shape scheduled per frame
+  const curve = sampleRelBody(ENVELOPE, schedProg, schedProg + horizon * 1000, 24);
+  const scaled = curve.map(v => baseVol * v);
   ds.gain.cancelScheduledValues(at);
-  ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), at);
-  ds.gain.linearRampToValueAtTime(target, at + horizon);
-  ds.lastSched = at + horizon;
-  ds.gainLevel = target;
+  ds.gain.setValueAtTime(Math.max(1e-4, scaled[0]), at);
+  ds.gain.setValueCurveAtTime(scaled, at + 0.001, horizon);
+  ds.lastSched = at + 0.001 + horizon;
+  ds.gainLevel = scaled[scaled.length - 1];
+}
+
+// Where an early release jumps to the release section: the playback time (ms)
+// through the body at the early-cut marker. Clamped so the cut never lands past
+// the end of the body's last component (safe: it can't exceed holdEndTime).
+function earlyCutMs() {
+  const env = ENVELOPE;
+  const maxIdx = Math.max(0, env.beginReleaseIndex - 1);
+  const idx = Math.max(0, Math.min(maxIdx, env.earlyCutIndex == null ? maxIdx : env.earlyCutIndex));
+  return compsMs(env.components.slice(0, idx + 1));
 }
 
 function finishLivePathNote(ds) {
   if (!ds.gain || !ds.playback) return;
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
-  const relMs = gestureReleaseMs();
-  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, ds.atkMs || gestureAttackMs(), ds.decMs || gestureDecayMs(), relMs);
+  const cutMs = earlyCutMs();
+  const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
+  const relMs = compsMs(relComps);
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
+  // Anchor the visual timeline at the release moment: keep the circle where it
+  // is (its path-time playhead) but make the release tail run from now. Without
+  // this a stationary press held past the note length would already be "done"
+  // when the finger lifts, so its tail would never be drawn.
+  const pb = ds.playback;
+  const playheadMs = pb.pts && pb.pts.length
+    ? cumAtState(pb.cumTime, pathStateAtTime(pb.pts, pb.cumTime, performance.now() - pb.startedAt))
+    : 0;
   ds.playback.released = true;
-  ds.playback.totalMs = totalMs + relMs;
+  ds.playback.totalMs = Math.max(totalMs, cutMs) + relMs;
   ds.playback.relMs = relMs;
   ds.playback.pts = path.pts;
   ds.playback.cumTime = path.cum;
   ds.playback.tailEnd = path.tailEnd;
+  ds.playback.startedAt = performance.now() - playheadMs;
   const now = audioCtx.currentTime;
-  const endT = ds.ctx0 + ds.totalMs / 1000;   // when the path's playback finishes
-  if (performance.now() - ds.startedAt >= ds.totalMs) {
-    if (relMs > 0) {
-      const held = ds.gain.value;
+  const elapsed = performance.now() - ds.startedAt;
+  if (elapsed >= ds.totalMs) {
+    // The circle already caught the fingertip (the drawn body finished). If the
+    // envelope hasn't played through the early-cut marker yet — a quick tap or
+    // a lift inside the body — extend the body through the cut point so the
+    // components up to it all play before the release section.
+    const prog = liveFadeProgress(ds);
+    if (prog < cutMs) {
+      const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
+      const N = 32;
+      const curve = new Float32Array(N);
+      curve[0] = Math.max(1e-4, ds.gain.value);
+      for (let k = 1; k < N; k++) {
+        const t = prog + (cutMs - prog) * k / (N - 1);
+        curve[k] = baseVol * relValueBody(ENVELOPE, t, true);
+      }
       ds.gain.cancelScheduledValues(now);
-      ds.gain.setValueAtTime(held, now);
-      ds.gain.linearRampToValueAtTime(held * (FIXED.release.vol / 100), now + relMs / 1000);
-      ds.gain.linearRampToValueAtTime(0, now + relMs / 1000 + FADE_MS / 1000);
-      try { ds.osc.stop(now + relMs / 1000 + FADE_MS / 1000 + 0.05); } catch (e) {}
-      scheduleLiveCleanup(ds, now + relMs / 1000 + FADE_MS / 1000);
+      ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), now);
+      ds.gain.setValueCurveAtTime(curve, now + 0.002, (cutMs - prog) / 1000);
+      scheduleReleaseTail(ds, curve[curve.length - 1], now + 0.002 + (cutMs - prog) / 1000);
     } else {
-      // The circle already caught the fingertip: fade out from the held level.
-      ds.gain.setTargetAtTime(0, now, 0.03);
-      try { ds.osc.stop(now + 0.4); } catch (e) {}
-      scheduleLiveCleanup(ds, now + 0.6);
+      // The body already played through the cut: play the release section from
+      // the held level, then fade.
+      scheduleReleaseTail(ds, ds.gain.value, now);
     }
   } else {
-    // Playback is still behind the fingertip: finish the path, then fade.
-    const startT = Math.max(now, endT, ds.ctx0);
+    // Playback is still behind the fingertip: the cut-and-release must not fire
+    // yet — there is still drawn line to play. It only fires once the line runs
+    // out before the cut marker; then the remainder is added to the line and
+    // the release section follows.
+    if (ds.totalMs < cutMs) {
+      // The line will run out before the cut: extend the body through the cut
+      // point (the remainder), then release from the level at the cut.
+      const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
+      const p0 = ds.totalMs;
+      const t0 = Math.max(now, ds.ctx0 + p0 / 1000);
+      const N = 32;
+      const curve = new Float32Array(N);
+      curve[0] = Math.max(1e-4, ds.gainLevel || ds.gain.value);
+      for (let k = 1; k < N; k++) {
+        const t = p0 + (cutMs - p0) * k / (N - 1);
+        curve[k] = baseVol * relValueBody(ENVELOPE, t, true);
+      }
+      ds.gain.setValueCurveAtTime(curve, t0 + 0.002, (cutMs - p0) / 1000);
+      scheduleReleaseTail(ds, curve[curve.length - 1], t0 + 0.002 + (cutMs - p0) / 1000);
+    } else {
+      // The line already reaches the cut: no cut needed — let the whole drawn
+      // line play out to its end, then start the release section where the
+      // body runs out so every drawn point gets used.
+      const endT = Math.max(now, ds.ctx0 + ds.totalMs / 1000);
+      scheduleReleaseTail(ds, ds.gainLevel, endT);
+    }
+  }
+}
+
+// On finger-up, jump from the held body level into the release section, then
+// fade out. The release section starts at `startLevel` (the value currently
+// playing) and each release card ramps from whatever value it's entered at to
+// its own end value, so the jump is a smooth continuation with no click. Any
+// pending body/hold automation is cancelled at `startT`.
+function scheduleReleaseTail(ds, startLevel, startT) {
+  const g = ds.gain;
+  const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
+  const relMs = compsMs(relComps);
+  const now = audioCtx.currentTime;
+  g.cancelScheduledValues(Math.max(now, startT));
+  g.setValueAtTime(Math.max(1e-4, startLevel), startT);
+  if (relMs > 0) {
+    const rel = sampleComps(relComps, 32, startLevel);
+    g.setValueCurveAtTime(rel.curve, startT + 0.002, relMs / 1000);
     const stopT = startT + relMs / 1000 + FADE_MS / 1000;
-    ds.gain.setValueAtTime(ds.gainLevel, startT);
-    if (relMs > 0) ds.gain.linearRampToValueAtTime(ds.gainLevel * (FIXED.release.vol / 100), startT + relMs / 1000);
-    ds.gain.linearRampToValueAtTime(0, stopT);
+    g.linearRampToValueAtTime(0, stopT);
     try { ds.osc.stop(stopT + 0.05); } catch (e) {}
-    scheduleLiveCleanup(ds, stopT + 0.5);
+    scheduleLiveCleanup(ds, stopT);
+  } else {
+    const stopT = startT + FADE_MS / 1000;
+    g.linearRampToValueAtTime(0, stopT);
+    try { ds.osc.stop(stopT + 0.05); } catch (e) {}
+    scheduleLiveCleanup(ds, stopT);
   }
 }
 
