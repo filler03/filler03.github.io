@@ -58,15 +58,20 @@ function liveFadeProgress(ds) {
 
 // Sample the gain the gesture produces at N evenly-spaced times across its
 // body: the base volume at each point scaled by the envelope's pre-release
-// shape (one pass — the value holds once the body domain is exhausted). For
-// near-vertical paths (almost no time) the samples walk the path by index
-// instead so the note still sweeps its Y range in a short blip.
+// shape (one pass — the value holds once the body domain is exhausted). The
+// caller passes the body's total length (the note length, extended through the
+// early-cut marker), so a tap's components all play before the release section.
+// For near-vertical paths (almost no time) the samples walk the path by index
+// instead so the note still sweeps its Y range in a short blip, and the
+// envelope's relative value still advances over the MINIMUM note length rather
+// than stalling at the attack start.
 function buildVolumeCurve(pts, cum, totalMs, N) {
   const curve = new Float32Array(N);
+  const noteMs = Math.max(MIN_GESTURE_MS, totalMs);
   if (totalMs < MIN_GESTURE_MS) {
     for (let k = 0; k < N; k++) {
       const idx = Math.min(pts.length - 1, Math.round((k / (N - 1)) * (pts.length - 1)));
-      const t = totalMs * k / (N - 1);
+      const t = noteMs * k / (N - 1);
       curve[k] = baseVolumeFromY(pts[idx].y) * relValueBody(ENVELOPE, t, false);
     }
     return curve;
@@ -87,10 +92,11 @@ function schedulePathPlayback(ds) {
   initAudio();
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
   const relMs = compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
-  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs);
+  const cutMs = earlyCutMs();
+  const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
   playbacks.push({
     pts: tail.pts, cumTime: tail.cum, tailEnd: tail.tailEnd,
-    totalMs: totalMs + relMs, relMs, startedAt: performance.now(), released: true, looped: false,
+    totalMs: Math.max(totalMs, cutMs) + relMs, relMs, startedAt: performance.now(), released: true, looped: false,
     color: degreeColorForX(ds.startX),
   });
   ensureAudioRunning(() => schedulePathAudio(ds, totalMs), Date.now() + 30000);
@@ -224,7 +230,11 @@ const DOTTED_MAX_W = 3.2, DOTTED_MIN_W = 0.7;  // dotted lines (live path, unpla
 function pointRelVol(cum, i, tailEnd, looped) {
   if (i < tailEnd) return relValueBody(ENVELOPE, cum[i], looped);
   const pathMs = tailEnd > 0 ? (cum[tailEnd - 1] || 0) : 0;
-  return relValueRelease(ENVELOPE, (cum[i] || 0) - pathMs);
+  // The release starts from the real-time value the body was playing when the
+  // tail was entered — e.g. the value mid-hold-loop at the lift — never a
+  // static chained start, so the drawn thickness matches the audio's level.
+  const bodyEnd = relValueBody(ENVELOPE, pathMs, looped);
+  return relValueRelease(ENVELOPE, (cum[i] || 0) - pathMs, bodyEnd);
 }
 
 // Same, for an interpolated playback state ({ idx, frac }).
@@ -232,7 +242,8 @@ function stateRelVol(cum, st, tailEnd, looped) {
   const t = cumAtState(cum, st);
   if (st.idx < tailEnd) return relValueBody(ENVELOPE, t, looped);
   const pathMs = tailEnd > 0 ? (cum[tailEnd - 1] || 0) : 0;
-  return relValueRelease(ENVELOPE, t - pathMs);
+  const bodyEnd = relValueBody(ENVELOPE, pathMs, looped);
+  return relValueRelease(ENVELOPE, t - pathMs, bodyEnd);
 }
 
 // Line width for a given relative volume (0 = thinnest, 1 = fullest).
@@ -339,25 +350,49 @@ function drawDottedTail(pts, cum, st, tailEnd, color) {
 
 // Build the playback path a gesture's note follows: the gesture's own path,
 // then an appended release tail. The body components don't add time — they
-// scale the relative value in place over the path. The release tail is a
+// scale the relative value in place over the path. When the gesture's body is
+// shorter than the early-cut marker (`cutMs`), a horizontal continuation at the
+// finger's end Y extends the body through the cut so the played line and its
+// thickness animation run as long as the audio body. The release tail is a
 // straight line in X=time space stretched over the release section's duration
-// of horizontal travel; it stays at the finger's end Y and its thickness fades
-// out instead of dropping in Y. Returns { pts, cum, tailEnd }.
-function buildGesturePlaybackPath(pts, cum, pathMs, relMs) {
+// of horizontal travel, starting at the cut (or the path end if there is none);
+// it stays at the finger's end Y and its thickness fades out instead of
+// dropping in Y. Returns { pts, cum, tailEnd }.
+function buildGesturePlaybackPath(pts, cum, pathMs, relMs, cutMs) {
   if (!pts.length) return { pts, cum, tailEnd: pts.length };
   const end = pts[pts.length - 1];
   let out = pts.slice();
   let outc = cum.slice();
+  // Time-to-screen: horizontal travel, same scale as the release tail below
+  // (px per ms of note time).
+  const pxPerMs = (W / 100) / (TIME_PER_W * GESTURE.timeMult);
 
   let tailEnd = out.length;
+  let tailStartX = end.x;
+  if (cutMs != null && cutMs > pathMs) {
+    // The audio body plays on through the early-cut marker even though the
+    // drawn path is already done: extend the line horizontally (X = time), at
+    // the finger's end Y, exactly like the release tail, so the playhead keeps
+    // moving and the thickness keeps animating (the envelope body's shape) for
+    // the rest of the body.
+    const contPx = (cutMs - pathMs) * pxPerMs;
+    for (let i = 0; i <= RELEASE_TAIL_STEPS; i++) {
+      const t = i / RELEASE_TAIL_STEPS;
+      out.push({ x: end.x + contPx * t, y: end.y });
+      outc.push(pathMs + (cutMs - pathMs) * t);
+    }
+    tailEnd = out.length;
+    tailStartX = end.x + contPx;
+  }
   if (relMs > 0) {
-    const px = relMs / (TIME_PER_W * GESTURE.timeMult) * W / 100;
+    const tailStartMs = cutMs != null ? Math.max(cutMs, pathMs) : pathMs;
+    const px = relMs * pxPerMs;
     // The first tail point sits exactly at the finger's end position so the
     // solid played line flows straight into the tail with no gap.
     for (let i = 0; i <= RELEASE_TAIL_STEPS; i++) {
       const t = i / RELEASE_TAIL_STEPS;
-      out.push({ x: end.x + px * t, y: end.y });
-      outc.push(pathMs + relMs * t);
+      out.push({ x: tailStartX + px * t, y: end.y });
+      outc.push(tailStartMs + relMs * t);
     }
   }
   return { pts: out, cum: outc, tailEnd };

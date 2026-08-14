@@ -265,12 +265,16 @@ function schedulePathAudio(ds, totalMs) {
   if (!audioCtx || !masterGain) return;
   const s = CHIME_SETTINGS.start;
   const t0 = audioCtx.currentTime;
-  const pathDur = totalMs / 1000;
+  // The body always plays through the early-cut marker: a tap or short note is
+  // extended so every component up to the cut point plays before the release
+  // section starts.
+  const bodyDurMs = Math.max(totalMs, earlyCutMs());
+  const pathDur = bodyDurMs / 1000;
 
   // Body: the base volume along the path × the envelope's pre-release shape
   // (one pass — once the body domain is exhausted the value holds at the hold
   // window's end), scheduled as a sampled curve.
-  const body = buildVolumeCurve(ds.pts, ds.cumTime, ds.totalMs || 0, 128);
+  const body = buildVolumeCurve(ds.pts, ds.cumTime, bodyDurMs, 128);
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const curveStart = t0 + 0.002;   // tiny offset: no automation overlap with the setValue below
@@ -278,15 +282,20 @@ function schedulePathAudio(ds, totalMs) {
   g.setValueCurveAtTime(body, curveStart, pathDur);
   const curveEnd = curveStart + pathDur;
 
-  // Release tail: the release section, scaled to the path-end base volume.
+  // Release tail: the release section, scaled to the path-end base volume. It
+  // continues from whatever the body ended at (a tap's body ends mid-attack),
+  // not the release's design start, so the transition is a smooth continuation
+  // with no jump. The seed is the body's end as a fraction of the end base.
   const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
   const relMs = compsMs(relComps);
   if (relMs > 0) {
     const endBase = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
+    const bodyEnd = body[body.length - 1];
+    const relSeed = endBase > 0.0001 ? Math.max(0, Math.min(1, bodyEnd / endBase)) : 0;
     const tail = new Float32Array(64);
     for (let k = 0; k < tail.length; k++) {
       const t = relMs * k / (tail.length - 1);
-      tail[k] = endBase * relValueRelease(ENVELOPE, t);
+      tail[k] = endBase * relValueAtList(relComps, t, relSeed);
     }
     const relStart = curveEnd + 0.002;
     g.setValueAtTime(tail[0], curveEnd);
@@ -415,9 +424,10 @@ function earlyCutMs() {
 function finishLivePathNote(ds) {
   if (!ds.gain || !ds.playback) return;
   const totalMs = Math.max(MIN_GESTURE_MS, ds.totalMs || 0);
+  const cutMs = earlyCutMs();
   const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
   const relMs = compsMs(relComps);
-  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs);
+  const path = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
   // Anchor the visual timeline at the release moment: keep the circle where it
   // is (its path-time playhead) but make the release tail run from now. Without
   // this a stationary press held past the note length would already be "done"
@@ -427,27 +437,61 @@ function finishLivePathNote(ds) {
     ? cumAtState(pb.cumTime, pathStateAtTime(pb.pts, pb.cumTime, performance.now() - pb.startedAt))
     : 0;
   ds.playback.released = true;
-  ds.playback.totalMs = totalMs + relMs;
+  ds.playback.totalMs = Math.max(totalMs, cutMs) + relMs;
   ds.playback.relMs = relMs;
   ds.playback.pts = path.pts;
   ds.playback.cumTime = path.cum;
   ds.playback.tailEnd = path.tailEnd;
   ds.playback.startedAt = performance.now() - playheadMs;
   const now = audioCtx.currentTime;
-  if (performance.now() - ds.startedAt >= ds.totalMs) {
-    // The circle already caught the fingertip: play the release section from
-    // the held level, then fade.
-    scheduleReleaseTail(ds, ds.gain.value, now);
+  const elapsed = performance.now() - ds.startedAt;
+  if (elapsed >= ds.totalMs) {
+    // The circle already caught the fingertip (the drawn body finished). If the
+    // envelope hasn't played through the early-cut marker yet — a quick tap or
+    // a lift inside the body — extend the body through the cut point so the
+    // components up to it all play before the release section.
+    const prog = liveFadeProgress(ds);
+    if (prog < cutMs) {
+      const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
+      const N = 32;
+      const curve = new Float32Array(N);
+      curve[0] = Math.max(1e-4, ds.gain.value);
+      for (let k = 1; k < N; k++) {
+        const t = prog + (cutMs - prog) * k / (N - 1);
+        curve[k] = baseVol * relValueBody(ENVELOPE, t, true);
+      }
+      ds.gain.cancelScheduledValues(now);
+      ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), now);
+      ds.gain.setValueCurveAtTime(curve, now + 0.002, (cutMs - prog) / 1000);
+      scheduleReleaseTail(ds, curve[curve.length - 1], now + 0.002 + (cutMs - prog) / 1000);
+    } else {
+      // The body already played through the cut: play the release section from
+      // the held level, then fade.
+      scheduleReleaseTail(ds, ds.gain.value, now);
+    }
   } else {
     // Playback is still behind the fingertip: let the body play through the
-    // early-cut marker (or the whole body by default), then release from the
-    // level at the cut.
-    const bodyCutMs = Math.min(earlyCutMs(), ds.totalMs);
-    const cutT = ds.ctx0 + bodyCutMs / 1000;
-    const releaseT = Math.max(now, cutT, ds.ctx0);
-    const st = pathStateAtTime(ds.pts, ds.cumTime, bodyCutMs);
-    const level = baseVolumeFromY(st.y) * relValueBody(ENVELOPE, bodyCutMs, true);
-    scheduleReleaseTail(ds, level, releaseT);
+    // early-cut marker, then release from the level at the cut.
+    const st = pathStateAtTime(ds.pts, ds.cumTime, cutMs);
+    const cutLevel = baseVolumeFromY(st.y) * relValueBody(ENVELOPE, cutMs, true);
+    if (ds.totalMs < cutMs) {
+      // The note is shorter than the cut: schedule the envelope's continuation
+      // from the end of the drawn path through the cut point, then release.
+      const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
+      const p0 = ds.totalMs;
+      const t0 = Math.max(now, ds.ctx0 + p0 / 1000);
+      const N = 32;
+      const curve = new Float32Array(N);
+      curve[0] = Math.max(1e-4, ds.gainLevel || ds.gain.value);
+      for (let k = 1; k < N; k++) {
+        const t = p0 + (cutMs - p0) * k / (N - 1);
+        curve[k] = baseVol * relValueBody(ENVELOPE, t, true);
+      }
+      ds.gain.setValueCurveAtTime(curve, t0 + 0.002, (cutMs - p0) / 1000);
+      scheduleReleaseTail(ds, curve[curve.length - 1], t0 + 0.002 + (cutMs - p0) / 1000);
+    } else {
+      scheduleReleaseTail(ds, cutLevel, Math.max(now, ds.ctx0 + cutMs / 1000, ds.ctx0));
+    }
   }
 }
 

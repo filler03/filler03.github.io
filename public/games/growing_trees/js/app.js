@@ -216,10 +216,11 @@ function relValueBody(env, t, looped) {
 }
 
 // Relative value through the release section (components at/after beginRelease),
-// as time measured from the release start. The first card starts at whatever
-// value is playing when the release begins; the rest chain onto it.
-function relValueRelease(env, t) {
-  return relValueAtList(env.components.slice(env.beginReleaseIndex), t);
+// as time measured from the release start. The first card starts from whatever
+// value is playing when the release begins — `seed`, the real-time value at the
+// body's end (never a static chained start) — and the rest chain onto it.
+function relValueRelease(env, t, seed) {
+  return relValueAtList(env.components.slice(env.beginReleaseIndex), t, seed);
 }
 
 // Sample an ordered component list into N relative values.

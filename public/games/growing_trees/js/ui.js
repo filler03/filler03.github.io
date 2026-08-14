@@ -20,9 +20,10 @@ function gestureNoteCardHtml(now, p) {
   // relative volume (the % of base volume in use from the envelope), and the
   // resulting current volume level (base × relative).
   const tailEnd = p.tailEnd != null ? p.tailEnd : (p.pts ? p.pts.length : 0);
+  const pathMs = tailEnd > 0 ? (p.cumTime[tailEnd - 1] || 0) : 0;
   const relVol = st.idx < tailEnd
     ? relValueBody(ENVELOPE, prog, !!p.looped)
-    : relValueRelease(ENVELOPE, prog - (p.cumTime[tailEnd - 1] || 0));
+    : relValueRelease(ENVELOPE, prog - pathMs, relValueBody(ENVELOPE, pathMs, !!p.looped));
   const baseVol = baseVolumeFromY(st.y);
   const baseNum = Math.round(baseVol / BASE_VOL_MAX * 100);
   const relPct = Math.round(relVol * 100);
@@ -69,6 +70,24 @@ function saveSettings() {
     return true;
   } catch (e) { return false; }
 }
+
+// Debounced persist for live-edited controls (sliders, names): 'change' doesn't
+// reliably fire on every device (release off the thumb, keyboard, mobile
+// browsers), so edits are also saved shortly after the last 'input' — the live
+// ENVELOPE object is already updated, only localStorage would be stale.
+let settingsSaveTimer = null;
+function scheduleSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(saveSettings, 400);
+}
+function flushSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  saveSettings();
+}
+// Close the tab mid-edit: flush anything pending so the last value sticks.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSettingsSave();
+});
 
 // Merge saved settings over the defaults (in case older saves lack keys).
 function loadSavedSettings() {
@@ -466,6 +485,7 @@ envListEl.addEventListener('input', e => {
   if (!c) return;
   if (e.target.classList.contains('env-name')) {
     c.name = e.target.value.slice(0, 24);
+    scheduleSettingsSave();
     return;
   }
   const f = e.target.dataset.f;
@@ -481,6 +501,7 @@ envListEl.addEventListener('input', e => {
     const nextStart = nextRow && nextRow.querySelector('.env-start-ro b');
     if (nextStart) nextStart.textContent = c[f] + '%';
   }
+  scheduleSettingsSave();
 });
 
 envListEl.addEventListener('change', e => {
@@ -640,7 +661,7 @@ loadGestureUI();
 
 function closeSettingsPanel() {
   settingsPanel.classList.add('hidden');
-  saveSettings();
+  flushSettingsSave();
   // Re-sync the canvas to the real window size: iOS can leave it sized to a
   // stale value after the full-screen panel is dismissed, which squishes the
   // scene's background. Resetting canvas.width also forces a clean repaint.
