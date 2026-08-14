@@ -107,7 +107,7 @@ const EMOJI_VOL  = '🔊';   // speaker marks volume values
 /* ---------- Defaults (persisted to localStorage) ---------- */
 const DEFAULT_GESTURE = {
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
-  timeMult: 1,             // × the base time rate (TIME_PER_W ms per % of width)
+  timeMult: 1,             // ÷ the base time rate (TIME_PER_W ms per % of width)
 };
 var GESTURE = clone(DEFAULT_GESTURE);
 

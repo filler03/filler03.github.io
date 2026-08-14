@@ -470,13 +470,13 @@ function finishLivePathNote(ds) {
       scheduleReleaseTail(ds, ds.gain.value, now);
     }
   } else {
-    // Playback is still behind the fingertip: let the body play through the
-    // early-cut marker, then release from the level at the cut.
-    const st = pathStateAtTime(ds.pts, ds.cumTime, cutMs);
-    const cutLevel = baseVolumeFromY(st.y) * relValueBody(ENVELOPE, cutMs, true);
+    // Playback is still behind the fingertip: the cut-and-release must not fire
+    // yet — there is still drawn line to play. It only fires once the line runs
+    // out before the cut marker; then the remainder is added to the line and
+    // the release section follows.
     if (ds.totalMs < cutMs) {
-      // The note is shorter than the cut: schedule the envelope's continuation
-      // from the end of the drawn path through the cut point, then release.
+      // The line will run out before the cut: extend the body through the cut
+      // point (the remainder), then release from the level at the cut.
       const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
       const p0 = ds.totalMs;
       const t0 = Math.max(now, ds.ctx0 + p0 / 1000);
@@ -490,7 +490,11 @@ function finishLivePathNote(ds) {
       ds.gain.setValueCurveAtTime(curve, t0 + 0.002, (cutMs - p0) / 1000);
       scheduleReleaseTail(ds, curve[curve.length - 1], t0 + 0.002 + (cutMs - p0) / 1000);
     } else {
-      scheduleReleaseTail(ds, cutLevel, Math.max(now, ds.ctx0 + cutMs / 1000, ds.ctx0));
+      // The line already reaches the cut: no cut needed — let the whole drawn
+      // line play out to its end, then start the release section where the
+      // body runs out so every drawn point gets used.
+      const endT = Math.max(now, ds.ctx0 + ds.totalMs / 1000);
+      scheduleReleaseTail(ds, ds.gainLevel, endT);
     }
   }
 }

@@ -19,7 +19,7 @@ function addPathPoint(ds, x, y) {
   const dx = x - last.x, dy = y - last.y;
   if (Math.abs(dx) + Math.abs(dy) < 3) return;        // throttle: ~3px of travel per point
   const wPct = Math.abs(dx) / Math.max(1, W) * 100;   // horizontal travel, % of width
-  const dt = wPct * TIME_PER_W * GESTURE.timeMult;    // ms this step adds
+  const dt = wPct * TIME_PER_W / GESTURE.timeMult;    // ms this step adds
   ds.pts.push({ x, y });
   ds.cumTime.push(ds.totalMs + dt);
   ds.totalMs += dt;
@@ -365,7 +365,7 @@ function buildGesturePlaybackPath(pts, cum, pathMs, relMs, cutMs) {
   let outc = cum.slice();
   // Time-to-screen: horizontal travel, same scale as the release tail below
   // (px per ms of note time).
-  const pxPerMs = (W / 100) / (TIME_PER_W * GESTURE.timeMult);
+  const pxPerMs = (W / 100) * GESTURE.timeMult / TIME_PER_W;
 
   let tailEnd = out.length;
   let tailStartX = end.x;
