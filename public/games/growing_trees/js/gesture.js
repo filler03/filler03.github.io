@@ -58,9 +58,10 @@ function liveFadeProgress(ds) {
 
 // Sample the gain the gesture produces at N evenly-spaced times across its
 // body: the base volume at each point scaled by the envelope's pre-release
-// shape (one pass — the value holds once the body domain is exhausted). The
-// caller passes the body's total length (the note length, extended through the
-// early-cut marker), so a tap's components all play before the release section.
+// shape (looped through the hold range, so a held note's oscillation plays
+// the same way in wait mode as it does live). The caller passes the body's
+// total length (the note length, extended through the early-cut marker), so a
+// tap's components all play before the release section.
 // For near-vertical paths (almost no time) the samples walk the path by index
 // instead so the note still sweeps its Y range in a short blip, and the
 // envelope's relative value still advances over the MINIMUM note length rather
@@ -72,13 +73,13 @@ function buildVolumeCurve(pts, cum, totalMs, N) {
     for (let k = 0; k < N; k++) {
       const idx = Math.min(pts.length - 1, Math.round((k / (N - 1)) * (pts.length - 1)));
       const t = noteMs * k / (N - 1);
-      curve[k] = baseVolumeFromY(pts[idx].y) * relValueBody(ENVELOPE, t, false);
+      curve[k] = baseVolumeFromY(pts[idx].y) * relValueBody(ENVELOPE, t, true);
     }
     return curve;
   }
   for (let k = 0; k < N; k++) {
     const t = (totalMs * k) / (N - 1);
-    curve[k] = baseVolumeFromY(pathStateAtTime(pts, cum, t).y) * relValueBody(ENVELOPE, t, false);
+    curve[k] = baseVolumeFromY(pathStateAtTime(pts, cum, t).y) * relValueBody(ENVELOPE, t, true);
   }
   return curve;
 }
@@ -96,7 +97,7 @@ function schedulePathPlayback(ds) {
   const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
   playbacks.push({
     pts: tail.pts, cumTime: tail.cum, tailEnd: tail.tailEnd,
-    totalMs: Math.max(totalMs, cutMs) + relMs, relMs, startedAt: performance.now(), released: true, looped: false,
+    totalMs: Math.max(totalMs, cutMs) + relMs, relMs, startedAt: performance.now(), released: true, looped: true,
     color: degreeColorForX(ds.startX),
   });
   ensureAudioRunning(() => schedulePathAudio(ds, totalMs), Date.now() + 30000);
