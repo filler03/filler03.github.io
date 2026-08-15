@@ -21,6 +21,10 @@
     user-select: none;
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
+    /* This is a full-screen app: horizontal panning must never shift the
+       page, and vertical overscroll (pull-to-refresh) must not bounce it. */
+    touch-action: pan-y;
+    overscroll-behavior: none;
   }
   /* Keep text fields editable/selectable despite the global user-select: none. */
   input, textarea { -webkit-user-select: text; user-select: text; }
@@ -163,6 +167,10 @@
     top: 0; right: 0; bottom: 0; left: 0;
     inset: 0;
     overflow: hidden;
+    /* Only vertical gestures should be browser-handled here: a horizontal swipe
+       on anything that isn't a slider must not pan the screen left/right. */
+    touch-action: pan-y;
+    overscroll-behavior: none;
     box-sizing: border-box;
     background: rgba(255,255,255,0.97);
     padding: calc(16px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
@@ -176,7 +184,7 @@
   .panel-cols {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 10px 28px;
+    gap: 6px 28px;
     align-items: start;
   }
   .panel-col { min-width: 0; }
@@ -187,12 +195,15 @@
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    /* The scroll container itself must also only pan vertically. */
+    touch-action: pan-y;
+    overscroll-behavior-x: none;
   }
   .panel-tabs {
     display: flex;
     gap: 6px;
-    margin-bottom: 5px;
-    padding-bottom: 5px;
+    margin-bottom: 3px;
+    padding-bottom: 3px;
     border-bottom: 1px solid #cdeab3;
   }
   .tab-btn {
@@ -216,7 +227,7 @@
     gap: 8px;
   }
   .panel-actions button { margin-bottom: 0; flex: 1; }
-  .panel-actions.top { margin-bottom: 6px; }
+  .panel-actions.top { margin-bottom: 3px; }
   #settingsPanel.hidden { display: none; }
   .tab-scroll::-webkit-scrollbar { width: 10px; }
   .tab-scroll::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 5px; }
@@ -230,7 +241,7 @@
     align-items: center;
     font-weight: 700;
     font-size: 15px;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
   }
   .panel-head button {
     background: none;
@@ -242,9 +253,9 @@
   .grid {
     display: grid;
     grid-template-columns: 78px 1fr;
-    gap: 6px 10px;
+    gap: 3px 10px;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
   .grid label { font-weight: 600; }
   .grid select, .grid input[type=range] { width: 100%; }
@@ -253,7 +264,7 @@
     align-items: center;
     gap: 6px;
     font-weight: 600;
-    margin-bottom: 6px;
+    margin-bottom: 3px;
   }
   .zone-toggle input[type=checkbox] { accent-color: #2e5d34; }
   .fx-block {
@@ -283,7 +294,7 @@
   .fx-head input[type=checkbox] { accent-color: #2e5d34; }
   .fx-item input[type=range] { width: 100%; margin-bottom: 6px; }
   .val { font-weight: 700; }
-  .env-actions { display: flex; gap: 6px; margin-bottom: 5px; }
+  .env-actions { display: flex; gap: 6px; margin-bottom: 3px; }
   .env-actions button {
     flex: 1;
     padding: 5px 8px;
@@ -299,12 +310,12 @@
   .env-note {
     font-size: 10px;
     color: #6b8e5a;
-    margin: 0 0 6px;
+    margin: 0 0 4px;
     line-height: 1.3;
   }
   .env-row {
-    margin-bottom: 5px;
-    padding: 5px 8px;
+    margin-bottom: 3px;
+    padding: 4px 8px;
     border: 1px solid #cdeab3;
     border-radius: 10px;
     background: #f7fdf0;
@@ -315,7 +326,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
   .env-name {
     flex: 1;
@@ -379,7 +390,7 @@
   .env-secs {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 3px 8px;
+    gap: 2px 8px;
     align-items: center;
   }
   .env-sec {
@@ -399,8 +410,8 @@
     font-size: 12px;
     color: #3c7a45;
     border-top: 1px solid #cdeab3;
-    padding-top: 6px;
-    margin: 2px 0 6px;
+    padding-top: 3px;
+    margin: 1px 0 4px;
   }
   .vec-sel.flash { border-color: #d9534f; background: #fdecea; }
   .mm-legend {
@@ -540,6 +551,14 @@
     <input type="range" id="release" min="0" max="2000" step="10">
     -->
   </div>
+  <div class="vec-head">Volume over Y</div>
+  <div class="grid">
+    <label for="volBottom">Lower gain (bottom) <b class="val" id="volBottomVal"></b></label>
+    <input type="range" id="volBottom" min="0" max="100" step="1">
+    <label for="volTop">Upper gain (top) <b class="val" id="volTopVal"></b></label>
+    <input type="range" id="volTop" min="0" max="100" step="1">
+  </div>
+  <div class="env-note">Gain at the <b>bottom</b> and <b>top</b> of the screen (in between is interpolated). <b>100</b> = maximum volume the audio engine can produce — a note there plays at full scale. The two are independent and may cross.</div>
   <div class="vec-head">Pitch color zones</div>
   <label class="zone-toggle"><input type="checkbox" id="zonesShow"> Show color zones</label>
   <div class="grid">
@@ -628,7 +647,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.8.2</div>
+<div id="version">v1.8.6</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser

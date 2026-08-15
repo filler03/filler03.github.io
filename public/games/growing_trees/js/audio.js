@@ -33,6 +33,23 @@ function buildBlendWave(ctx, typeA, typeB, t) {
   const real = new Float32Array(HARMONICS + 1);
   const imag = new Float32Array(HARMONICS + 1);
   for (let n = 0; n <= HARMONICS; n++) imag[n] = (1 - t) * a[n] + t * b[n];
+  // Normalize the peak to 1.0: a band-limited square/sawtooth (or a blend toward
+  // one) overshoots ±1.0 at its discontinuity (Gibbs overshoot — a sawtooth can
+  // peak ~1.2-1.3), so the same gain value would play louder on rich waves and
+  // feed clipping. Sample the waveform at many phases, scale the coefficients so
+  // the peak lands at exactly 1.0, and every wave/blend plays at equal loudness.
+  let peak = 0;
+  const N = 2048;
+  for (let k = 0; k < N; k++) {
+    const th = (2 * Math.PI * k) / N;
+    let v = 0;
+    for (let n = 1; n <= HARMONICS; n++) v += imag[n] * Math.sin(n * th);
+    if (Math.abs(v) > peak) peak = Math.abs(v);
+  }
+  if (peak > 1e-9) {
+    const s = 1 / peak;
+    for (let n = 0; n <= HARMONICS; n++) imag[n] *= s;
+  }
   return ctx.createPeriodicWave(real, imag);
 }
 
@@ -252,6 +269,51 @@ function stopGestureNote() {
   playbacks = [];
 }
 
+// Fade one note out over `fadeMs` and stop it, then disconnect after the fade.
+function quickFadeNote(n, fadeMs) {
+  try {
+    const now = audioCtx.currentTime;
+    clearTimeout(n.cleanupTimer);
+    // Live notes store the AudioParam in .gain (node in .gainNode); wait-mode
+    // notes store the GainNode in .gain. Resolve the AudioParam.
+    const param = n.gain && n.gain.gain ? n.gain.gain : n.gain;
+    const node = n.gainNode || n.gain;
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(param.value, now);
+    param.linearRampToValueAtTime(0, now + fadeMs / 1000);
+    n.osc.stop(now + fadeMs / 1000 + 0.05);
+    setTimeout(() => { try { n.osc.disconnect(); if (node && node.disconnect) node.disconnect(); } catch (e) {} }, fadeMs + 200);
+  } catch (e) {}
+}
+
+// A new note on the same pitch steals the voice already ringing there, so
+// repeated taps on one band restrike instead of stacking voices (stacking is
+// what made rapid tapping sound laggy — voices piled up through the
+// compressor). The old voice fades in ~35 ms and its green playback path
+// disappears; the new note starts its attack cycle fresh with its own path
+// intact. Different pitches stay polyphonic.
+function retriggerPitch(pitch, keep) {
+  for (const n of gestureNotes.slice()) {
+    if (n === keep || n.pitch !== pitch) continue;
+    quickFadeNote(n, 35);
+    // A live drag still drawing on this pitch is superseded: drop it so it
+    // can't keep scheduling, and leave its pointer to come back up empty.
+    if (n.pointerId != null && dragStates.has(n.pointerId)) {
+      dragStates.delete(n.pointerId);
+      n.gain = null;
+      n.finished = true;
+    }
+    // Remove ONLY the stolen note's own playback path — never the new note's
+    // (which is already in playbacks by the time the retrigger runs).
+    const pb = n.playback;
+    if (pb) {
+      const i = playbacks.indexOf(pb);
+      if (i >= 0) playbacks.splice(i, 1);
+    }
+    unregisterNote(n);
+  }
+}
+
 /* ---- Gesture note audio ----
    WAIT MODE (schedulePathAudio): the whole note is played with a single
    setValueCurveAtTime over 128 volume samples (attack fade baked in) plus a
@@ -261,10 +323,14 @@ function stopGestureNote() {
    newly-recorded point is scheduled at the audio time its horizontal travel
    implies, with setTargetAtTime catch-up when the circle catches the fingertip. */
 
-function schedulePathAudio(ds, totalMs) {
+function schedulePathAudio(ds, totalMs, pb) {
   if (!audioCtx || !masterGain) return;
   const s = CHIME_SETTINGS.start;
   const t0 = audioCtx.currentTime;
+  // Retrigger: a new note on this pitch steals the voice already ringing there,
+  // so rapid taps on one band restrike instead of stacking voices.
+  const pitch = pitchFor(ds.startX, ds.startY);
+  retriggerPitch(pitch, null);
   // The body always plays through the early-cut marker: a tap or short note is
   // extended so every component up to the cut point plays before the release
   // section starts.
@@ -307,11 +373,11 @@ function schedulePathAudio(ds, totalMs) {
 
   const osc = audioCtx.createOscillator();
   setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(pitchFor(ds.startX, ds.startY));
+  osc.frequency.value = noteToFreq(pitch);
   osc.connect(gain);
   osc.start(t0);
   osc.stop(tEnd + 0.05);
-  const note = { osc, gain, gainParam: g, cleanupTimer: null };
+  const note = { osc, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb };
   gestureNotes.push(note);
   setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} unregisterNote(note); }, (tEnd - t0 + 0.5) * 1000);
 }
@@ -342,6 +408,10 @@ function ensureLiveAudio(ds, deadline) {
 function initLivePathAudio(ds) {
   const s = CHIME_SETTINGS.start;
   const ctx0 = audioCtx.currentTime;
+  // A new note on a pitch steals the voice already ringing there (retrigger),
+  // so rapid taps on one band restrike instead of stacking voices.
+  ds.pitch = pitchFor(ds.startX, ds.startY);
+  retriggerPitch(ds.pitch, ds);
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const baseVol0 = baseVolumeFromY(ds.pts[0].y);
@@ -349,7 +419,7 @@ function initLivePathAudio(ds) {
   gain.connect(masterGain);
   const osc = audioCtx.createOscillator();
   setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(pitchFor(ds.startX, ds.startY));
+  osc.frequency.value = noteToFreq(ds.pitch);
   osc.connect(gain);
   osc.start(ctx0);
   ds.startedAt = performance.now();

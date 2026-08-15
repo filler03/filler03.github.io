@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.8.1` (bottom-left of the page — **bump on every change**).
+> Current version badge: `v1.8.5` (bottom-left of the page — **bump on every change**).
 
 ## Overview
 
@@ -13,7 +13,7 @@
 | Script style | Classic `<script src>` tags — **no ES modules**, so the page still opens over `file://`. Shared top-level state uses `var`; load order matters (see above) |
 | Rendering | Canvas 2D, plain white world background; gesture paths drawn in screen space |
 | Audio | Web Audio API (oscillator + gain envelope, master gain 0.45, compressor). Gestures use `setValueCurveAtTime` (wait mode) or incremental ramps (live mode) |
-| Persistence | `localStorage` key `growingTrees.settings.v5` → `{ chime, gesture, fixed }` (key kept for backwards compatibility with saved settings) |
+| Persistence | `localStorage` key `growingTrees.settings.v8` → `{ chime, gesture, envelope, pitchZones, volume }` (key bumped on schema changes; old saves merge onto defaults) |
 | Interaction | Single mode — freehand gestures only. The nav-mode button/start-mode setting were removed; the dormant camera (pan/zoom) code is kept in case navigation is re-added later |
 
 ## Controls
@@ -40,6 +40,8 @@ While drawing the path is a **dotted line**. During playback a small **glowing c
 
 Gestures **overlap**: starting a new gesture never removes an earlier one that is still playing — each keeps its green path animating and its note sounding until it finishes (`playbacks[]` and `gestureNotes[]` lists). Taps overlap too (each is its own note in `tapNotes[]`); only a global cancel on blur/cancel/clear stops everything (`stopGestureNote`).
 
+**Per-pitch retrigger:** a new gesture or tap on a pitch that is already ringing **steals that voice** instead of stacking another (`retriggerPitch` in `audio.js`). The old voice fades in ~35 ms and **only the stolen note's green playback path is removed** — the new note keeps its own path and starts its attack cycle fresh. This keeps rapid taps on one band legible — at most one voice per pitch rings at a time, and every note that rings has its own path on screen. Different pitches remain polyphonic (multi-finger chords still layer). Each gesture note and playback entry carries its `pitch` (from `pitchFor(startX, startY)`) and wait-mode notes link back to their playback (`note.playback`) so the retrigger removes exactly the old path, never the new note's.
+
 ### Live vs Wait (top-left toggle)
 
 | Mode | When the note plays |
@@ -63,6 +65,7 @@ Stacked **note cards**, one per running tap and one per active gesture playback,
 | Section | Controls |
 |---------|----------|
 | Default values | Key (root note) |
+| Volume over Y | **Lower gain (bottom)** and **Upper gain (top)** sliders — independent 0–100 gains (100 = full scale, the max the audio engine can produce); the screen-Y volume interpolates between them |
 | Gesture timing | Time multiplier (`timeMult` — ms per % of horizontal travel) |
 | Pitch color zones | Show zones (checkbox), Low octave + degree, High octave + degree |
 | Tap note defaults | Allow tap notes (checkbox), Attack / Decay / Hold / Release ms + End vol sliders |
@@ -99,7 +102,7 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `FADE_MS` | 150 | anti-clip fade-out |
 | `TAP_ATTACK_MS` | 60 | attack for a tap (no line) |
 | `TAP_THRESHOLD` | 8 | px before a drag counts |
-| `VOL_MIN` / `VOL_MAX` | 0.01 / 0.5 | screen-Y volume gain range |
+| `VOL_MIN` / `VOL_MAX` | 0.01 / 0.5 | screen-Y volume gain range (now set directly via `VOLUME = { bottom: 0.01, top: 0.5 }` — both linear gains, 1.0 = full scale; wave peaks are normalized to 1.0) |
 | `PAN_SENS` / `PINCH_SENS` | 2 / 0.4 | nav camera sensitivities (dormant — nav removed for now) |
 | `GESTURE.allowTapNotes` | true | when off, a tap plays a ~0-length gesture note instead of the default tap note |
 

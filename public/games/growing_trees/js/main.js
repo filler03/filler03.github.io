@@ -176,6 +176,7 @@ function loop(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (mode === 'plant') {
     drawPitchZones();   // faint degree-color bands, one per scale degree
+    drawVolumeScale();  // right-edge lower/middle/upper volume markers
     // Held live-sound gestures keep their attack fade advancing in real time;
     // without this the fade stalls the moment the finger stops drawing.
     for (const ds of dragStates.values()) {

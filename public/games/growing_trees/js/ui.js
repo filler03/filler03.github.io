@@ -16,18 +16,20 @@ function gestureNoteCardHtml(now, p) {
   // real elapsed time while held; once released, stop at the full duration.
   const timeMs = p.released ? Math.min(prog, p.totalMs || 0) : prog;
   const pct = total > 0 ? (Math.min(elapsed, total) / total * 100).toFixed(1) : 100;
-  // The readout shows base volume (a number, 100 = highest, from the path's Y),
-  // relative volume (the % of base volume in use from the envelope), and the
-  // resulting current volume level (base × relative).
+  // The readout shows base volume (a number, 100 = full scale, from the path's
+  // Y per the upper/lower gain settings — a line at the top with upper gain 50
+  // reads 50), relative volume (the % of base volume in use from the envelope),
+  // and the resulting current volume level (base × relative, same 0-100 gain
+  // scale).
   const tailEnd = p.tailEnd != null ? p.tailEnd : (p.pts ? p.pts.length : 0);
   const pathMs = tailEnd > 0 ? (p.cumTime[tailEnd - 1] || 0) : 0;
   const relVol = st.idx < tailEnd
     ? relValueBody(ENVELOPE, prog, !!p.looped)
     : relValueRelease(ENVELOPE, prog - pathMs, relValueBody(ENVELOPE, pathMs, !!p.looped));
   const baseVol = baseVolumeFromY(st.y);
-  const baseNum = Math.round(baseVol / BASE_VOL_MAX * 100);
+  const baseNum = Math.round(baseVol * 100);
   const relPct = Math.round(relVol * 100);
-  const curNum = Math.round(baseVol * relVol / BASE_VOL_MAX * 100);
+  const curNum = Math.round(baseVol * relVol * 100);
   return `<div class="live"><div class="note-stats">${EMOJI_TIME}${Math.round(timeMs)}ms</div><div class="vol-stats">${EMOJI_VOL} base: ${baseNum} · relative: ${relPct}% · true: ${curNum}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
 
@@ -62,37 +64,73 @@ waitBtn.addEventListener('click', () => {
 });
 
 /* ---------- Persistence ---------- */
-const STORAGE_KEY = 'growingTrees.settings.v7';
+const STORAGE_KEY = 'growingTrees.settings.v8';
+// Older versions saved under these keys. v7 stores the same envelope/pitchZones
+// layout (only `volume` was added in v8, which loads with defaults when absent);
+// v6 and earlier stored the old fixed-ADSR layout that loadSavedSettings already
+// migrates via d.fixed. When the current key is missing, fall back through them
+// so a storage-key bump never discards saved settings.
+const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v7', 'growingTrees.settings.v6'];
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME }));
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    noteStorageError();
+    return false;
+  }
 }
 
-// Debounced persist for live-edited controls (sliders, names): 'change' doesn't
-// reliably fire on every device (release off the thumb, keyboard, mobile
-// browsers), so edits are also saved shortly after the last 'input' — the live
-// ENVELOPE object is already updated, only localStorage would be stale.
+// Persist the instant anything changes: the payload is tiny, so writing on every
+// 'input' (even mid-slider-drag) is cheap, and there is never a debounce window
+// in which an edit exists only in memory and could be lost on a fast reload.
 let settingsSaveTimer = null;
 function scheduleSettingsSave() {
   clearTimeout(settingsSaveTimer);
-  settingsSaveTimer = setTimeout(saveSettings, 400);
+  saveSettings();
 }
 function flushSettingsSave() {
   clearTimeout(settingsSaveTimer);
   saveSettings();
 }
+
+// localStorage can be unavailable (private mode, blocked storage, sandboxed
+// preview iframes). Persistence is best-effort: if it throws, say so on screen
+// instead of silently letting settings revert on reload.
+let storageWarned = false;
+function noteStorageError() {
+  if (storageWarned) return;
+  storageWarned = true;
+  console.warn('[Growing Trees] Settings could not be saved: localStorage is unavailable (private browsing, blocked storage, or a sandboxed preview frame). Changes will revert on reload.');
+  const panel = document.getElementById('settingsPanel');
+  const head = panel && panel.querySelector('.panel-head');
+  if (!head || head.querySelector('#storageWarn')) return;
+  const el = document.createElement('span');
+  el.id = 'storageWarn';
+  el.textContent = '⚠ not saving';
+  el.style.cssText = 'margin-left:auto;font-size:10px;font-weight:700;color:#d9534f;background:#fdecea;border:1px solid #d9534f;border-radius:8px;padding:2px 7px;';
+  head.appendChild(el);
+}
 // Close the tab mid-edit: flush anything pending so the last value sticks.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushSettingsSave();
 });
+// Some browsers (especially mobile) never fire visibilitychange on reload or
+// swipe-to-close, so also flush on pagehide.
+window.addEventListener('pagehide', flushSettingsSave);
 
 // Merge saved settings over the defaults (in case older saves lack keys).
 function loadSavedSettings() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    let migrated = false;
+    if (!raw) {
+      for (const k of LEGACY_STORAGE_KEYS) {
+        raw = localStorage.getItem(k);
+        if (raw) { migrated = true; break; }
+      }
+    }
     if (!raw) return false;
     const d = JSON.parse(raw);
     const chime = clone(DEFAULT_CHIME);
@@ -144,8 +182,25 @@ function loadSavedSettings() {
       if (d.pitchZones.highOctave != null) pz.highOctave = Math.max(-2, Math.min(2, +d.pitchZones.highOctave));
     }
     PITCH_ZONES = pz;
+    const vol = clone(DEFAULT_VOLUME);
+    if (d.volume) {
+      if (d.volume.bottom != null) vol.bottom = Math.max(0, Math.min(1, +d.volume.bottom || 0.01));
+      // Older saves used `ratio` (how many × louder the top is) instead of a
+      // direct top gain: map it so the stored sound is preserved.
+      if (d.volume.top != null) vol.top = Math.max(0, Math.min(1, +d.volume.top || 0.5));
+      else if (d.volume.ratio != null) vol.top = Math.max(0, Math.min(1, vol.bottom * (+d.volume.ratio || 50)));
+    }
+    VOLUME = vol;
+    if (migrated) {
+      // A legacy save was just loaded: persist it under the current key now so
+      // later edits land in the right place (and the legacy copy can age out).
+      saveSettings();
+    }
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    noteStorageError();
+    return false;
+  }
 }
 
 function resetToDefaults() {
@@ -153,11 +208,15 @@ function resetToDefaults() {
   GESTURE = clone(DEFAULT_GESTURE);
   ENVELOPE = clone(DEFAULT_ENVELOPE);
   PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
+  VOLUME = clone(DEFAULT_VOLUME);
+  // Clear legacy copies too, or the next load would migrate them straight back.
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  for (const k of LEGACY_STORAGE_KEYS) { try { localStorage.removeItem(k); } catch (e) {} }
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
   syncEnvelopeUI();
   syncPitchZonesUI();
+  syncVolumeUI();
   syncWaitBtn();
 }
 
@@ -395,6 +454,26 @@ function syncLineUI() {
 timeMultEl.addEventListener('input', () => {
   GESTURE.timeMult = +timeMultEl.value;
   document.getElementById('timeMultVal').textContent = GESTURE.timeMult.toFixed(1) + 'x';
+});
+
+/* ---- Volume over Y (bottom & top gain) ---- */
+const volBottomEl = document.getElementById('volBottom');
+const volTopEl = document.getElementById('volTop');
+function syncVolumeUI() {
+  volBottomEl.value = Math.round(VOLUME.bottom * 100);
+  volTopEl.value = Math.round(VOLUME.top * 100);
+  document.getElementById('volBottomVal').textContent = volBottomEl.value;
+  document.getElementById('volTopVal').textContent = volTopEl.value;
+}
+volBottomEl.addEventListener('input', () => {
+  VOLUME.bottom = Math.max(0, Math.min(1, +volBottomEl.value / 100));
+  document.getElementById('volBottomVal').textContent = volBottomEl.value;
+  scheduleSettingsSave();
+});
+volTopEl.addEventListener('input', () => {
+  VOLUME.top = Math.max(0, Math.min(1, +volTopEl.value / 100));
+  document.getElementById('volTopVal').textContent = volTopEl.value;
+  scheduleSettingsSave();
 });
 
 /* ---- Envelope editor ---- */
@@ -678,11 +757,35 @@ settingsBtn.addEventListener('click', () => {
     syncLineUI();
     syncEnvelopeUI();
     syncPitchZonesUI();
+    syncVolumeUI();
   } else {
     closeSettingsPanel();
   }
 });
 document.getElementById('closeSettings').addEventListener('click', closeSettingsPanel);
+
+// Belt-and-suspenders against the fixed panel panning sideways: some browsers
+// still rubber-band/edge-pan it even with touch-action: pan-y (iOS Safari's
+// fixed-element handling, Android edge pans). Swallow horizontal drags here so
+// the screen can't slide; vertical drags keep scrolling and native range
+// sliders keep their own drag handling (they're excluded below).
+let panelDrag = null;
+settingsPanel.addEventListener('touchstart', e => {
+  if (e.target.closest('input[type=range]')) { panelDrag = null; return; }
+  const t = e.touches[0];
+  panelDrag = { x: t.clientX, y: t.clientY, horizontal: null };
+}, { passive: true });
+settingsPanel.addEventListener('touchmove', e => {
+  if (!panelDrag) return;
+  const t = e.touches[0];
+  const dx = t.clientX - panelDrag.x;
+  const dy = t.clientY - panelDrag.y;
+  if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+  if (panelDrag.horizontal == null) panelDrag.horizontal = Math.abs(dx) > Math.abs(dy);
+  if (panelDrag.horizontal || Math.abs(dx) > Math.abs(dy)) e.preventDefault();
+}, { passive: false });
+settingsPanel.addEventListener('touchend', () => { panelDrag = null; });
+settingsPanel.addEventListener('touchcancel', () => { panelDrag = null; });
 document.getElementById('testSound').addEventListener('click', previewChime);
 
 document.getElementById('resetDefaults').addEventListener('click', () => {

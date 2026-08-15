@@ -95,12 +95,13 @@ function schedulePathPlayback(ds) {
   const relMs = compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
   const cutMs = earlyCutMs();
   const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
-  playbacks.push({
+  const pb = {
     pts: tail.pts, cumTime: tail.cum, tailEnd: tail.tailEnd,
     totalMs: Math.max(totalMs, cutMs) + relMs, relMs, startedAt: performance.now(), released: true, looped: true,
-    color: degreeColorForX(ds.startX),
-  });
-  ensureAudioRunning(() => schedulePathAudio(ds, totalMs), Date.now() + 30000);
+    color: degreeColorForX(ds.startX), pitch: pitchFor(ds.startX, ds.startY),
+  };
+  playbacks.push(pb);
+  ensureAudioRunning(() => schedulePathAudio(ds, totalMs, pb), Date.now() + 30000);
 }
 
 // LIVE MODE: the note begins the moment the finger touches down (a tap is just
@@ -116,7 +117,7 @@ function startLivePathNote(ds) {
   // The visual shows immediately; only the audio waits for the AudioContext
   // to be running, since a freshly-created context is still suspended on the
   // very first load and events scheduled at currentTime 0 would be missed.
-  ds.playback = { ds, pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true, color: degreeColorForX(ds.startX) };
+  ds.playback = { ds, pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true, color: degreeColorForX(ds.startX), pitch: pitchFor(ds.startX, ds.startY) };
   syncLivePlaybackPath(ds);
   playbacks.push(ds.playback);
   ensureLiveAudio(ds, Date.now() + 30000);
@@ -214,6 +215,28 @@ function drawPitchZones() {
       : noteNameForPos(positions[i]).replace(/\d+$/, '');
     if (ctx.measureText(label).width > bw - 4) continue;
     ctx.fillText(label, i * bw + bw / 2, H - 6);
+  }
+}
+
+// Right-edge volume scale, drawn like the pitch-zone note labels: one marker
+// each for the upper (full-volume), middle, and lower volume levels. The top
+// 10% of the screen is the full-volume zone and the bottom 10% the lowest (see
+// baseVolumeFromY), so the upper/lower markers sit at the center of their
+// zones. Each label shows the level name plus the actual gain (0-100) played
+// there, so the readout tracks the upper/lower gain settings live.
+function drawVolumeScale() {
+  const markers = [
+    { y: H * 0.05, label: 'full', gain: volumeTop() },
+    { y: H * 0.50, label: 'mid',  gain: mix(VOLUME.bottom, volumeTop(), 0.5) },
+    { y: H * 0.95, label: 'low',  gain: VOLUME.bottom },
+  ];
+  ctx.fillStyle = '#000';
+  ctx.font = '600 11px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (const m of markers) {
+    ctx.fillRect(W - 14, m.y - 1, 8, 2);   // short tick on the right edge
+    ctx.fillText(m.label + ' ' + Math.round(m.gain * 100), W - 18, m.y);
   }
 }
 

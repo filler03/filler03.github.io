@@ -89,15 +89,35 @@ const ZONE_FILL_ALPHA = 0.15;   // faintness of a degree's color band (0..1)
 const OCTAVE_BOUND_ALPHA = 0.35;  // slightly stronger line where a new octave begins
 
 // Base volume (gain) comes from where the gesture sits vertically on screen:
-// top is loudest, bottom is quietest. The relative volume — the percentage of
-// this base volume actually being output — comes from the attack/decay/release
-// components and drives the gesture line's thickness.
-const BASE_VOL_MIN = 0.01, BASE_VOL_MAX = 0.5;
+// top is loudest, bottom is quietest. The top 10% of the screen is the
+// full-volume zone (the upper gain) and the bottom 10% the lowest-volume zone
+// (the lower gain); the middle 80% sweeps linearly between the two. The
+// relative volume — the percentage of this base volume actually being output —
+// comes from the attack/decay/release components and drives the gesture line's
+// thickness.
+// Gain is a linear amplitude in 0..1 (1.0 = full scale, the loudest a voice can
+// play). `bottom` is the gain at the bottom of the screen, `top` the gain at
+// the top; both are set directly by the user's lower/upper gain sliders.
+const DEFAULT_VOLUME = { bottom: 0.01, top: 0.5 };
+var VOLUME = clone(DEFAULT_VOLUME);
+
+function volumeTop() {
+  return VOLUME.top;
+}
+
 function baseVolumeFromY(sy) {
-  return mix(BASE_VOL_MIN, BASE_VOL_MAX, clamp01(1 - sy / H));
+  const t = clamp01(1 - sy / H);   // 1 at the top of the screen, 0 at the bottom
+  return mix(VOLUME.bottom, volumeTop(), clamp01((t - 0.1) / 0.8));
 }
 function yForBaseVolume(v) {
-  return H * (1 - (v - BASE_VOL_MIN) / (BASE_VOL_MAX - BASE_VOL_MIN));
+  const span = volumeTop() - VOLUME.bottom;
+  if (span === 0) return H / 2;
+  const r = clamp01((v - VOLUME.bottom) / span);
+  // The top/bottom 10% of the screen are flat full/low zones, so gains at the
+  // top/bottom of the scale sit at the center of their zone.
+  if (r >= 1) return H * 0.05;
+  if (r <= 0) return H * 0.95;
+  return H * (1 - (0.1 + r * 0.8));
 }
 
 // Top-left HUD emoji markers.
