@@ -218,26 +218,48 @@ function drawPitchZones() {
   }
 }
 
-// Right-edge volume scale, drawn like the pitch-zone note labels: one marker
-// each for the upper (full-volume), middle, and lower volume levels. The top
-// 10% of the screen is the full-volume zone and the bottom 10% the lowest (see
-// baseVolumeFromY), so the upper/lower markers sit at the center of their
-// zones. Each label shows the level name plus the actual gain (0-100) played
-// there, so the readout tracks the upper/lower gain settings live.
+// Centered, faint volume-scale legend: one row each for the upper (full) and
+// lower (low) volume levels, horizontally centered but positioned at the exact
+// screen Y where each gain is actually reached (the top/bottom 10% zones — see
+// baseVolumeFromY), with a dotted guide line on each side of the label. Each
+// label shows the level name plus the actual gain (0-100) played there, so the
+// readout tracks the upper/lower gain settings live.
 function drawVolumeScale() {
   const markers = [
     { y: H * 0.05, label: 'full', gain: volumeTop() },
-    { y: H * 0.50, label: 'mid',  gain: mix(VOLUME.bottom, volumeTop(), 0.5) },
     { y: H * 0.95, label: 'low',  gain: VOLUME.bottom },
   ];
+  const cx = W / 2;
+  ctx.save();
   ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#000';
   ctx.font = '600 11px sans-serif';
-  ctx.textAlign = 'right';
+  ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const m of markers) {
-    ctx.fillRect(W - 14, m.y - 1, 8, 2);   // short tick on the right edge
-    ctx.fillText(m.label + ' ' + Math.round(m.gain * 100), W - 18, m.y);
+    const txt = m.label + ' ' + Math.round(m.gain * 100);
+    const half = ctx.measureText(txt).width / 2;
+    const clear = half + 10;                     // gap between label and guide
+    const x0 = W * 0.12, x1 = W * 0.88;
+    ctx.globalAlpha = 0.28;                      // dotted guides: very faint
+    ctx.lineWidth = 1;
+    drawDottedSegment(x0, cx - clear, m.y);
+    drawDottedSegment(cx + clear, x1, m.y);
+    ctx.globalAlpha = 0.55;                      // label: faint but readable
+    ctx.fillText(txt, cx, m.y);
   }
+  ctx.restore();
+}
+
+function drawDottedSegment(x0, x1, y) {
+  if (x1 <= x0) return;
+  const dot = 4;
+  ctx.beginPath();
+  for (let x = x0; x < x1; x += 2 * dot) {
+    ctx.moveTo(x, y);
+    ctx.lineTo(Math.min(x + dot, x1), y);
+  }
+  ctx.stroke();
 }
 
 // The gesture path is always drawn at the finger's own Y. The line's thickness
