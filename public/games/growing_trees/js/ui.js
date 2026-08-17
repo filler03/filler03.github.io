@@ -64,17 +64,16 @@ waitBtn.addEventListener('click', () => {
 });
 
 /* ---------- Persistence ---------- */
-const STORAGE_KEY = 'growingTrees.settings.v8';
-// Older versions saved under these keys. v7 stores the same envelope/pitchZones
+const STORAGE_KEY = 'growingTrees.settings.v9';
+// Older versions saved under these keys. v8 stores the same envelope/pitchZones
 // layout (only `volume` was added in v8, which loads with defaults when absent);
-// v6 and earlier stored the old fixed-ADSR layout that loadSavedSettings already
-// migrates via d.fixed. When the current key is missing, fall back through them
-// so a storage-key bump never discards saved settings.
-const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v7', 'growingTrees.settings.v6'];
+// v7 and v6 are further back. When the current key is missing, fall back through
+// them so a storage-key bump never discards saved settings.
+const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.v7', 'growingTrees.settings.v6'];
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, harmonics: HARMONICS }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -191,6 +190,14 @@ function loadSavedSettings() {
       else if (d.volume.ratio != null) vol.top = Math.max(0, Math.min(1, vol.bottom * (+d.volume.ratio || 50)));
     }
     VOLUME = vol;
+    // v9+: harmonics
+    const harm = clone(DEFAULT_HARMONICS);
+    if (d.harmonics && Array.isArray(d.harmonics.amplitudes) && d.harmonics.amplitudes.length) {
+      for (let i = 0; i < HARMONIC_COUNT; i++) {
+        harm.amplitudes[i] = Math.max(-1, Math.min(1, +d.harmonics.amplitudes[i] || 0));
+      }
+    }
+    HARMONICS = harm;
     if (migrated) {
       // A legacy save was just loaded: persist it under the current key now so
       // later edits land in the right place (and the legacy copy can age out).
@@ -209,6 +216,7 @@ function resetToDefaults() {
   ENVELOPE = clone(DEFAULT_ENVELOPE);
   PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
   VOLUME = clone(DEFAULT_VOLUME);
+  HARMONICS = clone(DEFAULT_HARMONICS);
   // Clear legacy copies too, or the next load would migrate them straight back.
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   for (const k of LEGACY_STORAGE_KEYS) { try { localStorage.removeItem(k); } catch (e) {} }
@@ -217,6 +225,7 @@ function resetToDefaults() {
   syncEnvelopeUI();
   syncPitchZonesUI();
   syncVolumeUI();
+  syncHarmonicsUI();
   syncWaitBtn();
 }
 
@@ -444,6 +453,81 @@ syncSensUI();
 */
 
 /* ---- Gesture value mapping is pure screen proportions (see lineTimeForSlot) ---- */
+
+/* ---- Harmonic editor ---- */
+const harmonicSlidersEl = document.getElementById('harmonicSliders');
+const harmonicPresetsEl = document.getElementById('harmonicPresets');
+let activePreset = 'sine';
+
+function renderHarmonicSliders() {
+  let html = '';
+  for (let i = 0; i < HARMONIC_COUNT; i++) {
+    const amp = HARMONICS.amplitudes[i];
+    const pct = Math.round(Math.abs(amp) * 100);
+    const sign = amp < 0 ? '-' : '';
+    html += '<div class="harm-row"><span class="harm-label">H' + (i + 1) + '</span>'
+      + '<input type="range" class="harm-slider" data-idx="' + i + '" min="-100" max="100" step="1" value="' + Math.round(amp * 100) + '">'
+      + '<span class="harm-val">' + sign + pct + '%</span></div>';
+  }
+  harmonicSlidersEl.innerHTML = html;
+}
+
+function syncHarmonicsUI() {
+  renderHarmonicSliders();
+  activePreset = matchPreset();
+  for (const btn of harmonicPresetsEl.querySelectorAll('.harm-preset')) {
+    btn.classList.toggle('active', btn.dataset.preset === activePreset);
+  }
+}
+
+function matchPreset() {
+  for (const name of Object.keys(HARMONIC_PRESETS)) {
+    const preset = HARMONIC_PRESETS[name];
+    let match = true;
+    for (let i = 0; i < HARMONIC_COUNT; i++) {
+      if (Math.abs(HARMONICS.amplitudes[i] - preset[i]) > 0.005) { match = false; break; }
+    }
+    if (match) return name;
+  }
+  return null;
+}
+
+harmonicSlidersEl.addEventListener('input', e => {
+  if (!e.target.classList.contains('harm-slider')) return;
+  const i = +e.target.dataset.idx;
+  HARMONICS.amplitudes[i] = Math.max(-1, Math.min(1, +e.target.value / 100));
+  const vEl = e.target.closest('.harm-row').querySelector('.harm-val');
+  if (vEl) {
+    const v = HARMONICS.amplitudes[i];
+    const pct = Math.round(Math.abs(v) * 100);
+    vEl.textContent = (v < 0 ? '-' : '') + pct + '%';
+  }
+  activePreset = matchPreset();
+  for (const btn of harmonicPresetsEl.querySelectorAll('.harm-preset')) {
+    btn.classList.toggle('active', btn.dataset.preset === activePreset);
+  }
+  previewChime();
+});
+
+harmonicSlidersEl.addEventListener('change', () => {
+  saveSettings();
+});
+
+harmonicPresetsEl.addEventListener('click', e => {
+  const btn = e.target.closest('.harm-preset');
+  if (!btn) return;
+  const name = btn.dataset.preset;
+  const preset = HARMONIC_PRESETS[name];
+  if (!preset) return;
+  for (let i = 0; i < HARMONIC_COUNT; i++) HARMONICS.amplitudes[i] = preset[i];
+  activePreset = name;
+  for (const b of harmonicPresetsEl.querySelectorAll('.harm-preset')) {
+    b.classList.toggle('active', b === btn);
+  }
+  renderHarmonicSliders();
+  previewChime();
+  saveSettings();
+});
 
 /* ---- Playhead speed (ms per % of horizontal travel) ---- */
 const timeMultEl = document.getElementById('timeMult');
@@ -758,6 +842,7 @@ settingsBtn.addEventListener('click', () => {
     syncEnvelopeUI();
     syncPitchZonesUI();
     syncVolumeUI();
+    syncHarmonicsUI();
   } else {
     closeSettingsPanel();
   }

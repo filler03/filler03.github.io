@@ -10,11 +10,11 @@ const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
 // coefficients. `blend` (0..1) mixes the chosen wave toward `blendTo` (or the
 // NEXT shape in the cycle if blendTo is unset), e.g. 50% sine + 50% triangle.
 const WAVE_ORDER = ['sine', 'triangle', 'square', 'sawtooth'];
-const HARMONICS = 64;
+const WAVE_HARMONICS = 64;
 
 function waveCoeffs(type) {
-  const imag = new Float32Array(HARMONICS + 1);
-  for (let n = 1; n <= HARMONICS; n++) {
+  const imag = new Float32Array(WAVE_HARMONICS + 1);
+  for (let n = 1; n <= WAVE_HARMONICS; n++) {
     if (type === 'sine') {
       if (n === 1) imag[n] = 1;
     } else if (type === 'triangle') {
@@ -30,9 +30,9 @@ function waveCoeffs(type) {
 
 function buildBlendWave(ctx, typeA, typeB, t) {
   const a = waveCoeffs(typeA), b = waveCoeffs(typeB);
-  const real = new Float32Array(HARMONICS + 1);
-  const imag = new Float32Array(HARMONICS + 1);
-  for (let n = 0; n <= HARMONICS; n++) imag[n] = (1 - t) * a[n] + t * b[n];
+  const real = new Float32Array(WAVE_HARMONICS + 1);
+  const imag = new Float32Array(WAVE_HARMONICS + 1);
+  for (let n = 0; n <= WAVE_HARMONICS; n++) imag[n] = (1 - t) * a[n] + t * b[n];
   // Normalize the peak to 1.0: a band-limited square/sawtooth (or a blend toward
   // one) overshoots ±1.0 at its discontinuity (Gibbs overshoot — a sawtooth can
   // peak ~1.2-1.3), so the same gain value would play louder on rich waves and
@@ -43,12 +43,12 @@ function buildBlendWave(ctx, typeA, typeB, t) {
   for (let k = 0; k < N; k++) {
     const th = (2 * Math.PI * k) / N;
     let v = 0;
-    for (let n = 1; n <= HARMONICS; n++) v += imag[n] * Math.sin(n * th);
+    for (let n = 1; n <= WAVE_HARMONICS; n++) v += imag[n] * Math.sin(n * th);
     if (Math.abs(v) > peak) peak = Math.abs(v);
   }
   if (peak > 1e-9) {
     const s = 1 / peak;
-    for (let n = 0; n <= HARMONICS; n++) imag[n] *= s;
+    for (let n = 0; n <= WAVE_HARMONICS; n++) imag[n] *= s;
   }
   return ctx.createPeriodicWave(real, imag);
 }
@@ -187,8 +187,35 @@ function pitchFor(sx, sy) {
   return noteNameForPos(pitchPositions()[pitchIndexForX(sx)]);
 }
 
+// Build a PeriodicWave from user-specified harmonic amplitudes (0..1 each).
+// The peak is normalized to 1.0 so every harmonic combination plays at equal
+// loudness (same approach as buildBlendWave).
+function buildHarmonicWave(ctx, amplitudes) {
+  const real = new Float32Array(WAVE_HARMONICS + 1);
+  const imag = new Float32Array(WAVE_HARMONICS + 1);
+  for (let i = 0; i < Math.min(amplitudes.length, WAVE_HARMONICS); i++) {
+    imag[i + 1] = amplitudes[i];
+  }
+  let peak = 0;
+  const N = 2048;
+  for (let k = 0; k < N; k++) {
+    const th = (2 * Math.PI * k) / N;
+    let v = 0;
+    for (let n = 1; n <= WAVE_HARMONICS; n++) v += imag[n] * Math.sin(n * th);
+    if (Math.abs(v) > peak) peak = Math.abs(v);
+  }
+  if (peak > 1e-9) {
+    const s = 1 / peak;
+    for (let n = 0; n <= WAVE_HARMONICS; n++) imag[n] *= s;
+  }
+  return ctx.createPeriodicWave(real, imag);
+}
+
 function setOscWave(osc, s) {
-  if (s.blend > 0) {
+  // Custom harmonics override the wave/blend system when any are non-zero.
+  if (typeof HARMONICS !== 'undefined' && HARMONICS.amplitudes.some(v => v !== 0)) {
+    osc.setPeriodicWave(buildHarmonicWave(audioCtx, HARMONICS.amplitudes));
+  } else if (s.blend > 0) {
     const idx = WAVE_ORDER.indexOf(s.wave);
     const next = WAVE_ORDER.includes(s.blendTo) ? s.blendTo : WAVE_ORDER[(idx + 1) % WAVE_ORDER.length];
     osc.setPeriodicWave(buildBlendWave(audioCtx, s.wave, next, Math.min(1, s.blend)));

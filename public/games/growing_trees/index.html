@@ -491,6 +491,65 @@
     margin-bottom: 8px;
   }
   #resetDefaults:hover { background: #e7f4d7; }
+  /* Harmonic editor */
+  .harm-presets {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+  .harm-preset {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 4px;
+    border: 1px solid #cdeab3;
+    border-radius: 8px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-weight: 700;
+    font-size: 10px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .harm-preset.active { background: #2e5d34; color: #fff; border-color: #2e5d34; }
+  .harm-preset:hover:not(.active) { background: #eaf9dc; }
+  #harmonicSliders {
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  #harmonicSliders::-webkit-scrollbar { width: 6px; }
+  #harmonicSliders::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 3px; }
+  #harmonicSliders::-webkit-scrollbar-thumb { background: #2e5d34; border-radius: 3px; }
+  #harmonicSliders { scrollbar-width: thin; scrollbar-color: #2e5d34 rgba(46,93,52,0.06); }
+  .harm-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 0;
+  }
+  .harm-label {
+    width: 22px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #2e5d34;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .harm-row input[type=range] {
+    flex: 1;
+    min-width: 0;
+    height: 14px;
+    accent-color: #2e5d34;
+  }
+  .harm-val {
+    width: 30px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #2e5d34;
+    text-align: right;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -518,39 +577,16 @@
   <div class="grid">
     <label for="note">Key</label>
     <select id="note"></select>
-    <!-- COMMENTED OUT - the gesture now determines the sound's wave, blend,
-         volume, attack, decay, sustain, hold, and release. Only the key
-         (root pitch) stays manual.
-    <label for="wave">Wave</label>
-    <select id="wave">
-      <option value="sine">Sine</option>
-      <option value="triangle">Triangle</option>
-      <option value="square">Square</option>
-      <option value="sawtooth">Sawtooth</option>
-    </select>
-    <label for="blend">Wave blend <b class="val" id="blendVal"></b></label>
-    <input type="range" id="blend" min="0" max="100" step="1">
-    <label for="blendTo">Blend to</label>
-    <select id="blendTo">
-      <option value="sine">Sine</option>
-      <option value="triangle">Triangle</option>
-      <option value="square">Square</option>
-      <option value="sawtooth">Sawtooth</option>
-    </select>
-    <label for="volume">Volume <b class="val" id="volumeVal"></b></label>
-    <input type="range" id="volume">
-    <label for="attack">Attack <b class="val" id="attackVal"></b></label>
-    <input type="range" id="attack">
-    <label for="decay">Decay <b class="val" id="decayVal"></b></label>
-    <input type="range" id="decay" min="0" max="1000" step="10">
-    <label for="sustain">Sustain <b class="val" id="sustainVal"></b></label>
-    <input type="range" id="sustain" min="0" max="100" step="1">
-    <label for="hold">Hold <b class="val" id="holdVal"></b></label>
-    <input type="range" id="hold">
-    <label for="release">Release <b class="val" id="releaseVal"></b></label>
-    <input type="range" id="release" min="0" max="2000" step="10">
-    -->
   </div>
+  <div class="vec-head">Harmonics</div>
+  <div class="harm-presets" id="harmonicPresets">
+    <button class="harm-preset active" data-preset="sine">Sine</button>
+    <button class="harm-preset" data-preset="triangle">Triangle</button>
+    <button class="harm-preset" data-preset="square">Square</button>
+    <button class="harm-preset" data-preset="sawtooth">Sawtooth</button>
+  </div>
+  <div class="env-note">Amplitude of each harmonic. Harmonic 1 = fundamental pitch. Drag sliders to shape the tone. Presets fill in known waveforms.</div>
+  <div id="harmonicSliders"></div>
   <div class="vec-head">Volume over Y</div>
   <div class="grid">
     <label for="volBottom">Lower gain (bottom) <b class="val" id="volBottomVal"></b></label>

@@ -274,6 +274,25 @@ const DEFAULT_CHIME = {
 };
 var CHIME_SETTINGS = clone(DEFAULT_CHIME);
 
+/* ---------- Harmonic editor ----------
+   32 individual harmonic amplitudes (0..1) that directly define the waveform.
+   Harmonic 1 is the fundamental; harmonic N is N× the fundamental frequency.
+   When set, these override the wave/blend system in CHIME_SETTINGS. */
+const HARMONIC_COUNT = 32;
+const DEFAULT_HARMONICS = {
+  amplitudes: (function () { const a = new Array(HARMONIC_COUNT).fill(0); a[0] = 1; return a; })(),
+};
+var HARMONICS = clone(DEFAULT_HARMONICS);
+
+// Preset waveforms: pre-computed Fourier coefficients for the first 32 harmonics.
+// Each value is the amplitude (signed) for harmonic n (1-indexed: presets[0] = harmonic 1).
+const HARMONIC_PRESETS = {
+  sine:     (function () { const a = new Array(HARMONIC_COUNT).fill(0); a[0] = 1; return a; })(),
+  triangle: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 1) a[i] = (8 / (Math.PI * Math.PI)) * (n % 4 === 1 ? 1 : -1) / (n * n); } return a; })(),
+  square:   (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 1) a[i] = (4 / Math.PI) / n; } return a; })(),
+  sawtooth: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; a[i] = (2 / Math.PI) * (n % 2 === 1 ? 1 : -1) / n; } return a; })(),
+};
+
 // Pitch color zones: the range of scale degrees shown as faint color bands on
 // screen (screen X = pitch). Octaves are relative to the key note's octave —
 // 0 is the key octave (the "middle ground"), -1/-2 below, +1/+2 above. The
