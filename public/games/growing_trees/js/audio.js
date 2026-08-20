@@ -67,7 +67,17 @@ function initAudio() {
   comp.attack.value = 0.01;
   comp.release.value = 0.3;
   masterGain.connect(comp);
-  comp.connect(audioCtx.destination);
+  // Hard limiter: a second compressor with near-brickwall settings catches any
+  // peaks that slip past the first (musical) compressor, preventing clipping
+  // when many voices stack.
+  const limiter = audioCtx.createDynamicsCompressor();
+  limiter.threshold.value = -3;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.001;
+  limiter.release.value = 0.1;
+  comp.connect(limiter);
+  limiter.connect(audioCtx.destination);
 }
 
 function resumeAudio() {
