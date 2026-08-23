@@ -1,57 +1,11 @@
 /* ============================================================
    audio.js — synthesized sound: engine, note scheduling, gesture
-   audio (live + wait modes), wave blending.
+   audio (live + wait modes), oscillator-stack voices.
    ============================================================ */
 
 const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
 
-// Wave morphing: periodic waves are built from Fourier coefficients, so a
-// blend between two types is a per-harmonic linear interpolation of their
-// coefficients. `blend` (0..1) mixes the chosen wave toward `blendTo` (or the
-// NEXT shape in the cycle if blendTo is unset), e.g. 50% sine + 50% triangle.
-const WAVE_ORDER = ['sine', 'triangle', 'square', 'sawtooth'];
 const WAVE_HARMONICS = 64;
-
-function waveCoeffs(type) {
-  const imag = new Float32Array(WAVE_HARMONICS + 1);
-  for (let n = 1; n <= WAVE_HARMONICS; n++) {
-    if (type === 'sine') {
-      if (n === 1) imag[n] = 1;
-    } else if (type === 'triangle') {
-      if (n % 2 === 1) imag[n] = (8 / (Math.PI * Math.PI)) * (n % 4 === 1 ? 1 : -1) / (n * n);
-    } else if (type === 'square') {
-      if (n % 2 === 1) imag[n] = (4 / Math.PI) / n;
-    } else if (type === 'sawtooth') {
-      imag[n] = (2 / Math.PI) * (n % 2 === 1 ? 1 : -1) / n;
-    }
-  }
-  return imag;
-}
-
-function buildBlendWave(ctx, typeA, typeB, t) {
-  const a = waveCoeffs(typeA), b = waveCoeffs(typeB);
-  const real = new Float32Array(WAVE_HARMONICS + 1);
-  const imag = new Float32Array(WAVE_HARMONICS + 1);
-  for (let n = 0; n <= WAVE_HARMONICS; n++) imag[n] = (1 - t) * a[n] + t * b[n];
-  // Normalize the peak to 1.0: a band-limited square/sawtooth (or a blend toward
-  // one) overshoots ±1.0 at its discontinuity (Gibbs overshoot — a sawtooth can
-  // peak ~1.2-1.3), so the same gain value would play louder on rich waves and
-  // feed clipping. Sample the waveform at many phases, scale the coefficients so
-  // the peak lands at exactly 1.0, and every wave/blend plays at equal loudness.
-  let peak = 0;
-  const N = 2048;
-  for (let k = 0; k < N; k++) {
-    const th = (2 * Math.PI * k) / N;
-    let v = 0;
-    for (let n = 1; n <= WAVE_HARMONICS; n++) v += imag[n] * Math.sin(n * th);
-    if (Math.abs(v) > peak) peak = Math.abs(v);
-  }
-  if (peak > 1e-9) {
-    const s = 1 / peak;
-    for (let n = 0; n <= WAVE_HARMONICS; n++) imag[n] *= s;
-  }
-  return ctx.createPeriodicWave(real, imag);
-}
 
 function initAudio() {
   if (audioCtx) return;
@@ -131,13 +85,12 @@ function playUnlockChime() {
   g.setValueAtTime(0, tSus);
   g.linearRampToValueAtTime(0, tEnd);
   gain.connect(masterGain);
-  const osc = audioCtx.createOscillator();
-  setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(s.note);
-  osc.connect(gain);
-  osc.start(t0);
-  osc.stop(tEnd + 0.05);
-  setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} }, (tEnd - t0 + 0.5) * 1000);
+  const stack = buildLayerStack(audioCtx, gain);
+  scheduleLayerMix(stack, t0, tEnd);
+  startLayerStack(stack, t0, tEnd, noteToFreq(s.note));
+  setTimeout(() => {
+    try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(g => g.disconnect()); gain.disconnect(); } catch (e) {}
+  }, (tEnd - t0 + 0.5) * 1000);
 }
 
 /* ---------- Note / pitch helpers ---------- */
@@ -197,9 +150,8 @@ function pitchFor(sx, sy) {
   return noteNameForPos(pitchPositions()[pitchIndexForX(sx)]);
 }
 
-// Build a PeriodicWave from user-specified harmonic amplitudes (0..1 each).
-// The peak is normalized to 1.0 so every harmonic combination plays at equal
-// loudness (same approach as buildBlendWave).
+// Build a PeriodicWave from harmonic amplitudes (0..1 each). The peak is
+// normalized to 1.0 so every harmonic combination plays at equal loudness.
 function buildHarmonicWave(ctx, amplitudes) {
   const real = new Float32Array(WAVE_HARMONICS + 1);
   const imag = new Float32Array(WAVE_HARMONICS + 1);
@@ -221,16 +173,134 @@ function buildHarmonicWave(ctx, amplitudes) {
   return ctx.createPeriodicWave(real, imag);
 }
 
-function setOscWave(osc, s) {
-  // Custom harmonics override the wave/blend system when any are non-zero.
-  if (typeof HARMONICS !== 'undefined' && HARMONICS.amplitudes.some(v => v !== 0)) {
-    osc.setPeriodicWave(buildHarmonicWave(audioCtx, HARMONICS.amplitudes));
-  } else if (s.blend > 0) {
-    const idx = WAVE_ORDER.indexOf(s.wave);
-    const next = WAVE_ORDER.includes(s.blendTo) ? s.blendTo : WAVE_ORDER[(idx + 1) % WAVE_ORDER.length];
-    osc.setPeriodicWave(buildBlendWave(audioCtx, s.wave, next, Math.min(1, s.blend)));
-  } else {
-    osc.type = s.wave;
+/* ---- Oscillator stack ----
+   A note is a mix of OSC_STACK.layers. Each layer gets its own oscillator and
+   mix gain, chained osc → mixGain → the shared envelope gain (which carries the
+   amplitude envelope, so all the envelope scheduling below is untouched). The
+   mix gain carries only the layer's time-varying mix weight. */
+// Built PeriodicWaves are cached by their harmonic content so a repeated layer
+// (same preset or custom amplitudes) reuses the wave instead of rebuilding it
+// for every note.
+const layerWaveCache = new Map();
+function layerWaveKey(layer) {
+  if (layer.presetId) return 'p:' + layer.presetId;
+  let key = 'c:';
+  for (let i = 0; i < HARMONIC_COUNT; i++) {
+    key += (i ? ',' : '') + Math.round((layer.amplitudes[i] || 0) * 1000);
+  }
+  return key;
+}
+function layerWave(ctx, layer) {
+  const key = layerWaveKey(layer);
+  let w = layerWaveCache.get(key);
+  if (!w) {
+    w = buildHarmonicWave(ctx, layerWaveCoeffs(layer));
+    // Cap the cache: drawing a spectrum can churn out many waves in a session.
+    // In-flight oscillators keep their own references, so evicting old entries
+    // never silences a note that is already scheduled.
+    if (layerWaveCache.size >= 256) layerWaveCache.clear();
+    layerWaveCache.set(key, w);
+  }
+  return w;
+}
+
+// Build the oscillator layers for a note (osc → mixGain, all into envGain).
+// mixParams[i] is the AudioParam carrying layer i's time-varying mix.
+function buildLayerStack(ctx, envGain) {
+  const oscs = [], mixGains = [], mixParams = [];
+  const g0 = layerGainsAt(0);
+  for (let i = 0; i < OSC_STACK.layers.length; i++) {
+    const layer = OSC_STACK.layers[i];
+    const osc = ctx.createOscillator();
+    osc.setPeriodicWave(layerWave(ctx, layer));
+    osc.frequency.value = 440;
+    const g = ctx.createGain();
+    g.gain.value = g0[i];
+    osc.connect(g);
+    g.connect(envGain);
+    oscs.push(osc);
+    mixGains.push(g);
+    mixParams.push(g.gain);
+  }
+  return { oscs, mixGains, mixParams };
+}
+
+// Start every oscillator at t0 (and stop at stopAt, when provided — live notes
+// schedule their own stop at release). Each layer plays the same pitch `freq`.
+function startLayerStack(stack, t0, freq, stopAt) {
+  for (const osc of stack.oscs) {
+    osc.frequency.value = freq;
+    osc.start(t0);
+    if (stopAt != null) osc.stop(stopAt);
+  }
+}
+
+// Duration of the release section (the design tail after the hold end).
+function releaseMs() {
+  return compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
+}
+
+// Design body length (hold end) — the canonical body used by the curve markers.
+function designBodyMs() {
+  return designTimeline().bodyMs;
+}
+
+// Schedule each layer's mix across the whole note (wait-mode and the fixed-length
+// one-shot chimes): sample each layer's normalized mix curve over t0..tEnd and
+// play it with a value curve (same pattern as the envelope body scheduling).
+// The curve is sampled against the note's body/release split (when given) so the
+// drawn features line up with the HOLD/CUT/REL markers; one-shots sample it
+// uniformly.
+function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
+  const dur = Math.max(0.004, tEnd - t0);
+  const N = 64;
+  const gains = [];
+  const split = actualBodyMs != null && relMs != null && (actualBodyMs + relMs) > 0;
+  const dBody = designBodyMs();
+  for (let k = 0; k < N; k++) {
+    const audioMs = (k / (N - 1)) * dur * 1000;
+    const prog = split ? mixProgForTimes(audioMs, actualBodyMs, relMs, dBody) : k / (N - 1);
+    gains.push(layerGainsAt(prog));
+  }
+  for (let i = 0; i < stack.mixParams.length; i++) {
+    const p = stack.mixParams[i];
+    const curve = new Float32Array(N);
+    for (let k = 0; k < N; k++) curve[k] = gains[k][i];
+    p.setValueAtTime(curve[0], t0);
+    p.setValueCurveAtTime(curve, t0 + 0.002, dur - 0.002);
+  }
+}
+
+// Chase the live mix params toward their current progress value. The body runs
+// from note start to the release point (max of the drawn time and the early-cut
+// marker), then the release section, mapped onto the same curve axis.
+function updateLiveMixTargets(ds, at, tc) {
+  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
+  const relMs = releaseMs();
+  const gains = layerGainsAt(mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs()));
+  for (let i = 0; i < ds.mixParams.length; i++) {
+    ds.mixParams[i].setTargetAtTime(gains[i], at, tc);
+  }
+}
+
+// On release, each live layer's mix continues through the release section of its
+// drawn curve (from the release-begin fraction up to the note-end value), so the
+// morph completes through the tail exactly as it does in wait mode.
+function rampLayerMixToEnd(ds, startT, ms) {
+  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
+  const relMs = releaseMs();
+  const dBody = designBodyMs();
+  const N = 32;
+  for (let i = 0; i < (ds.mixParams || []).length; i++) {
+    const p = ds.mixParams[i];
+    const curve = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const relElapsed = relMs > 0 ? ms * k / (N - 1) : ms;
+      curve[k] = layerGainsAt(mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody))[i];
+    }
+    p.cancelScheduledValues(startT);
+    p.setValueAtTime(Math.max(1e-4, p.value), startT);
+    p.setValueCurveAtTime(curve, startT + 0.002, Math.max(0.004, ms / 1000) - 0.002);
   }
 }
 
@@ -263,15 +333,12 @@ function chime(level, overrides) {
   g.linearRampToValueAtTime(0, tEnd);
   gain.connect(masterGain);
 
-  const osc = audioCtx.createOscillator();
-  setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(s.note);
-  osc.connect(gain);
-  osc.start(t0);
-  osc.stop(tEnd + 0.05);
+  const stack = buildLayerStack(audioCtx, gain);
+  scheduleLayerMix(stack, t0, tEnd);
+  startLayerStack(stack, t0, tEnd, noteToFreq(s.note));
 
   setTimeout(() => {
-    try { osc.disconnect(); gain.disconnect(); } catch (e) {}
+    try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(g => g.disconnect()); gain.disconnect(); } catch (e) {}
   }, (tEnd - t0 + 0.5) * 1000);
 }
 
@@ -298,8 +365,15 @@ function stopGestureNote() {
       param.cancelScheduledValues(now);
       param.setValueAtTime(param.value, now);
       param.linearRampToValueAtTime(0, now + 0.03);
-      n.osc.stop(now + 0.05);
-      setTimeout(() => { try { n.osc.disconnect(); if (node && node.disconnect) node.disconnect(); } catch (e) {} }, 200);
+      const oscs = n.oscs || (n.osc ? [n.osc] : []);
+      for (const o of oscs) { try { o.stop(now + 0.05); } catch (e) {} }
+      setTimeout(() => {
+        try {
+          oscs.forEach(o => o.disconnect());
+          (n.mixGains || []).forEach(g => g.disconnect());
+          if (node && node.disconnect) node.disconnect();
+        } catch (e) {}
+      }, 200);
     } catch (e) {}
   }
   gestureNotes = [];
@@ -318,8 +392,15 @@ function quickFadeNote(n, fadeMs) {
     param.cancelScheduledValues(now);
     param.setValueAtTime(param.value, now);
     param.linearRampToValueAtTime(0, now + fadeMs / 1000);
-    n.osc.stop(now + fadeMs / 1000 + 0.05);
-    setTimeout(() => { try { n.osc.disconnect(); if (node && node.disconnect) node.disconnect(); } catch (e) {} }, fadeMs + 200);
+    const oscs = n.oscs || (n.osc ? [n.osc] : []);
+    for (const o of oscs) { try { o.stop(now + fadeMs / 1000 + 0.05); } catch (e) {} }
+    setTimeout(() => {
+      try {
+        oscs.forEach(o => o.disconnect());
+        (n.mixGains || []).forEach(g => g.disconnect());
+        if (node && node.disconnect) node.disconnect();
+      } catch (e) {}
+    }, fadeMs + 200);
   } catch (e) {}
 }
 
@@ -362,7 +443,6 @@ function retriggerPitch(pitch, keep) {
 
 function schedulePathAudio(ds, totalMs, pb) {
   if (!audioCtx || !masterGain) return;
-  const s = CHIME_SETTINGS.start;
   const t0 = audioCtx.currentTime;
   // Retrigger: a new note on this pitch steals the voice already ringing there,
   // so rapid taps on one band restrike instead of stacking voices.
@@ -408,15 +488,15 @@ function schedulePathAudio(ds, totalMs, pb) {
   g.linearRampToValueAtTime(0, tEnd);
   gain.connect(masterGain);
 
-  const osc = audioCtx.createOscillator();
-  setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(pitch);
-  osc.connect(gain);
-  osc.start(t0);
-  osc.stop(tEnd + 0.05);
-  const note = { osc, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb };
+  const stack = buildLayerStack(audioCtx, gain);
+  scheduleLayerMix(stack, t0, tEnd, bodyDurMs, relMs);
+  startLayerStack(stack, t0, tEnd, noteToFreq(pitch));
+  const note = { oscs: stack.oscs, mixGains: stack.mixGains, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb };
   gestureNotes.push(note);
-  setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch (e) {} unregisterNote(note); }, (tEnd - t0 + 0.5) * 1000);
+  setTimeout(() => {
+    try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(x => x.disconnect()); gain.disconnect(); } catch (e) {}
+    unregisterNote(note);
+  }, (tEnd - t0 + 0.5) * 1000);
 }
 
 // Run `fn` once the AudioContext is actually running. On the very first load the
@@ -443,7 +523,6 @@ function ensureLiveAudio(ds, deadline) {
 }
 
 function initLivePathAudio(ds) {
-  const s = CHIME_SETTINGS.start;
   const ctx0 = audioCtx.currentTime;
   // A new note on a pitch steals the voice already ringing there (retrigger),
   // so rapid taps on one band restrike instead of stacking voices.
@@ -454,16 +533,17 @@ function initLivePathAudio(ds) {
   const baseVol0 = baseVolumeFromY(ds.pts[0].y);
   g.setValueAtTime(baseVol0 * relValueBody(ENVELOPE, 0, true), ctx0);
   gain.connect(masterGain);
-  const osc = audioCtx.createOscillator();
-  setOscWave(osc, s);
-  osc.frequency.value = noteToFreq(ds.pitch);
-  osc.connect(gain);
-  osc.start(ctx0);
+  const stack = buildLayerStack(audioCtx, gain);
+  const freq = noteToFreq(ds.pitch);
+  for (const osc of stack.oscs) { osc.frequency.value = freq; osc.start(ctx0); }
   ds.startedAt = performance.now();
   ds.ctx0 = ctx0;
   ds.gain = g;          // the AudioParam (gain.gain) — scheduling/ramps go through this
   ds.gainNode = gain;   // the GainNode itself — used for cleanup/disconnect
-  ds.osc = osc;
+  ds.oscs = stack.oscs;
+  ds.mixGains = stack.mixGains;
+  ds.mixParams = stack.mixParams;
+  ds.osc = stack.oscs[0];
   ds.gainLevel = baseVol0 * relValueBody(ENVELOPE, 0, true);
   ds.lastSched = ctx0;
   ds.cleanupTimer = null;
@@ -492,6 +572,7 @@ function scheduleLivePoint(ds) {
     ds.gain.setTargetAtTime(target, now, 0.06);   // catch-up: chase the fingertip
   }
   ds.gainLevel = target;
+  updateLiveMixTargets(ds, now, 0.06);
 }
 
 // A held finger adds no new path points, so no volume automation is scheduled
@@ -516,6 +597,7 @@ function tickLiveHold(ds) {
   ds.gain.setValueCurveAtTime(scaled, at + 0.001, horizon);
   ds.lastSched = at + 0.001 + horizon;
   ds.gainLevel = scaled[scaled.length - 1];
+  updateLiveMixTargets(ds, at, 0.06);
 }
 
 // Where an early release jumps to the release section: the playback time (ms)
@@ -552,6 +634,7 @@ function finishLivePathNote(ds) {
   ds.playback.startedAt = performance.now() - playheadMs;
   const now = audioCtx.currentTime;
   const elapsed = performance.now() - ds.startedAt;
+  updateLiveMixTargets(ds, now, 0.05);
   if (elapsed >= ds.totalMs) {
     // The circle already caught the fingertip (the drawn body finished). If the
     // envelope hasn't played through the early-cut marker yet — a quick tap or
@@ -616,6 +699,7 @@ function scheduleReleaseTail(ds, startLevel, startT) {
   const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
   const relMs = compsMs(relComps);
   const now = audioCtx.currentTime;
+  const oscs = ds.oscs || (ds.osc ? [ds.osc] : []);
   g.cancelScheduledValues(Math.max(now, startT));
   g.setValueAtTime(Math.max(1e-4, startLevel), startT);
   if (relMs > 0) {
@@ -623,12 +707,14 @@ function scheduleReleaseTail(ds, startLevel, startT) {
     g.setValueCurveAtTime(rel.curve, startT + 0.002, relMs / 1000);
     const stopT = startT + relMs / 1000 + FADE_MS / 1000;
     g.linearRampToValueAtTime(0, stopT);
-    try { ds.osc.stop(stopT + 0.05); } catch (e) {}
+    rampLayerMixToEnd(ds, startT, relMs);
+    for (const o of oscs) { try { o.stop(stopT + 0.05); } catch (e) {} }
     scheduleLiveCleanup(ds, stopT);
   } else {
     const stopT = startT + FADE_MS / 1000;
     g.linearRampToValueAtTime(0, stopT);
-    try { ds.osc.stop(stopT + 0.05); } catch (e) {}
+    rampLayerMixToEnd(ds, startT, FADE_MS);
+    for (const o of oscs) { try { o.stop(stopT + 0.05); } catch (e) {} }
     scheduleLiveCleanup(ds, stopT);
   }
 }
@@ -636,7 +722,11 @@ function scheduleReleaseTail(ds, startLevel, startT) {
 function scheduleLiveCleanup(ds, t) {
   clearTimeout(ds.cleanupTimer);
   ds.cleanupTimer = setTimeout(() => {
-    try { ds.osc.disconnect(); if (ds.gainNode) ds.gainNode.disconnect(); } catch (e) {}
+    try {
+      (ds.oscs || []).forEach(o => o.disconnect());
+      (ds.mixGains || []).forEach(g => g.disconnect());
+      if (ds.gainNode) ds.gainNode.disconnect();
+    } catch (e) {}
     unregisterNote(ds);
   }, (t - audioCtx.currentTime + 0.5) * 1000);
 }

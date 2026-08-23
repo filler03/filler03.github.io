@@ -73,7 +73,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, harmonics: HARMONICS }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -190,14 +190,61 @@ function loadSavedSettings() {
       else if (d.volume.ratio != null) vol.top = Math.max(0, Math.min(1, vol.bottom * (+d.volume.ratio || 50)));
     }
     VOLUME = vol;
-    // v9+: harmonics
-    const harm = clone(DEFAULT_HARMONICS);
-    if (d.harmonics && Array.isArray(d.harmonics.amplitudes) && d.harmonics.amplitudes.length) {
-      for (let i = 0; i < HARMONIC_COUNT; i++) {
-        harm.amplitudes[i] = Math.max(-1, Math.min(1, +d.harmonics.amplitudes[i] || 0));
+    // v9+: oscillator stack. New saves store `oscStack`; older saves stored a
+    // single `harmonics` amplitude set, which becomes one custom layer.
+    function curveFromSaved(l) {
+      if (l && Array.isArray(l.curve) && l.curve.length >= 2) {
+        const pts = l.curve.map((p, k) => ({
+          t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k) || 0)),
+          v: Math.max(0, Math.min(1, +((p && p.v) != null ? p.v : 1) || 1)),
+        }));
+        pts.sort((a, b) => a.t - b.t);
+        const out = [];
+        for (const p of pts) {
+          if (out.length && out[out.length - 1].t === p.t) out[out.length - 1].v = p.v;
+          else out.push(p);
+        }
+        if (out.length >= 2) return out;
       }
+      // Older saves used two-point mixStart/mixEnd: migrate to a flat-ish curve.
+      const ms = l && l.mixStart != null ? +l.mixStart : 1;
+      const me = l && l.mixEnd != null ? +l.mixEnd : 1;
+      return [
+        { t: 0, v: Math.max(0, Math.min(1, ms || 1)) },
+        { t: 1, v: Math.max(0, Math.min(1, me || 1)) },
+      ];
     }
-    HARMONICS = harm;
+    function layerFromSaved(l, i) {
+      const amplitudes = new Array(HARMONIC_COUNT).fill(0);
+      if (l && Array.isArray(l.amplitudes) && l.amplitudes.length) {
+        for (let j = 0; j < HARMONIC_COUNT; j++) amplitudes[j] = Math.max(-1, Math.min(1, +l.amplitudes[j] || 0));
+      } else {
+        amplitudes[0] = 1;
+      }
+      let specPoints = null;
+      if (l && Array.isArray(l.specPoints) && l.specPoints.length >= 2) {
+        specPoints = l.specPoints.map((p, k) => ({
+          x: Math.max(0, Math.min(1, +((p && p.x) != null ? p.x : k) || 0)),
+          a: Math.max(-1, Math.min(1, +((p && p.a) != null ? p.a : 0) || 0)),
+        }));
+        specPoints.sort((a, b) => a.x - b.x);
+      }
+      return {
+        id: (l && l.id) || 'osc-' + (i + 1),
+        amplitudes,
+        level: Math.max(0, Math.min(1, +((l && l.level) != null ? l.level : 1) || 1)),
+        curve: curveFromSaved(l),
+        presetId: (l && l.presetId) || null,
+        specPoints,
+      };
+    }
+    const stack = clone(DEFAULT_OSC_STACK);
+    if (d.oscStack && Array.isArray(d.oscStack.layers) && d.oscStack.layers.length) {
+      stack.layers = d.oscStack.layers.map(layerFromSaved);
+    } else if (d.harmonics && Array.isArray(d.harmonics.amplitudes) && d.harmonics.amplitudes.length) {
+      stack.layers = [layerFromSaved({ amplitudes: d.harmonics.amplitudes }, 0)];
+    }
+    OSC_STACK = stack;
     if (migrated) {
       // A legacy save was just loaded: persist it under the current key now so
       // later edits land in the right place (and the legacy copy can age out).
@@ -216,7 +263,8 @@ function resetToDefaults() {
   ENVELOPE = clone(DEFAULT_ENVELOPE);
   PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
   VOLUME = clone(DEFAULT_VOLUME);
-  HARMONICS = clone(DEFAULT_HARMONICS);
+  OSC_STACK = clone(DEFAULT_OSC_STACK);
+  selectedLayerIdx = 0;
   // Clear legacy copies too, or the next load would migrate them straight back.
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   for (const k of LEGACY_STORAGE_KEYS) { try { localStorage.removeItem(k); } catch (e) {} }
@@ -454,15 +502,71 @@ syncSensUI();
 
 /* ---- Gesture value mapping is pure screen proportions (see lineTimeForSlot) ---- */
 
-/* ---- Harmonic editor ---- */
+/* ---- Oscillator mixer ----
+   OSC_STACK.layers each define a waveform (a named preset or custom harmonic
+   amplitudes), a level, and a Start→End mix morph. The selected layer is edited
+   by the waveform preset dropdown and the harmonic sliders below the mixer. */
 const harmonicSlidersEl = document.getElementById('harmonicSliders');
-const harmonicPresetsEl = document.getElementById('harmonicPresets');
-let activePreset = 'sine';
+const harmonicPresetSelectEl = document.getElementById('harmonicPreset');
+const oscListEl = document.getElementById('oscList');
+const oscAddEl = document.getElementById('oscAdd');
+const oscResetEl = document.getElementById('oscReset');
+let selectedLayerIdx = 0;
+
+const PRESET_LABELS = {
+  sine: 'Sine', triangle: 'Triangle', square: 'Square', sawtooth: 'Sawtooth',
+  reverseSaw: 'Reverse sawtooth', pulse25: 'Pulse (25%)', pulse10: 'Pulse (10%)',
+  warm: 'Warm', mellow: 'Mellow', bright: 'Bright', hollow: 'Hollow', ethereal: 'Ethereal',
+};
+
+function selectedLayer() {
+  const layers = OSC_STACK.layers;
+  if (!layers.length) layers.push(defaultLayer('osc-1'));
+  if (selectedLayerIdx >= layers.length) selectedLayerIdx = layers.length - 1;
+  return layers[selectedLayerIdx];
+}
+
+function presetOptionsHtml(sel) {
+  const groups = [
+    ['Classic', ['sine', 'triangle', 'square', 'sawtooth', 'reverseSaw', 'pulse25', 'pulse10']],
+    ['Spectral', ['warm', 'mellow', 'bright', 'hollow', 'ethereal']],
+  ];
+  let html = '<option value="">Custom…</option>';
+  for (const [label, ids] of groups) {
+    html += '<optgroup label="' + label + '">';
+    for (const id of ids) {
+      html += '<option value="' + id + '"' + (id === sel ? ' selected' : '') + '>' + (PRESET_LABELS[id] || id) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  return html;
+}
+
+function renderOscList() {
+  let html = '';
+  for (let i = 0; i < OSC_STACK.layers.length; i++) {
+    const l = OSC_STACK.layers[i];
+    const pct = v => Math.round(v * 100) + '%';
+    html += '<div class="env-row osc-card' + (i === selectedLayerIdx ? ' active' : '') + '" data-idx="' + i + '">'
+      + '<div class="env-row-head">'
+      + '<span class="env-name osc-name">Osc ' + (i + 1) + '</span>'
+      + '<button type="button" class="osc-del" data-idx="' + i + '" title="Remove oscillator">✕</button>'
+      + '</div>'
+      + '<div class="env-secs">'
+      + '<label class="env-sec">Wave <select class="osc-wave" data-idx="' + i + '">' + presetOptionsHtml(l.presetId || '') + '</select></label>'
+      + '<label class="env-sec">Level <input type="range" class="osc-level" data-idx="' + i + '" min="0" max="100" step="1" value="' + Math.round(l.level * 100) + '"><b>' + pct(l.level) + '</b></label>'
+      + '</div>'
+      + '<button type="button" class="osc-editmix" data-idx="' + i + '" title="Open the sound creator to draw this oscillator mix curve over time">✎ Draw mix curve</button>'
+      + '</div>';
+  }
+  oscListEl.innerHTML = html;
+}
 
 function renderHarmonicSliders() {
+  const amps = selectedLayer().amplitudes;
   let html = '';
   for (let i = 0; i < HARMONIC_COUNT; i++) {
-    const amp = HARMONICS.amplitudes[i];
+    const amp = amps[i];
     const pct = Math.round(Math.abs(amp) * 100);
     const sign = amp < 0 ? '-' : '';
     html += '<div class="harm-row"><span class="harm-label">H' + (i + 1) + '</span>'
@@ -473,39 +577,124 @@ function renderHarmonicSliders() {
 }
 
 function syncHarmonicsUI() {
+  selectedLayerIdx = Math.max(0, Math.min(OSC_STACK.layers.length - 1, selectedLayerIdx));
+  renderOscList();
   renderHarmonicSliders();
-  activePreset = matchPreset();
-  for (const btn of harmonicPresetsEl.querySelectorAll('.harm-preset')) {
-    btn.classList.toggle('active', btn.dataset.preset === activePreset);
-  }
+  harmonicPresetSelectEl.value = matchPreset(selectedLayer().amplitudes) || '';
 }
 
-function matchPreset() {
+function matchPreset(amplitudes) {
   for (const name of Object.keys(HARMONIC_PRESETS)) {
     const preset = HARMONIC_PRESETS[name];
     let match = true;
     for (let i = 0; i < HARMONIC_COUNT; i++) {
-      if (Math.abs(HARMONICS.amplitudes[i] - preset[i]) > 0.005) { match = false; break; }
+      if (Math.abs(amplitudes[i] - preset[i]) > 0.005) { match = false; break; }
     }
     if (match) return name;
   }
   return null;
 }
 
+// Apply a preset's coefficients to a layer (also marked as a preset so the wave
+// cache key stays stable); returns the layer.
+function applyPresetToLayer(layer, name) {
+  const preset = HARMONIC_PRESETS[name];
+  if (!preset) return layer;
+  for (let i = 0; i < HARMONIC_COUNT; i++) layer.amplitudes[i] = preset[i];
+  layer.presetId = name;
+  layer.specPoints = null;   // a preset replaces any drawn spectrum curve
+  return layer;
+}
+
+/* -- Mixer card events -- */
+oscListEl.addEventListener('click', e => {
+  if (e.target.classList.contains('osc-editmix')) {
+    selectedLayerIdx = +e.target.dataset.idx;
+    if (typeof openSoundCreator === 'function') openSoundCreator('mix', selectedLayerIdx);
+    return;
+  }
+  if (e.target.classList.contains('osc-del')) {
+    if (OSC_STACK.layers.length <= 1) return;
+    const i = +e.target.dataset.idx;
+    OSC_STACK.layers.splice(i, 1);
+    if (selectedLayerIdx >= i) selectedLayerIdx = Math.max(0, selectedLayerIdx - 1);
+    syncHarmonicsUI();
+    saveSettings();
+    return;
+  }
+  const card = e.target.closest('.osc-card');
+  if (!card) return;
+  const i = +card.dataset.idx;
+  if (i === selectedLayerIdx) return;
+  selectedLayerIdx = i;
+  renderOscList();
+  renderHarmonicSliders();
+  harmonicPresetSelectEl.value = matchPreset(selectedLayer().amplitudes) || '';
+});
+
+oscListEl.addEventListener('input', e => {
+  const card = e.target.closest('.osc-card');
+  if (!card) return;
+  const i = +card.dataset.idx;
+  const l = OSC_STACK.layers[i];
+  if (!l) return;
+  if (e.target.classList.contains('osc-level')) {
+    l.level = Math.max(0, Math.min(1, +e.target.value / 100));
+    e.target.parentElement.querySelector('b').textContent = Math.round(l.level * 100) + '%';
+  }
+  previewChime();
+});
+
+oscListEl.addEventListener('change', e => {
+  const card = e.target.closest('.osc-card');
+  if (!card) return;
+  const i = +card.dataset.idx;
+  const l = OSC_STACK.layers[i];
+  if (!l) return;
+  if (e.target.classList.contains('osc-wave')) {
+    if (e.target.value) applyPresetToLayer(l, e.target.value);
+    else l.presetId = null;   // Custom: keep the current amplitudes
+    if (i === selectedLayerIdx) {
+      renderHarmonicSliders();
+      harmonicPresetSelectEl.value = matchPreset(selectedLayer().amplitudes) || '';
+    }
+    previewChime();
+  }
+  saveSettings();
+});
+
+oscAddEl.addEventListener('click', () => {
+  if (OSC_STACK.layers.length >= 8) return;
+  OSC_STACK.layers.push(defaultLayer('osc-' + (OSC_STACK.layers.length + 1)));
+  selectedLayerIdx = OSC_STACK.layers.length - 1;
+  syncHarmonicsUI();
+  saveSettings();
+});
+
+oscResetEl.addEventListener('click', () => {
+  OSC_STACK = clone(DEFAULT_OSC_STACK);
+  selectedLayerIdx = 0;
+  syncHarmonicsUI();
+  saveSettings();
+});
+
+/* -- Selected-layer waveform editing -- */
 harmonicSlidersEl.addEventListener('input', e => {
   if (!e.target.classList.contains('harm-slider')) return;
   const i = +e.target.dataset.idx;
-  HARMONICS.amplitudes[i] = Math.max(-1, Math.min(1, +e.target.value / 100));
+  const layer = selectedLayer();
+  layer.amplitudes[i] = Math.max(-1, Math.min(1, +e.target.value / 100));
+  layer.presetId = null;   // any manual edit makes the waveform custom
+  layer.specPoints = null; // ...and replaces any drawn spectrum curve
   const vEl = e.target.closest('.harm-row').querySelector('.harm-val');
   if (vEl) {
-    const v = HARMONICS.amplitudes[i];
+    const v = layer.amplitudes[i];
     const pct = Math.round(Math.abs(v) * 100);
     vEl.textContent = (v < 0 ? '-' : '') + pct + '%';
   }
-  activePreset = matchPreset();
-  for (const btn of harmonicPresetsEl.querySelectorAll('.harm-preset')) {
-    btn.classList.toggle('active', btn.dataset.preset === activePreset);
-  }
+  harmonicPresetSelectEl.value = matchPreset(layer.amplitudes) || '';
+  const waveSel = oscListEl.querySelector('.osc-wave[data-idx="' + selectedLayerIdx + '"]');
+  if (waveSel) waveSel.value = layer.presetId || '';
   previewChime();
 });
 
@@ -513,18 +702,12 @@ harmonicSlidersEl.addEventListener('change', () => {
   saveSettings();
 });
 
-harmonicPresetsEl.addEventListener('click', e => {
-  const btn = e.target.closest('.harm-preset');
-  if (!btn) return;
-  const name = btn.dataset.preset;
-  const preset = HARMONIC_PRESETS[name];
-  if (!preset) return;
-  for (let i = 0; i < HARMONIC_COUNT; i++) HARMONICS.amplitudes[i] = preset[i];
-  activePreset = name;
-  for (const b of harmonicPresetsEl.querySelectorAll('.harm-preset')) {
-    b.classList.toggle('active', b === btn);
-  }
+harmonicPresetSelectEl.addEventListener('change', e => {
+  const name = e.target.value;
+  if (!name) return;
+  applyPresetToLayer(selectedLayer(), name);
   renderHarmonicSliders();
+  renderOscList();
   previewChime();
   saveSettings();
 });
