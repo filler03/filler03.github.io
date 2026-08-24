@@ -12,9 +12,23 @@ const creatorBtn = document.getElementById('creatorBtn');
 
 let creatorSubmode = 'note';  // 'note' (merged volume envelope + mix) or 'harm'
 let creatorVolSel = true;     // true = master volume envelope selected; false = a layer's mix curve
-let creatorPtr = null;        // { mode:'point'|'marker', layerIdx, ptIdx|key, x0, y0, moved }
+let creatorPtr = null;        // { mode:'point'|'marker'|'draw', layerIdx, ptIdx|key, x0, y0, moved }
 let creatorLastTap = null;    // { t, x, y } for double-tap-to-delete
 let creatorPreviewTimer = null;
+// Freehand "Draw" mode: while on, any drag in the graph scribbles breakpoints
+// along the finger's path instead of grabbing/moving individual dots. The
+// points dropdown (4..32) sets how many evenly-spaced breakpoints a full-width
+// sweep places across the graph; the mode itself is session-only, the count is
+// persisted.
+let creatorDrawMode = false;
+var creatorDrawPoints = 8;   // 4..HARMONIC_COUNT (clamped)
+// Auto-preview: when on, edits/taps in the creator (and settings sliders) play
+// the current design automatically. When off, only the ▶ Preview button (and
+// the settings panel's Play test) make a sound. Persisted; default off.
+var creatorAutoPreview = false;
+// Hard cap on envelope components created by drawing (the other editors cap via
+// their own insert helpers, raised to HARMONIC_COUNT for drawing).
+const ENV_DRAW_MAX = 48;
 
 /* ---- Open / close ---- */
 function openSoundCreator(submode, layerIdx) {
@@ -28,6 +42,8 @@ function openSoundCreator(submode, layerIdx) {
   playbacks.length = 0;
   settingsPanel.classList.add('hidden');
   document.body.classList.add('creator');
+  const ptsSel = document.getElementById('creatorPoints');
+  if (ptsSel) ptsSel.value = drawPointCount();
 }
 
 function closeSoundCreator() {
@@ -39,6 +55,8 @@ function closeSoundCreator() {
   stopGestureNote();
   stopPreviewVoices();
   document.body.classList.remove('creator');
+  const ptsSel = document.getElementById('creatorPoints');
+  if (ptsSel) ptsSel.style.display = 'none';
   flushSettingsSave();
 }
 
@@ -48,6 +66,25 @@ creatorBtn.addEventListener('click', () => {
   resumeAudio();
   openSoundCreator('note', selectedLayerIdx);
 });
+
+/* ---- Draw points dropdown ----
+   A native <select> overlaid on the toolbar's points pill. Its options mirror
+   the range of the graph's point models (4..HARMONIC_COUNT), so a full-width
+   draw places exactly the chosen number of breakpoints on any tab. */
+(function initDrawPointsSelect() {
+  const sel = document.getElementById('creatorPoints');
+  if (!sel) return;
+  for (let i = 4; i <= HARMONIC_COUNT; i++) {
+    const o = document.createElement('option');
+    o.value = i; o.textContent = i + ' points';
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', () => {
+    creatorDrawPoints = Math.max(4, Math.min(HARMONIC_COUNT, +sel.value || 8));
+    saveSettings();
+    sel.blur();
+  });
+})();
 
 /* ---- Plot geometry ---- */
 function creatorPlot() {
@@ -156,7 +193,7 @@ function insertCurvePoint(l, t, v) {
   for (let i = 0; i < curve.length; i++) {
     if (Math.abs(curve[i].t - t) < 0.008) { curve[i].v = v; return i; }
   }
-  if (curve.length >= 16) return -1;
+  if (curve.length >= HARMONIC_COUNT) return -1;
   curve.push({ t, v });
   curve.sort((a, b) => a.t - b.t);
   return curve.findIndex(pt => pt.t === t && pt.v === v);
@@ -331,6 +368,107 @@ function envDragBoundary(i, t, v) {
   clampEnvelopeIndexes();
 }
 
+/* ---- Freehand drawing ----
+   Draw mode scribbles breakpoints along the finger's path. The points dropdown
+   (4..32) divides the graph into that many evenly-spaced slots (x = i/(N-1));
+   each time the finger enters a slot, a breakpoint is placed/updated there at
+   the finger's value. Insert-dedupe merges revisits, so a full sweep yields at
+   most N points and backtracking adds nothing. */
+function drawPointCount() { return Math.max(4, Math.min(HARMONIC_COUNT, +creatorDrawPoints || 8)); }
+function slotT(s) { const n = drawPointCount(); return n > 1 ? s / (n - 1) : 0; }
+function slotAtX(x, p) {
+  const n = drawPointCount();
+  if (n <= 1) return 0;
+  return Math.max(0, Math.min(n - 1, Math.round((x - p.left) / (p.pw / (n - 1)))));
+}
+
+// Toolbar pills floating in the top-right corner of the plot (always visible in
+// both sub-modes, so Draw stays reachable without crowding the busy bars). The
+// points pill is the visual under the native <select> dropdown.
+function drawToolbar(p) {
+  const y = p.top + 8, w = 58, h = 26;
+  const drawX = p.right - 4 - w;
+  const densX = drawX - 8 - w;
+  return {
+    draw:  { x: drawX, y, w, h },
+    dens:  { x: densX, y, w, h },
+  };
+}
+
+// Auto-preview toggle + manual preview button, anchored just left of the pitch
+// selector in the swatch row (y 68..90).
+function creatorTopPills() {
+  const y = 68, h = 22;
+  const previewX = W - 196 - 8 - 72;
+  const autoX = previewX - 6 - 58;
+  return {
+    auto:    { x: autoX,    y, w: 58, h },
+    preview: { x: previewX, y, w: 72, h },
+  };
+}
+
+// Place/update a breakpoint at slot `s` with the pointer's value. Returns the
+// index of the placed/touched point (spec & curve), or null (env).
+function drawPlacePointAtSlot(s, y, p) {
+  const t = slotT(s);
+  if (creatorSubmode === 'harm') {
+    const l = selectedLayer();
+    const idx = insertSpecPoint(l, t, yToAmp(y, p));
+    if (idx >= 0) syncLayerAmplitudes(l);
+    return idx;
+  }
+  if (creatorVolSel) { envDrawAt(t, yToV(y, p), p); return null; }
+  return insertCurvePoint(selectedLayer(), t, yToV(y, p));
+}
+
+// Rebuild the envelope into the draw grid: N-1 equal-duration components (one
+// between each pair of the N slot boundaries), values 0, markers auto-clamped.
+// Drawing then sets each boundary's value as the finger visits its slot, so a
+// stroke replaces the previous shape with exactly the chosen point count.
+function envResetForDraw() {
+  const n = drawPointCount();
+  const total = Math.max(300, noteLifetimeMs());
+  const per = Math.max(1, Math.round(total / (n - 1)));
+  const comps = [];
+  for (let i = 0; i < n - 1; i++) {
+    comps.push({ id: newCompId(), name: 'Component', duration: i === n - 2 ? Math.max(1, total - per * (n - 2)) : per, startValue: 0, endValue: 0 });
+  }
+  ENVELOPE = {
+    components: comps,
+    beginReleaseIndex: comps.length - 1,
+    holdStartIndex: 0,
+    holdEndIndex: comps.length - 2,
+    earlyCutIndex: comps.length - 1,
+  };
+  clampEnvelopeIndexes();
+}
+
+// Envelope draw: nudge the nearest boundary (within half the slot spacing) to
+// the drawn time/value, otherwise split the envelope there (capped) and set the
+// new boundary's value. Values chain forward via envDragBoundary, so the drawn
+// path is preserved as a continuous piecewise-linear curve.
+function envDrawAt(t, v, p) {
+  const eb = envBoundaries();
+  const total = eb.total;
+  const ms = clamp01(t) * total;
+  const dedupeMs = total / (2 * (drawPointCount() - 1));
+  let best = -1, bd = dedupeMs;
+  for (let i = 0; i <= eb.n; i++) {
+    const d = Math.abs(eb.b[i] - ms);
+    if (d < bd) { bd = d; best = i; }
+  }
+  if (best >= 0) { envDragBoundary(best, t, v); return; }
+  if (eb.n >= ENV_DRAW_MAX) return;
+  envSplitAtTime(ms);
+  const eb2 = envBoundaries();
+  best = -1; bd = Infinity;
+  for (let i = 0; i <= eb2.n; i++) {
+    const d = Math.abs(eb2.b[i] - ms);
+    if (d < bd) { bd = d; best = i; }
+  }
+  if (best >= 0) envDragBoundary(best, t, v);
+}
+
 /* ---- Note lifetime ----
    The note's lifetime is the sum of every envelope component (body through the
    hold end plus the release tail). The Volume-envelope tab offers a single
@@ -422,6 +560,8 @@ function dragCreatorMarker(key, t) {
 function scheduleCreatorPreview() {
   clearTimeout(creatorPreviewTimer);
   creatorPreviewTimer = setTimeout(() => {
+    // Only play when auto-preview is on; the ▶ Preview button always plays.
+    if (!creatorAutoPreview) return;
     // A clean single preview note: retire every earlier voice first, so repeated
     // edits never ring into each other (stacked voices read as a rising, denser
     // tone even though every preview is the same pitch).
@@ -479,6 +619,10 @@ function hitTestCreator(x, y) {
   const p = creatorPlot();
   if (y >= 66 && y <= 90) {
     const sw = creatorSubmode === 'note' ? 1 : 0;   // note mode pins a Vol swatch first
+    // Auto-preview toggle + manual preview button (right of the swatches).
+    const tp = creatorTopPills();
+    if (x >= tp.auto.x && x <= tp.auto.x + tp.auto.w && y >= tp.auto.y && y <= tp.auto.y + tp.auto.h) return { type: 'autopreview' };
+    if (x >= tp.preview.x && x <= tp.preview.x + tp.preview.w && y >= tp.preview.y && y <= tp.preview.y + tp.preview.h) return { type: 'previewbtn' };
     // ✕ delete badge on the selected layer (layers only; hidden when it's the last one).
     if (!creatorVolSel && OSC_STACK.layers.length > 1) {
       const scx = p.left + sw * 76 + selectedLayerIdx * 76 + 62, scy = 72;
@@ -521,6 +665,12 @@ function hitTestCreator(x, y) {
     return { type: 'bar' };
   }
   if (y >= p.top && y <= p.bottom) {
+    // Draw-mode toolbar (top-right of the plot, both sub-modes). The points
+    // pill is covered by a native <select>, so only the Draw toggle is hit.
+    const tb = drawToolbar(p);
+    if (x >= tb.draw.x && x <= tb.draw.x + tb.draw.w && y >= tb.draw.y && y <= tb.draw.y + tb.draw.h) return { type: 'drawtoggle' };
+    // Draw mode takes over the whole graph: any drag scribbles new points.
+    if (creatorDrawMode) return { type: 'draw' };
     if (creatorSubmode === 'harm') return hitTestHarm(x, y, p);
     // Volume-envelope tab: the selected curve (the master envelope when Vol is
     // selected, else one layer's mix curve) is editable; taps on any other curve
@@ -572,10 +722,19 @@ canvas.addEventListener('pointerdown', e => {
     }
     return;
   }
+  if (hit.type === 'autopreview') {
+    creatorAutoPreview = !creatorAutoPreview;
+    saveSettings();
+    return;
+  }
+  if (hit.type === 'previewbtn') {
+    previewChime();
+    return;
+  }
   if (hit.type === 'vol') {
     creatorVolSel = true;
     creatorPtr = null;
-    previewChime();
+    maybeAutoPreview();
     return;
   }
   if (hit.type === 'layer') {
@@ -583,7 +742,7 @@ canvas.addEventListener('pointerdown', e => {
     creatorVolSel = false;
     if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
     creatorPtr = null;
-    previewChime();
+    maybeAutoPreview();
     return;
   }
   if (hit.type === 'addlayer') {
@@ -631,6 +790,28 @@ canvas.addEventListener('pointerdown', e => {
     previewAndSave();
     return;
   }
+  if (hit.type === 'drawtoggle') {
+    creatorDrawMode = !creatorDrawMode;
+    creatorPtr = null;
+    return;
+  }
+  if (hit.type === 'draw') {
+    // Start a scribble on the current selection. A stroke replaces the previous
+    // shape (so the chosen point count is exact): the spectrum and a layer's
+    // mix curve are cleared, the envelope is rebuilt onto the slot grid.
+    const p = creatorPlot();
+    if (creatorSubmode === 'harm') {
+      selectedLayer().specPoints = [];
+    } else if (creatorVolSel) {
+      envResetForDraw();
+    } else {
+      selectedLayer().curve = [];
+    }
+    drawPlacePointAtSlot(slotAtX(x, p), y, p);
+    creatorPtr = { mode: 'draw', layerIdx: selectedLayerIdx, x0: x, y0: y };
+    previewAndSave();
+    return;
+  }
   if (hit.type === 'bar') { creatorPtr = null; return; }
   if (hit.type === 'pitch') {
     if (hit.dir !== 0) {
@@ -642,9 +823,9 @@ canvas.addEventListener('pointerdown', e => {
     }
     return;
   }
-  if (hit.type === 'marker') { previewChime(); creatorPtr = { mode: 'marker', key: hit.key, x0: x, y0: y }; return; }
+  if (hit.type === 'marker') { maybeAutoPreview(); creatorPtr = { mode: 'marker', key: hit.key, x0: x, y0: y }; return; }
   if (hit.type === 'harmpoint') {
-    previewChime();
+    maybeAutoPreview();
     const l = selectedLayer();
     if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
       removeSpecPoint(l, hit.idx);
@@ -657,7 +838,7 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'envbound') {
-    previewChime();
+    maybeAutoPreview();
     if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
       envDeleteAt(Math.max(0, hit.idx - 1));   // the component ending at this boundary
       creatorLastTap = null;
@@ -675,7 +856,7 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'point') {
-    previewChime();
+    maybeAutoPreview();
     if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
       removeCurvePoint(OSC_STACK.layers[hit.layerIdx], hit.ptIdx);
       creatorLastTap = null;
@@ -696,10 +877,10 @@ canvas.addEventListener('pointerdown', e => {
       previewAndSave();
       return;
     }
-    selectedLayerIdx = hit.layerIdx; creatorVolSel = false; creatorPtr = null; previewChime();
+    selectedLayerIdx = hit.layerIdx; creatorVolSel = false; creatorPtr = null; maybeAutoPreview();
     return;
   }
-  if (hit.type === 'selenv') { creatorVolSel = true; creatorPtr = null; previewChime(); return; }
+  if (hit.type === 'selenv') { creatorVolSel = true; creatorPtr = null; maybeAutoPreview(); return; }
   // Empty: add to the selected curve — split the envelope (Vol) or add a mix
   // breakpoint (a layer).
   const l = selectedLayer();
@@ -758,6 +939,9 @@ canvas.addEventListener('pointermove', e => {
       syncLayerAmplitudes(l);
       scheduleCreatorPreview();
     }
+  } else if (creatorPtr.mode === 'draw') {
+    drawPlacePointAtSlot(slotAtX(x, p), y, p);
+    scheduleCreatorPreview();
   }
   creatorPtr.x0 = x; creatorPtr.y0 = y;
 });
@@ -887,6 +1071,28 @@ function drawCreator(now) {
     ctx.textAlign = 'left';
     ctx.fillText('Add', ax + 14, 82);
   }
+  // Auto-preview toggle + manual preview button (left of the pitch selector).
+  const tp = creatorTopPills();
+  drawRoundRect(tp.auto.x, tp.auto.y, tp.auto.w, tp.auto.h, 8);
+  ctx.fillStyle = creatorAutoPreview ? '#2e5d34' : '#fff';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = creatorAutoPreview ? '#fff' : '#6b8e5a';
+  ctx.font = '700 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(creatorAutoPreview ? 'Auto on' : 'Auto off', tp.auto.x + tp.auto.w / 2, tp.auto.y + tp.auto.h / 2 + 3);
+  drawRoundRect(tp.preview.x, tp.preview.y, tp.preview.w, tp.preview.h, 8);
+  ctx.fillStyle = '#2e5d34';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = '700 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('▶ Preview', tp.preview.x + tp.preview.w / 2, tp.preview.y + tp.preview.h / 2 + 3);
   // Preview pitch selector (◀ name ▶)
   const pcx = W - 196;
   drawRoundRect(pcx, 68, 88, 22, 8);
@@ -1125,13 +1331,53 @@ function drawCreator(now) {
     }
   }
 
+  // ---- Draw-mode toolbar (top-right of the plot, both sub-modes) ----
+  const tb = drawToolbar(p);
+  const accent = OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
+  ctx.textBaseline = 'middle';
+  ctx.font = '700 10px sans-serif';
+  ctx.textAlign = 'center';
+  drawRoundRect(tb.dens.x, tb.dens.y, tb.dens.w, tb.dens.h, 8);
+  ctx.fillStyle = creatorDrawMode ? 'rgba(255,255,255,0.92)' : '#fff';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#2e5d34';
+  ctx.fillText(drawPointCount() + ' pts ▾', tb.dens.x + tb.dens.w / 2, tb.dens.y + tb.dens.h / 2 + 1);
+  drawRoundRect(tb.draw.x, tb.draw.y, tb.draw.w, tb.draw.h, 8);
+  ctx.fillStyle = creatorDrawMode ? accent : '#fff';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = creatorDrawMode ? '#fff' : '#2e5d34';
+  ctx.fillText(creatorDrawMode ? 'ON' : 'Draw', tb.draw.x + tb.draw.w / 2, tb.draw.y + tb.draw.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+
+  // Position the native points <select> over the pill (creator-active only).
+  const ptsSel = document.getElementById('creatorPoints');
+  if (ptsSel) {
+    ptsSel.style.left = tb.dens.x + 'px';
+    ptsSel.style.top = tb.dens.y + 'px';
+    ptsSel.style.width = tb.dens.w + 'px';
+    ptsSel.style.height = tb.dens.h + 'px';
+    ptsSel.style.display = creatorActive ? 'block' : 'none';
+  }
+
   // ---- Hint ----
   ctx.fillStyle = '#6b8e5a';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(creatorSubmode === 'note'
-    ? 'Pick Vol or an oscillator above · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
-    : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
+  if (creatorDrawMode) {
+    ctx.fillText(creatorSubmode === 'note'
+      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots'
+      : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots', W / 2, H - 8);
+  } else {
+    ctx.fillText(creatorSubmode === 'note'
+      ? 'Pick Vol or an oscillator above · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
+      : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
+  }
 }
 
 function creatorLoop(now) {

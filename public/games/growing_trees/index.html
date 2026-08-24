@@ -187,6 +187,27 @@
     z-index: 40;
   }
   #creatorBtn:hover { background: #fff; }
+  #creatorPoints {
+    position: fixed;
+    top: 0; left: 0;
+    z-index: 30;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: transparent;
+    appearance: none;
+    -webkit-appearance: none;
+    font: 700 10px sans-serif;
+    text-align: center;
+    text-align-last: center;
+    cursor: pointer;
+    outline: none;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    display: none;
+  }
   #creatorBtn.on { background: #2e5d34; color: #fff; }
   body.creator #waitBtn,
   body.creator #settingsBtn,
@@ -490,8 +511,9 @@
 </div>
 
 <canvas id="scene"></canvas>
+<select id="creatorPoints" aria-label="Draw point count"></select>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.9.7</div>
+<div id="version">v1.9.10</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser

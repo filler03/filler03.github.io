@@ -73,7 +73,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, previewPitch: PREVIEW_PITCH }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -191,6 +191,8 @@ function loadSavedSettings() {
     }
     VOLUME = vol;
     if (d.previewPitch != null) PREVIEW_PITCH = Math.max(0, Math.min(64, +d.previewPitch || 0));
+    if (d.drawPoints != null) creatorDrawPoints = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+d.drawPoints || 8)));
+    if (d.autoPreview != null) creatorAutoPreview = !!d.autoPreview;
     // v9+: oscillator stack. New saves store `oscStack`; older saves stored a
     // single `harmonics` amplitude set, which becomes one custom layer.
     function curveFromSaved(l) {
@@ -266,6 +268,8 @@ function resetToDefaults() {
   VOLUME = clone(DEFAULT_VOLUME);
   OSC_STACK = clone(DEFAULT_OSC_STACK);
   PREVIEW_PITCH = 0;
+  creatorDrawPoints = 8;
+  creatorAutoPreview = false;
   selectedLayerIdx = 0;
   // Clear legacy copies too, or the next load would migrate them straight back.
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
@@ -330,10 +334,16 @@ function previewChime() {
   previewNote(pitch);
 }
 
+// Auto-preview gate: control changes play only when the user has auto-preview
+// on; the manual ▶ Preview / Play test buttons always call previewChime().
+function maybeAutoPreview() {
+  if (creatorAutoPreview) previewChime();
+}
+
 noteSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].note = noteSel.value + NOTE_OCTAVE;
   populatePreviewPitch();
-  previewChime();
+  maybeAutoPreview();
 });
 
 /* ---- Preview pitch ---- */
@@ -350,7 +360,7 @@ function populatePreviewPitch() {
 
 previewPitchSel.addEventListener('change', () => {
   PREVIEW_PITCH = Math.max(0, Math.min(pitchPositions().length - 1, +previewPitchSel.value || 0));
-  previewChime();
+  maybeAutoPreview();
   saveSettings();
 });
 
