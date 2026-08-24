@@ -30,7 +30,7 @@ function gestureNoteCardHtml(now, p) {
   const baseNum = Math.round(baseVol * 100);
   const relPct = Math.round(relVol * 100);
   const curNum = Math.round(baseVol * relVol * 100);
-  return `<div class="live"><div class="note-stats">${EMOJI_TIME}${Math.round(timeMs)}ms</div><div class="vol-stats">${EMOJI_VOL} base: ${baseNum} · relative: ${relPct}% · true: ${curNum}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
+  return `<div class="live"><div class="note-stats">${p.pitch ? '<b class="hud-pitch">' + p.pitch + '</b> ' : ''}${EMOJI_TIME}${Math.round(timeMs)}ms</div><div class="vol-stats">${EMOJI_VOL} base: ${baseNum} · relative: ${relPct}% · true: ${curNum}</div><div class="hud-bar"><div class="hud-fill" style="width:${pct}%"></div></div></div>`;
 }
 
 // Refresh the top-left display each frame: one card per active gesture
@@ -73,7 +73,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, previewPitch: PREVIEW_PITCH }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -190,6 +190,7 @@ function loadSavedSettings() {
       else if (d.volume.ratio != null) vol.top = Math.max(0, Math.min(1, vol.bottom * (+d.volume.ratio || 50)));
     }
     VOLUME = vol;
+    if (d.previewPitch != null) PREVIEW_PITCH = Math.max(0, Math.min(64, +d.previewPitch || 0));
     // v9+: oscillator stack. New saves store `oscStack`; older saves stored a
     // single `harmonics` amplitude set, which becomes one custom layer.
     function curveFromSaved(l) {
@@ -264,6 +265,7 @@ function resetToDefaults() {
   PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
   VOLUME = clone(DEFAULT_VOLUME);
   OSC_STACK = clone(DEFAULT_OSC_STACK);
+  PREVIEW_PITCH = 0;
   selectedLayerIdx = 0;
   // Clear legacy copies too, or the next load would migrate them straight back.
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
@@ -319,19 +321,38 @@ function loadLevelUI(level) {
   */
 }
 
-// Preview the current envelope as a very short gesture (a tap) so the test
-// button and key changes play the same path the fingers play.
+// Preview the current sound design at the exact selected PREVIEW_PITCH. Uses the
+// dedicated previewNote scheduler (fresh nodes, no gesture state) so every
+// preview is a clean single note that can never accumulate voices or drift.
 function previewChime() {
-  initAudio();
-  resumeAudio();
-  const x = W / 2, y = H * 0.55;
-  const ds = { pts: [{ x, y }, { x, y }], cumTime: [0, 0], totalMs: 0, startX: x, startY: y };
-  schedulePathPlayback(ds);
+  const positions = pitchPositions();
+  const idx = Math.max(0, Math.min(positions.length - 1, PREVIEW_PITCH || 0));
+  const pitch = positions.length ? noteNameForPos(positions[idx]) : 'C4';
+  previewNote(pitch);
 }
 
 noteSel.addEventListener('change', () => {
   CHIME_SETTINGS[currentLevel].note = noteSel.value + NOTE_OCTAVE;
+  populatePreviewPitch();
   previewChime();
+});
+
+/* ---- Preview pitch ---- */
+const previewPitchSel = document.getElementById('previewPitch');
+
+// Rebuild the preview-pitch options from the current pitch range (note names
+// change with the key and the zones), keeping the selected position.
+function populatePreviewPitch() {
+  const positions = pitchPositions();
+  previewPitchSel.innerHTML = '';
+  for (let i = 0; i < positions.length; i++) previewPitchSel.add(new Option(noteNameForPos(positions[i]), i));
+  previewPitchSel.value = String(Math.max(0, Math.min(positions.length - 1, PREVIEW_PITCH || 0)));
+}
+
+previewPitchSel.addEventListener('change', () => {
+  PREVIEW_PITCH = Math.max(0, Math.min(pitchPositions().length - 1, +previewPitchSel.value || 0));
+  previewChime();
+  saveSettings();
 });
 
 /* ---- Pitch color zones ---- */
@@ -384,6 +405,7 @@ for (const el of [zonesLowOctEl, zonesLowDegEl, zonesHighOctEl, zonesHighDegEl])
     PITCH_ZONES.highOctave = +zonesHighOctEl.value;
     PITCH_ZONES.highDegree = +zonesHighDegEl.value;
     updateZonesRange();
+    populatePreviewPitch();
     saveSettings();
   });
 }
@@ -1026,6 +1048,7 @@ settingsBtn.addEventListener('click', () => {
     syncPitchZonesUI();
     syncVolumeUI();
     syncHarmonicsUI();
+    populatePreviewPitch();
   } else {
     closeSettingsPanel();
   }

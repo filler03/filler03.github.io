@@ -87,7 +87,7 @@ function playUnlockChime() {
   gain.connect(masterGain);
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd);
-  startLayerStack(stack, t0, tEnd, noteToFreq(s.note));
+  startLayerStack(stack, t0, noteToFreq(s.note), tEnd);
   setTimeout(() => {
     try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(g => g.disconnect()); gain.disconnect(); } catch (e) {}
   }, (tEnd - t0 + 0.5) * 1000);
@@ -304,6 +304,104 @@ function rampLayerMixToEnd(ds, startT, ms) {
   }
 }
 
+// Schedule each layer's mix at a FIXED progress (the "stable" preview): a single
+// constant mix weight, so the tone is static over the note.
+function scheduleLayerMixStable(stack, t0, prog) {
+  const gains = layerGainsAt(prog == null ? 0.5 : prog);
+  for (let i = 0; i < stack.mixParams.length; i++) {
+    stack.mixParams[i].setValueAtTime(gains[i], t0);
+  }
+}
+
+/* ---- Preview note ----
+   A dedicated, self-contained scheduler for the test/preview sound. It plays
+   the CURRENT sound design (oscillator stack + envelope + mix curves) at the
+   EXACT requested pitch, with fresh nodes every time and no interaction with
+   gesture scheduling, playback tracking, or retrigger state — so repeated
+   previews can never accumulate voices or drift in pitch. */
+// Every preview's nodes are tracked here so the next preview can retire them.
+// Without this, rapid taps layer full-length notes of the same pitch; stacked
+// harmonic-rich voices read as a rising, denser tone even though the badge
+// (and each preview's fundamental) never changes.
+const previewVoices = [];
+
+// Retire every ringing preview voice: fade its envelope gain to zero, stop its
+// oscillators, and disconnect — so a new preview always starts from silence.
+function stopPreviewVoices() {
+  for (const v of previewVoices.slice()) {
+    try {
+      const now = audioCtx.currentTime;
+      clearTimeout(v.cleanupTimer);
+      const g = v.gain.gain;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0, now + 0.03);
+      for (const o of v.oscs) { try { o.stop(now + 0.06); } catch (e) {} }
+      setTimeout(() => {
+        try {
+          v.oscs.forEach(o => o.disconnect());
+          v.mixGains.forEach(x => x.disconnect());
+          v.gain.disconnect();
+        } catch (e) {}
+      }, 200);
+    } catch (e) {}
+  }
+  previewVoices.length = 0;
+}
+
+function previewNote(pitch) {
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return;
+  stopGestureNote();
+  stopPreviewVoices();
+  const freq = noteToFreq(pitch);
+  const t0 = audioCtx.currentTime + 0.02;
+  const bodyMs = earlyCutMs();
+  const relMs = releaseMs();
+  const base = Math.max(0.35, baseVolumeFromY(H * 0.55));
+
+  // Amplitude envelope: the body (through the early-cut marker) then the release.
+  const gain = audioCtx.createGain();
+  const g = gain.gain;
+  g.setValueAtTime(0, t0);
+  const NB = 64;
+  const body = new Float32Array(NB);
+  for (let k = 0; k < NB; k++) body[k] = Math.max(0, base * relValueBody(ENVELOPE, bodyMs * k / (NB - 1), true));
+  const bodyDur = Math.max(0.004, bodyMs / 1000);
+  g.setValueCurveAtTime(body, t0 + 0.002, bodyDur - 0.002);
+  let tRel = t0 + 0.002 + (bodyDur - 0.002);
+  if (relMs > 0) {
+    const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
+    const seed = relValueBody(ENVELOPE, bodyMs, true);
+    const tail = new Float32Array(32);
+    for (let k = 0; k < tail.length; k++) tail[k] = Math.max(0, base * relValueAtList(relComps, relMs * k / (tail.length - 1), seed));
+    g.setValueAtTime(tail[0], tRel);
+    g.setValueCurveAtTime(tail, tRel + 0.002, relMs / 1000);
+    tRel += 0.002 + relMs / 1000;
+  }
+  const tEnd = tRel + FADE_MS / 1000;
+  g.linearRampToValueAtTime(0, tEnd);
+  gain.connect(masterGain);
+
+  const stack = buildLayerStack(audioCtx, gain);
+  if (PREVIEW_STABLE_MIX) scheduleLayerMixStable(stack, t0, 0.5);
+  else scheduleLayerMix(stack, t0, tEnd, bodyMs, relMs);
+  startLayerStack(stack, t0, freq, tEnd);
+
+  const voice = { oscs: stack.oscs, mixGains: stack.mixGains, gain, cleanupTimer: null };
+  previewVoices.push(voice);
+  voice.cleanupTimer = setTimeout(() => {
+    try {
+      stack.oscs.forEach(o => o.disconnect());
+      stack.mixGains.forEach(x => x.disconnect());
+      gain.disconnect();
+    } catch (e) {}
+    const i = previewVoices.indexOf(voice);
+    if (i >= 0) previewVoices.splice(i, 1);
+  }, (tEnd - t0 + 0.5) * 1000);
+}
+
 function chime(level, overrides) {
   initAudio();
   resumeAudio();
@@ -335,7 +433,7 @@ function chime(level, overrides) {
 
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd);
-  startLayerStack(stack, t0, tEnd, noteToFreq(s.note));
+  startLayerStack(stack, t0, noteToFreq(s.note), tEnd);
 
   setTimeout(() => {
     try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(g => g.disconnect()); gain.disconnect(); } catch (e) {}
@@ -446,7 +544,7 @@ function schedulePathAudio(ds, totalMs, pb) {
   const t0 = audioCtx.currentTime;
   // Retrigger: a new note on this pitch steals the voice already ringing there,
   // so rapid taps on one band restrike instead of stacking voices.
-  const pitch = pitchFor(ds.startX, ds.startY);
+  const pitch = ds.pitchOverride || pitchFor(ds.startX, ds.startY);
   retriggerPitch(pitch, null);
   // The body always plays through the early-cut marker: a tap or short note is
   // extended so every component up to the cut point plays before the release
@@ -490,7 +588,7 @@ function schedulePathAudio(ds, totalMs, pb) {
 
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd, bodyDurMs, relMs);
-  startLayerStack(stack, t0, tEnd, noteToFreq(pitch));
+  startLayerStack(stack, t0, noteToFreq(pitch), tEnd);
   const note = { oscs: stack.oscs, mixGains: stack.mixGains, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb };
   gestureNotes.push(note);
   setTimeout(() => {

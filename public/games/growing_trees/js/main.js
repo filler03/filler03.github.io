@@ -36,7 +36,7 @@ syncPitchZonesUI();
 
 canvas.addEventListener('pointerdown', e => {
   unlockAudio();
-  if (mode === 'creator') return;   // sound creator handles its own canvas input
+  if (mode === 'creator' || creatorActive) return;   // sound creator handles its own canvas input
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
@@ -69,7 +69,7 @@ canvas.addEventListener('pointerdown', e => {
 });
 
 canvas.addEventListener('pointermove', e => {
-  if (mode === 'creator') return;
+  if (mode === 'creator' || creatorActive) return;
   const p = pointers.get(e.pointerId);
   if (!p) return;
   const dx = stageX(e) - p.x, dy = stageY(e) - p.y;
@@ -111,7 +111,7 @@ canvas.addEventListener('pointermove', e => {
 
 canvas.addEventListener('pointerup', e => {
   unlockAudio();
-  if (mode === 'creator') return;
+  if (mode === 'creator' || creatorActive) return;
   pointers.delete(e.pointerId);
 
   if (mode === 'plant') {
@@ -130,7 +130,7 @@ canvas.addEventListener('pointerup', e => {
 });
 
 canvas.addEventListener('pointercancel', e => {
-  if (mode === 'creator') return;
+  if (mode === 'creator' || creatorActive) return;
   pointers.delete(e.pointerId);
   pinchState = null;
   if (mode === 'plant') {
@@ -160,7 +160,7 @@ window.addEventListener('blur', () => {
 let lastT = performance.now();
 function loop(now) {
   lastT = now;
-  if (mode === 'creator') { requestAnimationFrame(loop); return; }   // sound creator draws its own frame
+  if (mode === 'creator' || creatorActive) { requestAnimationFrame(loop); return; }   // sound creator draws its own frame
   try {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, W, H);

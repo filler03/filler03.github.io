@@ -14,6 +14,7 @@ var playbacks = [];      // { pts, cumTime, totalMs, startedAt, released }
 var gestureNotes = [];   // { osc, gain, cleanupTimer } running gesture-note audio
 
 var mode = 'plant';      // 'plant' | 'nav' | 'creator' (full-screen sound editor)
+var creatorActive = false;   // sound-creator mode is open (declared early: main.js reads it)
 var navState = null;     // single-finger pan drag in nav mode
 var dragStates = new Map();  // plant gestures, one per pointer (multi-finger)
 var pinchState = null;   // { dist } two-finger pinch in nav mode
@@ -424,6 +425,13 @@ const HARMONIC_PRESETS = {
   hollow:  (function () { const a = new Array(HARMONIC_COUNT).fill(0); a[0] = 1; for (let i = 1; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 0) a[i] = 1 / (n / 2); } return a; })(),
   ethereal: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 1) a[i] = 1 / n; } return a; })(),
 };
+
+// Preview pitch: index into pitchPositions() for the test note (the 🎛️ creator
+// and the settings "Play test" button). 0 = the key root.
+var PREVIEW_PITCH = 0;
+// When true, the test note plays the mix curves held at a fixed point (no
+// time-varying morph), so the perceived pitch can't rise over the note.
+var PREVIEW_STABLE_MIX = true;
 
 // Pitch color zones: the range of scale degrees shown as faint color bands on
 // screen (screen X = pitch). Octaves are relative to the key note's octave —

@@ -10,7 +10,6 @@
 const OSC_COLORS = ['#2e5d34', '#1e88e5', '#f57c00', '#8e24aa', '#00897b', '#d9534f', '#6d4c41', '#3949ab'];
 const creatorBtn = document.getElementById('creatorBtn');
 
-let creatorActive = false;
 let creatorSubmode = 'mix';   // 'mix' active in phase 1; env/harmonic tabs disabled
 let creatorPtr = null;        // { mode:'point'|'marker', layerIdx, ptIdx|key, x0, y0, moved }
 let creatorLastTap = null;    // { t, x, y } for double-tap-to-delete
@@ -23,6 +22,7 @@ function openSoundCreator(submode, layerIdx) {
   if (layerIdx != null && layerIdx >= 0 && layerIdx < OSC_STACK.layers.length) selectedLayerIdx = layerIdx;
   mode = 'creator';
   stopGestureNote();
+  stopPreviewVoices();
   playbacks.length = 0;
   settingsPanel.classList.add('hidden');
   document.body.classList.add('creator');
@@ -34,6 +34,8 @@ function closeSoundCreator() {
   mode = 'plant';
   playbacks.length = 0;
   clearTimeout(creatorPreviewTimer);
+  stopGestureNote();
+  stopPreviewVoices();
   document.body.classList.remove('creator');
   flushSettingsSave();
 }
@@ -47,13 +49,75 @@ creatorBtn.addEventListener('click', () => {
 
 /* ---- Plot geometry ---- */
 function creatorPlot() {
-  const top = 94, bottom = H - 26, left = 20, right = W - 14;
+  const top = 124, bottom = H - 26, left = 20, right = W - 14;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
 }
 const tToX = (t, p) => p.left + clamp01(t) * p.pw;
 const xToT = (x, p) => clamp01((x - p.left) / p.pw);
 const vToY = (v, p) => p.bottom - clamp01(v) * p.ph;
 const yToV = (y, p) => clamp01((p.bottom - y) / p.ph);
+
+/* ---- Time markers (shared by Mix & Envelope) ----
+   HOLD / CUT / REL are draggable via grab tabs drawn above the plot. Tabs at
+   nearby x positions are staggered onto a second row so overlapping markers
+   (e.g. cut == hold end) stay separately grabbable. */
+const MARKER_DEFS = [
+  { key: 'hold', label: 'HOLD', color: '#00897b' },
+  { key: 'cut', label: 'CUT', color: '#f57c00' },
+  { key: 'rel', label: 'REL', color: '#d9534f' },
+];
+function markerList() {
+  const tl = designTimeline();
+  return MARKER_DEFS.map(m => ({
+    key: m.key, label: m.label, color: m.color,
+    t: m.key === 'hold' ? tl.tHoldStart : m.key === 'cut' ? tl.tCut : tl.tHoldEnd,
+  }));
+}
+function markerTabs(p) {
+  const tabs = [];
+  for (const m of markerList()) {
+    const cx = tToX(m.t, p);
+    let y = 90;
+    for (const t of tabs) if (Math.abs(t.cx - cx) < 48) y = 108;
+    tabs.push({ key: m.key, label: m.label, color: m.color, cx, x: cx - 23, y, w: 46, h: 16 });
+  }
+  return tabs;
+}
+function previewPitchName() {
+  const positions = pitchPositions();
+  const idx = Math.max(0, Math.min(positions.length - 1, PREVIEW_PITCH || 0));
+  return positions.length ? noteNameForPos(positions[idx]) : '—';
+}
+function previewPitchFreq() {
+  const name = previewPitchName();
+  if (name === '—') return 0;
+  try { return noteToFreq(name); } catch (e) { return 0; }
+}
+
+// Average harmonic number of the mixed spectrum at a given mix progress
+// (1 = fundamental, 2 = an octave up, etc.). This is the note's spectral center —
+// what a listener perceives as "the pitch" as brightness changes over the note.
+function mixedSpectralCentroid(prog) {
+  const gains = layerGainsAt(prog);
+  let num = 0, den = 0;
+  for (let i = 0; i < OSC_STACK.layers.length; i++) {
+    const w = gains[i] || 0;
+    const amps = layerAmplitudes(OSC_STACK.layers[i]) || [];
+    for (let h = 0; h < HARMONIC_COUNT; h++) {
+      const a = Math.abs((amps[h] || 0) * w);
+      num += (h + 1) * a;
+      den += a;
+    }
+  }
+  return den > 1e-9 ? num / den : 1;
+}
+
+// Name of the note at the spectral center (frequency × centroid harmonic).
+function centroidPitchName(prog) {
+  const base = previewPitchFreq();
+  const f = base * mixedSpectralCentroid(prog);
+  try { return midiToName(Math.round(12 * Math.log2(f / 440) + 69)); } catch (e) { return '—'; }
+}
 
 /* ---- Curve helpers ---- */
 function insertCurvePoint(l, t, v) {
@@ -273,7 +337,13 @@ function dragCreatorMarker(key, t) {
 /* ---- Preview (debounced so drawing doesn't spam the engine) ---- */
 function scheduleCreatorPreview() {
   clearTimeout(creatorPreviewTimer);
-  creatorPreviewTimer = setTimeout(() => previewChime(), 150);
+  creatorPreviewTimer = setTimeout(() => {
+    // A clean single preview note: retire every earlier voice first, so repeated
+    // edits never ring into each other (stacked voices read as a rising, denser
+    // tone even though every preview is the same pitch).
+    stopGestureNote();
+    previewChime();
+  }, 150);
 }
 
 /* ---- Hit testing ---- */
@@ -331,7 +401,21 @@ function hitTestCreator(x, y) {
         if (x >= cx && x <= cx + 70) return { type: 'layer', layerIdx: i };
       }
     }
+    // Stable-test toggle (freeze the mix so the pitch can't climb)
+    if (x >= W - 292 && x <= W - 200) return { type: 'stable' };
+    // Preview pitch selector (◀ name ▶)
+    if (x >= W - 196 && x <= W - 108) {
+      const dir = x < W - 196 + 29 ? -1 : (x < W - 196 + 59 ? 0 : 1);
+      return { type: 'pitch', dir };
+    }
     if (x >= W - 104 && x <= W - 14) return { type: 'reset' };
+    return { type: 'bar' };
+  }
+  // Marker grab tabs (above the plot; Mix & Envelope only).
+  if (y > 90 && y <= 124 && creatorSubmode !== 'harm') {
+    for (const tab of markerTabs(p)) {
+      if (x >= tab.x && x <= tab.x + tab.w && y >= tab.y && y <= tab.y + tab.h) return { type: 'marker', key: tab.key };
+    }
     return { type: 'bar' };
   }
   if (y >= p.top && y <= p.bottom) {
@@ -388,6 +472,7 @@ canvas.addEventListener('pointerdown', e => {
     selectedLayerIdx = hit.layerIdx;
     if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
     creatorPtr = null;
+    previewChime();
     return;
   }
   if (hit.type === 'reset') {
@@ -408,8 +493,24 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'bar') { creatorPtr = null; return; }
-  if (hit.type === 'marker') { creatorPtr = { mode: 'marker', key: hit.key, x0: x, y0: y }; return; }
+  if (hit.type === 'stable') {
+    PREVIEW_STABLE_MIX = !PREVIEW_STABLE_MIX;
+    previewAndSave();
+    return;
+  }
+  if (hit.type === 'pitch') {
+    if (hit.dir !== 0) {
+      const positions = pitchPositions();
+      const n = positions.length || 1;
+      const cur = Math.max(0, Math.min(n - 1, PREVIEW_PITCH || 0));
+      PREVIEW_PITCH = (cur + hit.dir + n) % n;
+      previewAndSave();
+    }
+    return;
+  }
+  if (hit.type === 'marker') { previewChime(); creatorPtr = { mode: 'marker', key: hit.key, x0: x, y0: y }; return; }
   if (hit.type === 'harmpoint') {
+    previewChime();
     const l = selectedLayer();
     if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
       removeSpecPoint(l, hit.idx);
@@ -422,6 +523,7 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'envbound') {
+    previewChime();
     if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
       envDeleteAt(Math.max(0, hit.idx - 1));   // the component ending at this boundary
       creatorLastTap = null;
@@ -440,6 +542,7 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'point') {
+    previewChime();
     if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
       removeCurvePoint(OSC_STACK.layers[hit.layerIdx], hit.ptIdx);
       creatorLastTap = null;
@@ -451,7 +554,7 @@ canvas.addEventListener('pointerdown', e => {
     creatorPtr = { mode: 'point', layerIdx: hit.layerIdx, ptIdx: hit.ptIdx, x0: x, y0: y };
     return;
   }
-  if (hit.type === 'line') { selectedLayerIdx = hit.layerIdx; creatorPtr = null; return; }
+  if (hit.type === 'line') { selectedLayerIdx = hit.layerIdx; creatorPtr = null; previewChime(); return; }
   // Empty: add a breakpoint to the selected layer and grab it.
   const l = selectedLayer();
   if (creatorSubmode === 'harm') {
@@ -555,6 +658,15 @@ function drawCreator(now) {
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.fillText('Sound creator', W / 2, 36);
+  // Prominent readout of the exact preview pitch + frequency the test plays, plus
+// the note's spectral center at the start and end of the note — so a rising
+// "pitch" from the mix morphing is visibly explained.
+  ctx.font = '700 12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('Test: ' + previewPitchName() + ' · ' + previewPitchFreq().toFixed(1) + ' Hz', 84, 38);
+  const cs = PREVIEW_STABLE_MIX ? centroidPitchName(0.5) : centroidPitchName(0);
+  const ce = PREVIEW_STABLE_MIX ? centroidPitchName(0.5) : centroidPitchName(1);
+  ctx.fillText('spectral center: ' + cs + (PREVIEW_STABLE_MIX ? ' (stable)' : ' → ' + ce), 84, 58);
   const tabs = creatorTabs();
   let tx = W - 14;
   for (let i = tabs.length - 1; i >= 0; i--) {
@@ -592,6 +704,25 @@ function drawCreator(now) {
     ctx.textAlign = 'left';
     ctx.fillText('Envelope — note value over time', p.left, 82);
   }
+  // Stable-test toggle
+  drawRoundRect(W - 292, 68, 92, 22, 8);
+  ctx.fillStyle = PREVIEW_STABLE_MIX ? '#2e5d34' : '#fff';
+  ctx.fill();
+  ctx.fillStyle = PREVIEW_STABLE_MIX ? '#fff' : '#2e5d34';
+  ctx.font = '700 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(PREVIEW_STABLE_MIX ? '◉ Stable test' : '◯ Morph test', W - 246, 83);
+  // Preview pitch selector (◀ name ▶)
+  const pcx = W - 196;
+  drawRoundRect(pcx, 68, 88, 22, 8);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+  ctx.fillStyle = '#2e5d34';
+  ctx.font = '700 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('◀', pcx + 13, 83);
+  ctx.fillText(previewPitchName(), pcx + 44, 83);
+  ctx.fillText('▶', pcx + 75, 83);
   drawRoundRect(W - 104, 68, 90, 22, 8);
   ctx.fillStyle = '#fff';
   ctx.fill();
@@ -599,6 +730,19 @@ function drawCreator(now) {
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(creatorSubmode === 'env' ? '↺ Reset env' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
+
+  // ---- Marker grab tabs (Mix & Envelope only) ----
+  if (creatorSubmode !== 'harm') {
+    for (const tab of markerTabs(p)) {
+      drawRoundRect(tab.x, tab.y, tab.w, tab.h, 6);
+      ctx.fillStyle = tab.color;
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '800 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tab.label, tab.cx, tab.y + 11);
+    }
+  }
 
   // ---- Grid ----
   ctx.strokeStyle = 'rgba(46,93,52,0.14)';
@@ -636,12 +780,7 @@ function drawCreator(now) {
 
   // ---- Markers (time-based sub-modes only) ----
   if (creatorSubmode !== 'harm') {
-    const tl = designTimeline();
-    const markers = [
-      { t: tl.tHoldStart, label: 'HOLD', color: '#00897b' },
-      { t: tl.tCut, label: 'CUT', color: '#f57c00' },
-      { t: tl.tHoldEnd, label: 'REL', color: '#d9534f' },
-    ];
+    const markers = markerList();
     for (const m of markers) {
       const x = tToX(m.t, p);
       ctx.strokeStyle = m.color;
@@ -651,10 +790,6 @@ function drawCreator(now) {
       ctx.moveTo(x, p.top); ctx.lineTo(x, p.bottom);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = m.color;
-      ctx.font = '700 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(m.label, x, p.top - 5);
     }
   }
 

@@ -133,6 +133,13 @@
     margin-bottom: 1px;
     white-space: nowrap;
   }
+  .hud-pitch {
+    background: #2e5d34;
+    color: #fff;
+    border-radius: 5px;
+    padding: 1px 5px;
+    font-size: 11px;
+  }
   .vol-stats {
     font-size: 8px;
     font-weight: 600;
@@ -613,6 +620,8 @@
   <div class="grid">
     <label for="note">Key</label>
     <select id="note"></select>
+    <label for="previewPitch">Preview pitch</label>
+    <select id="previewPitch"></select>
   </div>
   <div class="vec-head">Oscillators</div>
   <div class="env-actions">
@@ -741,7 +750,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.8.9</div>
+<div id="version">v1.9.7</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
