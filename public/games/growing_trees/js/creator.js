@@ -49,7 +49,7 @@ creatorBtn.addEventListener('click', () => {
 
 /* ---- Plot geometry ---- */
 function creatorPlot() {
-  const top = 124, bottom = H - 26, left = 20, right = W - 14;
+  const top = 152, bottom = H - 26, left = 20, right = W - 14;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
 }
 const tToX = (t, p) => p.left + clamp01(t) * p.pw;
@@ -66,6 +66,14 @@ const MARKER_DEFS = [
   { key: 'cut', label: 'CUT', color: '#f57c00' },
   { key: 'rel', label: 'REL', color: '#d9534f' },
 ];
+// The marker lane: a grabbable strip between the controls row (ends at y 90)
+// and the plot (starts at creatorPlot().top = 152). Bigger tabs than before,
+// staggered onto two rows, so overlapping markers (e.g. cut == hold end) each
+// keep a separate handle. The plot itself no longer intercepts grabs near a
+// marker's line, so curve points sitting on the same x stay draggable.
+const MARKER_LANE_TOP = 92, MARKER_LANE_BOTTOM = 148;
+const MARKER_TAB_W = 58, MARKER_TAB_H = 22;
+const MARKER_TAB_ROW = 98, MARKER_TAB_ROW2 = 124;
 function markerList() {
   const tl = designTimeline();
   return MARKER_DEFS.map(m => ({
@@ -77,9 +85,9 @@ function markerTabs(p) {
   const tabs = [];
   for (const m of markerList()) {
     const cx = tToX(m.t, p);
-    let y = 90;
-    for (const t of tabs) if (Math.abs(t.cx - cx) < 48) y = 108;
-    tabs.push({ key: m.key, label: m.label, color: m.color, cx, x: cx - 23, y, w: 46, h: 16 });
+    let y = MARKER_TAB_ROW;
+    for (const t of tabs) if (Math.abs(t.cx - cx) < 50) y = MARKER_TAB_ROW2;
+    tabs.push({ key: m.key, label: m.label, color: m.color, cx, x: cx - MARKER_TAB_W / 2, y, w: MARKER_TAB_W, h: MARKER_TAB_H });
   }
   return tabs;
 }
@@ -411,24 +419,15 @@ function hitTestCreator(x, y) {
     if (x >= W - 104 && x <= W - 14) return { type: 'reset' };
     return { type: 'bar' };
   }
-  // Marker grab tabs (above the plot; Mix & Envelope only).
-  if (y > 90 && y <= 124 && creatorSubmode !== 'harm') {
+  // Marker grab tabs (the lane above the plot; Mix & Envelope only).
+  if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode !== 'harm') {
     for (const tab of markerTabs(p)) {
-      if (x >= tab.x && x <= tab.x + tab.w && y >= tab.y && y <= tab.y + tab.h) return { type: 'marker', key: tab.key };
+      if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
     }
     return { type: 'bar' };
   }
   if (y >= p.top && y <= p.bottom) {
     if (creatorSubmode === 'harm') return hitTestHarm(x, y, p);
-    const tl = designTimeline();
-    const markers = [
-      { t: tl.tHoldStart, key: 'hold' },
-      { t: tl.tCut, key: 'cut' },
-      { t: tl.tHoldEnd, key: 'rel' },
-    ];
-    for (const m of markers) {
-      if (Math.abs(x - tToX(m.t, p)) < 16) return { type: 'marker', key: m.key };
-    }
     if (creatorSubmode === 'env') return hitTestEnv(x, y, p);
     // Breakpoints: the selected layer first, then the others.
     for (let pass = 0; pass < 2; pass++) {
@@ -734,13 +733,22 @@ function drawCreator(now) {
   // ---- Marker grab tabs (Mix & Envelope only) ----
   if (creatorSubmode !== 'harm') {
     for (const tab of markerTabs(p)) {
-      drawRoundRect(tab.x, tab.y, tab.w, tab.h, 6);
+      // Connector from the tab down to its dashed line so the pairing is obvious.
+      ctx.strokeStyle = tab.color;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(tab.cx, tab.y + tab.h);
+      ctx.lineTo(tab.cx, p.top);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      drawRoundRect(tab.x, tab.y, tab.w, tab.h, 7);
       ctx.fillStyle = tab.color;
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = '800 9px sans-serif';
+      ctx.font = '800 10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(tab.label, tab.cx, tab.y + 11);
+      ctx.fillText(tab.label, tab.cx, tab.y + 15);
     }
   }
 
