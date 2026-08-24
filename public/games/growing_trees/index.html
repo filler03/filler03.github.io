@@ -220,7 +220,6 @@
     align-items: start;
   }
   .panel-col { min-width: 0; }
-  .fx-section { min-width: 0; }
   .tab-scroll {
     flex: 1;
     min-height: 0;
@@ -231,27 +230,6 @@
     touch-action: pan-y;
     overscroll-behavior-x: none;
   }
-  .panel-tabs {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 3px;
-    padding-bottom: 3px;
-    border-bottom: 1px solid #cdeab3;
-  }
-  .tab-btn {
-    flex: 1;
-    padding: 5px 6px;
-    border: 1px solid #cdeab3;
-    border-radius: 8px;
-    background: #f3fbea;
-    color: #2e5d34;
-    font-weight: 700;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .tab-btn.active { background: #2e5d34; color: #fff; border-color: #2e5d34; }
-  .tab-panel { flex: none; }
-  .tab-panel.hidden { display: none; }
   .panel-actions {
     grid-column: 1 / -1;
     display: flex;
@@ -299,20 +277,6 @@
     margin-bottom: 3px;
   }
   .zone-toggle input[type=checkbox] { accent-color: #2e5d34; }
-  .fx-block {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    align-items: start;
-    margin-bottom: 12px;
-  }
-  .fx-item {
-    margin-bottom: 6px;
-    padding: 6px 8px;
-    border: 1px solid #cdeab3;
-    border-radius: 10px;
-    background: #f7fdf0;
-  }
   .fx-head {
     display: flex;
     justify-content: space-between;
@@ -324,150 +288,13 @@
   }
   .fx-head label { display: flex; align-items: center; gap: 6px; }
   .fx-head input[type=checkbox] { accent-color: #2e5d34; }
-  .fx-item input[type=range] { width: 100%; margin-bottom: 6px; }
   .val { font-weight: 700; }
-  .env-actions { display: flex; gap: 6px; margin-bottom: 3px; }
-  .env-actions button {
-    flex: 1;
-    padding: 5px 8px;
-    border: 1px solid #cdeab3;
-    border-radius: 10px;
-    background: #f7fdf0;
-    color: #2e5d34;
-    font-weight: 600;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .env-actions button:hover { background: #eaf9dc; }
   .env-note {
     font-size: 10px;
     color: #6b8e5a;
     margin: 0 0 4px;
     line-height: 1.3;
   }
-  .env-row {
-    margin-bottom: 3px;
-    padding: 4px 8px;
-    border: 1px solid #cdeab3;
-    border-radius: 10px;
-    background: #f7fdf0;
-  }
-  .env-row.release-row { border-color: #e7c8a0; background: #fdf7ee; }
-  .env-row.hold-row { border-color: #b9d9c0; background: #f0f9f2; }
-  .env-row-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 2px;
-  }
-  .env-name {
-    flex: 1;
-    min-width: 0;
-    padding: 3px 6px;
-    border: 1px solid #cdeab3;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 12px;
-    color: #2e5d34;
-    background: #fff;
-  }
-  .env-name:focus { outline: 2px solid #3c7a45; outline-offset: 1px; }
-  .env-tag {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 6px;
-    white-space: nowrap;
-  }
-  .env-tag.tag-release { background: #e7c8a0; color: #6b4a1f; }
-  .env-tag.tag-hold { background: #b9d9c0; color: #2e5d34; }
-  .env-btns { display: flex; gap: 4px; flex-shrink: 0; }
-  .env-btns button {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid #cdeab3;
-    border-radius: 6px;
-    background: #fff;
-    color: #2e5d34;
-    font-size: 10px;
-    cursor: pointer;
-    line-height: 1;
-  }
-  .env-btns button:disabled { opacity: 0.35; cursor: default; }
-  .env-btns button:hover:not(:disabled) { background: #eaf9dc; }
-  .env-markers {
-    display: flex;
-    flex-shrink: 0;
-    gap: 4px;
-    margin: 0;
-  }
-  .env-m {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #2e5d34;
-    padding: 2px 6px;
-    border: 1px solid #cdeab3;
-    border-radius: 8px;
-    background: #fff;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .env-m input[type=radio] { accent-color: #2e5d34; margin: 0; }
-  .env-m.checked { background: #2e5d34; color: #fff; border-color: #2e5d34; }
-  .env-m.disabled { opacity: 0.4; cursor: default; }
-  .env-secs {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 2px 8px;
-    align-items: center;
-  }
-  .env-sec {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #2e5d34;
-    min-width: 0;
-  }
-  .env-sec input[type=range] { flex: 1; min-width: 0; margin: 0; width: auto; }
-  .env-sec b { white-space: nowrap; min-width: 30px; text-align: right; }
-  .env-sec.env-start-ro { color: #6b8e5a; }
-  .env-sec select { flex: 1; min-width: 0; }
-  /* Oscillator mixer */
-  .osc-card { cursor: pointer; }
-  .osc-card.active { border-color: #2e5d34; background: #eaf9dc; }
-  .osc-del {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid #cdeab3;
-    border-radius: 6px;
-    background: #fff;
-    color: #2e5d34;
-    font-size: 10px;
-    cursor: pointer;
-    line-height: 1;
-    flex-shrink: 0;
-  }
-  .osc-del:hover { background: #fdecea; border-color: #d9534f; color: #d9534f; }
-  .osc-editmix {
-    width: 100%;
-    margin-top: 3px;
-    padding: 5px 8px;
-    border: 1px solid #cdeab3;
-    border-radius: 8px;
-    background: #fff;
-    color: #2e5d34;
-    font-weight: 700;
-    font-size: 10px;
-    cursor: pointer;
-  }
-  .osc-editmix:hover { background: #eaf9dc; }
   .vec-head {
     font-weight: 700;
     font-size: 12px;
@@ -554,44 +381,6 @@
     margin-bottom: 8px;
   }
   #resetDefaults:hover { background: #e7f4d7; }
-  /* Harmonic editor */
-  #harmonicSliders {
-    max-height: 260px;
-    overflow-y: auto;
-    padding-right: 4px;
-  }
-  #harmonicSliders::-webkit-scrollbar { width: 6px; }
-  #harmonicSliders::-webkit-scrollbar-track { background: rgba(46,93,52,0.06); border-radius: 3px; }
-  #harmonicSliders::-webkit-scrollbar-thumb { background: #2e5d34; border-radius: 3px; }
-  #harmonicSliders { scrollbar-width: thin; scrollbar-color: #2e5d34 rgba(46,93,52,0.06); }
-  .harm-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 1px 0;
-  }
-  .harm-label {
-    width: 22px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #2e5d34;
-    text-align: right;
-    flex-shrink: 0;
-  }
-  .harm-row input[type=range] {
-    flex: 1;
-    min-width: 0;
-    height: 14px;
-    accent-color: #2e5d34;
-  }
-  .harm-val {
-    width: 30px;
-    font-size: 10px;
-    font-weight: 700;
-    color: #2e5d34;
-    text-align: right;
-    flex-shrink: 0;
-  }
 </style>
 </head>
 <body>
@@ -606,11 +395,7 @@
     <button id="closeSettings">✕</button>
   </div>
   <div class="tab-scroll">
-  <div class="panel-tabs">
-    <button type="button" class="tab-btn active" data-tab="tab-sound">Sound</button>
-    <button type="button" class="tab-btn" data-tab="tab-components">Components</button>
-  </div>
-  <div class="panel-cols tab-panel" id="tab-sound">
+  <div class="panel-cols">
   <div class="panel-actions top">
     <button id="clear">Stop sounds 🛑</button>
     <button id="resetDefaults">↺ Reset defaults</button>
@@ -623,37 +408,11 @@
     <label for="previewPitch">Preview pitch</label>
     <select id="previewPitch"></select>
   </div>
-  <div class="vec-head">Oscillators</div>
-  <div class="env-actions">
-    <button id="oscAdd">➕ Add oscillator</button>
-    <button id="oscReset">↺ Reset</button>
-  </div>
-  <div id="oscList"></div>
-  <div class="vec-head">Selected waveform</div>
+  <div class="vec-head">Playhead speed</div>
   <div class="grid">
-    <label for="harmonicPreset">Waveform preset</label>
-    <select id="harmonicPreset">
-      <option value="" selected>Custom…</option>
-      <optgroup label="Classic">
-        <option value="sine">Sine</option>
-        <option value="triangle">Triangle</option>
-        <option value="square">Square</option>
-        <option value="sawtooth">Sawtooth</option>
-        <option value="reverseSaw">Reverse sawtooth</option>
-        <option value="pulse25">Pulse (25%)</option>
-        <option value="pulse10">Pulse (10%)</option>
-      </optgroup>
-      <optgroup label="Spectral">
-        <option value="warm">Warm</option>
-        <option value="mellow">Mellow</option>
-        <option value="bright">Bright</option>
-        <option value="hollow">Hollow</option>
-        <option value="ethereal">Ethereal</option>
-      </optgroup>
-    </select>
+    <label for="timeMult">Playhead speed <b class="val" id="timeMultVal"></b></label>
+    <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
   </div>
-  <div class="env-note">Each oscillator has its own waveform and level. Draw its mix curve (how its contribution changes over the note's life) in the 🎛️ Sound creator — e.g. bright at the start settling to a mellow ring. Levels are normalized, so adding oscillators doesn't get louder.</div>
-  <div id="harmonicSliders"></div>
   <div class="vec-head">Volume over Y</div>
   <div class="grid">
     <label for="volBottom">Lower gain (bottom) <b class="val" id="volBottomVal"></b></label>
@@ -682,24 +441,6 @@
   </div>
   <div class="panel-actions">
     <button id="testSound">▶ Play test</button>
-  </div>
-  </div>
-  <div class="tab-panel hidden" id="tab-components">
-  <div class="panel-col">
-  <div class="vec-head">Playhead speed</div>
-  <div class="grid">
-    <label for="timeMult">Playhead speed <b class="val" id="timeMultVal"></b></label>
-    <input type="range" id="timeMult" min="0.1" max="4" step="0.1">
-  </div>
-  <div class="fx-section">
-  <div class="vec-head">Envelope — how a note's value changes over time</div>
-  <div class="env-actions">
-    <button id="envAdd">➕ Add component</button>
-    <button id="envReset">↺ Reset envelope</button>
-  </div>
-  <div class="env-note">The <b>⟳ Hold</b> range loops while the finger stays down; <b>▶ Release</b> always starts on the card right after <b>Hold to</b> and plays when the finger lifts. <b>✂ Cut</b> marks how far an early lift plays before jumping to Release. Start values chain: every card starts where the previous one ends, so only the first card has a Start slider.</div>
-  <div id="envList"></div>
-  </div>
   </div>
   </div>
   </div>

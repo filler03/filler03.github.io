@@ -304,15 +304,6 @@ function rampLayerMixToEnd(ds, startT, ms) {
   }
 }
 
-// Schedule each layer's mix at a FIXED progress (the "stable" preview): a single
-// constant mix weight, so the tone is static over the note.
-function scheduleLayerMixStable(stack, t0, prog) {
-  const gains = layerGainsAt(prog == null ? 0.5 : prog);
-  for (let i = 0; i < stack.mixParams.length; i++) {
-    stack.mixParams[i].setValueAtTime(gains[i], t0);
-  }
-}
-
 /* ---- Preview note ----
    A dedicated, self-contained scheduler for the test/preview sound. It plays
    the CURRENT sound design (oscillator stack + envelope + mix curves) at the
@@ -385,8 +376,7 @@ function previewNote(pitch) {
   gain.connect(masterGain);
 
   const stack = buildLayerStack(audioCtx, gain);
-  if (PREVIEW_STABLE_MIX) scheduleLayerMixStable(stack, t0, 0.5);
-  else scheduleLayerMix(stack, t0, tEnd, bodyMs, relMs);
+  scheduleLayerMix(stack, t0, tEnd, bodyMs, relMs);
   startLayerStack(stack, t0, freq, tEnd);
 
   const voice = { oscs: stack.oscs, mixGains: stack.mixGains, gain, cleanupTimer: null };

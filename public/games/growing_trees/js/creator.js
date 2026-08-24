@@ -10,7 +10,8 @@
 const OSC_COLORS = ['#2e5d34', '#1e88e5', '#f57c00', '#8e24aa', '#00897b', '#d9534f', '#6d4c41', '#3949ab'];
 const creatorBtn = document.getElementById('creatorBtn');
 
-let creatorSubmode = 'mix';   // 'mix' active in phase 1; env/harmonic tabs disabled
+let creatorSubmode = 'note';  // 'note' (merged volume envelope + mix) or 'harm'
+let creatorVolSel = true;     // true = master volume envelope selected; false = a layer's mix curve
 let creatorPtr = null;        // { mode:'point'|'marker', layerIdx, ptIdx|key, x0, y0, moved }
 let creatorLastTap = null;    // { t, x, y } for double-tap-to-delete
 let creatorPreviewTimer = null;
@@ -18,7 +19,8 @@ let creatorPreviewTimer = null;
 /* ---- Open / close ---- */
 function openSoundCreator(submode, layerIdx) {
   creatorActive = true;
-  creatorSubmode = submode || 'mix';
+  creatorSubmode = (submode === 'env' || submode === 'mix') ? 'note' : (submode || 'note');
+  creatorVolSel = creatorSubmode !== 'harm';
   if (layerIdx != null && layerIdx >= 0 && layerIdx < OSC_STACK.layers.length) selectedLayerIdx = layerIdx;
   mode = 'creator';
   stopGestureNote();
@@ -44,7 +46,7 @@ creatorBtn.addEventListener('click', () => {
   if (creatorActive) { closeSoundCreator(); return; }
   initAudio();
   resumeAudio();
-  openSoundCreator('mix', selectedLayerIdx);
+  openSoundCreator('note', selectedLayerIdx);
 });
 
 /* ---- Plot geometry ---- */
@@ -57,7 +59,7 @@ const xToT = (x, p) => clamp01((x - p.left) / p.pw);
 const vToY = (v, p) => p.bottom - clamp01(v) * p.ph;
 const yToV = (y, p) => clamp01((p.bottom - y) / p.ph);
 
-/* ---- Time markers (shared by Mix & Envelope) ----
+/* ---- Time markers (shared by the volume envelope & mix curves) ----
    HOLD / CUT / REL are draggable via grab tabs drawn above the plot. Tabs at
    nearby x positions are staggered onto a second row so overlapping markers
    (e.g. cut == hold end) stay separately grabbable. */
@@ -90,6 +92,26 @@ function markerTabs(p) {
     tabs.push({ key: m.key, label: m.label, color: m.color, cx, x: cx - MARKER_TAB_W / 2, y, w: MARKER_TAB_W, h: MARKER_TAB_H });
   }
   return tabs;
+}
+
+// Waveform presets offered in the Harmonics tab. They reuse the shared
+// HARMONIC_PRESETS via applyPresetToLayer, so a picked waveform is the exact
+// same sound as choosing it in the settings panel.
+const HARM_PRESETS = [
+  { name: 'sine', label: 'Sine' },
+  { name: 'triangle', label: 'Triangle' },
+  { name: 'square', label: 'Square' },
+  { name: 'sawtooth', label: 'Sawtooth' },
+];
+function harmPresetButtons(p) {
+  const n = HARM_PRESETS.length;
+  const gap = 8;
+  const w = (p.pw - (n - 1) * gap) / n;
+  const y = 102, h = 40;
+  return HARM_PRESETS.map((pr, i) => ({
+    name: pr.name, label: pr.label,
+    x: p.left + i * (w + gap), y, w, h,
+  }));
 }
 function previewPitchName() {
   const positions = pitchPositions();
@@ -270,6 +292,14 @@ function envSplitAt(c, ms) {
   clampEnvelopeIndexes();
 }
 
+// Split the envelope component that contains time `ms` at that time.
+function envSplitAtTime(ms) {
+  const eb = envBoundaries();
+  for (let c = 0; c < eb.n; c++) {
+    if (ms >= eb.b[c] && ms <= eb.b[c + 1]) { envSplitAt(c, ms); return; }
+  }
+}
+
 function envDeleteAt(idx) {
   const comps = ENVELOPE.components;
   if (comps.length <= 1) return;
@@ -301,6 +331,39 @@ function envDragBoundary(i, t, v) {
   clampEnvelopeIndexes();
 }
 
+/* ---- Note lifetime ----
+   The note's lifetime is the sum of every envelope component (body through the
+   hold end plus the release tail). The Volume-envelope tab offers a single
+   "Note life"
+   slider that scales all component durations proportionally, so the envelope
+   keeps its shape while the whole note is stretched or compressed. */
+function noteLifetimeMs() {
+  return compsMs(ENVELOPE.components);
+}
+function setNoteLifetime(ms) {
+  const comps = ENVELOPE.components;
+  const cur = compsMs(comps);
+  if (!comps.length || cur <= 0) return;
+  ms = Math.max(300, Math.min(10000, ms));
+  const k = ms / cur;
+  for (const c of comps) c.duration = Math.max(1, Math.round(c.duration * k));
+  // Snap the final total to the target by adjusting the last component.
+  const diff = ms - compsMs(comps);
+  if (comps.length) comps[comps.length - 1].duration = Math.max(1, comps[comps.length - 1].duration + diff);
+  clampEnvelopeIndexes();
+}
+function lifeSlider(p) {
+  const cy = 122;
+  const x2 = W - 40;
+  const x1 = Math.max(p.left + 120, x2 - 200);
+  return { x1, x2, cy, minSec: 0.3, maxSec: 10 };
+}
+function applyLifeFromX(x) {
+  const L = lifeSlider(creatorPlot());
+  const f = clamp01((x - L.x1) / (L.x2 - L.x1));
+  setNoteLifetime((L.minSec + f * (L.maxSec - L.minSec)) * 1000);
+}
+
 // Distance from a point to a layer's drawn curve (sampled).
 function distToCurve(layerIdx, x, y, p) {
   const l = OSC_STACK.layers[layerIdx];
@@ -309,6 +372,19 @@ function distToCurve(layerIdx, x, y, p) {
     const t = k / 160;
     const sx = tToX(t, p), sy = vToY(curveValue(l, t), p);
     const d = Math.hypot(x - sx, y - sy);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+// Distance from a point to the master envelope's drawn line (sampled).
+function distToEnv(x, y, p) {
+  const eb = envBoundaries();
+  let best = Infinity;
+  for (let c = 0; c < eb.n; c++) {
+    const d = segDist(x, y,
+      tToX(eb.tOf(eb.b[c]), p), vToY(eb.vals[c], p),
+      tToX(eb.tOf(eb.b[c + 1]), p), vToY(eb.vals[c + 1], p));
     if (d < best) best = d;
   }
   return best;
@@ -357,8 +433,7 @@ function scheduleCreatorPreview() {
 /* ---- Hit testing ---- */
 function creatorTabs() {
   return [
-    { submode: 'mix', label: 'Mix', enabled: true },
-    { submode: 'env', label: 'Envelope', enabled: true },
+    { submode: 'note', label: 'Volume envelope', enabled: true },
     { submode: 'harm', label: 'Harmonics', enabled: true },
   ];
 }
@@ -395,7 +470,7 @@ function hitTestCreator(x, y) {
     const tabs = creatorTabs();
     let tx = W - 14;
     for (let i = tabs.length - 1; i >= 0; i--) {
-      const w = 74;
+      const w = 112;
       tx -= w;
       if (x >= tx && x <= tx + w) return { type: 'tab', submode: tabs[i].submode, enabled: tabs[i].enabled };
     }
@@ -403,14 +478,23 @@ function hitTestCreator(x, y) {
   }
   const p = creatorPlot();
   if (y >= 66 && y <= 90) {
-    if (creatorSubmode !== 'env') {
-      for (let i = 0; i < OSC_STACK.layers.length; i++) {
-        const cx = p.left + i * 76;
-        if (x >= cx && x <= cx + 70) return { type: 'layer', layerIdx: i };
-      }
+    const sw = creatorSubmode === 'note' ? 1 : 0;   // note mode pins a Vol swatch first
+    // ✕ delete badge on the selected layer (layers only; hidden when it's the last one).
+    if (!creatorVolSel && OSC_STACK.layers.length > 1) {
+      const scx = p.left + sw * 76 + selectedLayerIdx * 76 + 62, scy = 72;
+      if (Math.hypot(x - scx, y - scy) < 15) return { type: 'dellayer' };
     }
-    // Stable-test toggle (freeze the mix so the pitch can't climb)
-    if (x >= W - 292 && x <= W - 200) return { type: 'stable' };
+    // ➕ add-layer button after the last swatch.
+    if (OSC_STACK.layers.length < 8) {
+      const ax = p.left + sw * 76 + OSC_STACK.layers.length * 76 + 7, ay = 78;
+      if (Math.hypot(x - ax, y - ay) < 18) return { type: 'addlayer' };
+    }
+    for (let i = 0; i < OSC_STACK.layers.length; i++) {
+      const cx = p.left + sw * 76 + i * 76;
+      if (x >= cx && x <= cx + 70) return { type: 'layer', layerIdx: i };
+    }
+    // Vol swatch (pinned first in the Volume-envelope tab).
+    if (creatorSubmode === 'note' && x >= p.left && x <= p.left + 70) return { type: 'vol' };
     // Preview pitch selector (◀ name ▶)
     if (x >= W - 196 && x <= W - 108) {
       const dir = x < W - 196 + 29 ? -1 : (x < W - 196 + 59 ? 0 : 1);
@@ -419,17 +503,35 @@ function hitTestCreator(x, y) {
     if (x >= W - 104 && x <= W - 14) return { type: 'reset' };
     return { type: 'bar' };
   }
-  // Marker grab tabs (the lane above the plot; Mix & Envelope only).
+  // Marker grab tabs (the lane above the plot; Volume envelope only).
   if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode !== 'harm') {
     for (const tab of markerTabs(p)) {
       if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
+    }
+    // Note-lifetime slider (right side of the lane).
+    const L = lifeSlider(p);
+    if (y >= L.cy - 16 && y <= L.cy + 16 && x >= L.x1 - 10 && x <= L.x2 + 10) return { type: 'life' };
+    return { type: 'bar' };
+  }
+  // Waveform preset buttons (the same strip, Harmonics tab only).
+  if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode === 'harm') {
+    for (const b of harmPresetButtons(p)) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return { type: 'harmpreset', name: b.name };
     }
     return { type: 'bar' };
   }
   if (y >= p.top && y <= p.bottom) {
     if (creatorSubmode === 'harm') return hitTestHarm(x, y, p);
-    if (creatorSubmode === 'env') return hitTestEnv(x, y, p);
-    // Breakpoints: the selected layer first, then the others.
+    // Volume-envelope tab: the selected curve (the master envelope when Vol is
+    // selected, else one layer's mix curve) is editable; taps on any other curve
+    // switch the selection to it.
+    if (creatorVolSel) {
+      // The envelope is selected: dots drag, tapping anywhere else splits it
+      // (adds a boundary point at the tapped time). Mix curves don't steal the
+      // tap here — switching layers is done from the swatch row above.
+      return hitTestEnv(x, y, p);   // 'envbound' | 'envline' | 'empty'
+    }
+    // A layer's mix curve is selected: its own breakpoints first, then the others.
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < OSC_STACK.layers.length; i++) {
         if ((pass === 0) !== (i === selectedLayerIdx)) continue;
@@ -440,11 +542,13 @@ function hitTestCreator(x, y) {
         }
       }
     }
+    // Nearest curve wins: a layer switches selection to it, the envelope to Vol.
     let best = null, bd = 22;
     for (let i = 0; i < OSC_STACK.layers.length; i++) {
       const d = distToCurve(i, x, y, p);
       if (d < bd) { bd = d; best = i; }
     }
+    if (distToEnv(x, y, p) < bd) return { type: 'selenv' };
     if (best != null) return { type: 'line', layerIdx: best };
     return { type: 'empty' };
   }
@@ -463,40 +567,71 @@ canvas.addEventListener('pointerdown', e => {
   if (hit.type === 'tab') {
     if (hit.enabled) {
       creatorSubmode = hit.submode;
+      creatorVolSel = creatorSubmode !== 'harm';
       if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
     }
     return;
   }
+  if (hit.type === 'vol') {
+    creatorVolSel = true;
+    creatorPtr = null;
+    previewChime();
+    return;
+  }
   if (hit.type === 'layer') {
     selectedLayerIdx = hit.layerIdx;
+    creatorVolSel = false;
     if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
     creatorPtr = null;
     previewChime();
     return;
   }
+  if (hit.type === 'addlayer') {
+    if (OSC_STACK.layers.length >= 8) return;
+    OSC_STACK.layers.push(defaultLayer('osc-' + (OSC_STACK.layers.length + 1)));
+    selectedLayerIdx = OSC_STACK.layers.length - 1;
+    creatorVolSel = false;
+    if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
+    previewAndSave();
+    return;
+  }
+  if (hit.type === 'dellayer') {
+    if (OSC_STACK.layers.length <= 1) return;
+    OSC_STACK.layers.splice(selectedLayerIdx, 1);
+    selectedLayerIdx = Math.max(0, Math.min(OSC_STACK.layers.length - 1, selectedLayerIdx));
+    if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
+    previewAndSave();
+    return;
+  }
+  if (hit.type === 'life') {
+    applyLifeFromX(x);
+    scheduleCreatorPreview();
+    creatorPtr = { mode: 'life', x0: x, y0: y };
+    return;
+  }
   if (hit.type === 'reset') {
-    if (creatorSubmode === 'env') {
-      ENVELOPE = clone(DEFAULT_ENVELOPE);
-      clampEnvelopeIndexes();
-      renderEnvelopeEditor();
-    } else if (creatorSubmode === 'harm') {
+    if (creatorSubmode === 'harm') {
       const l = selectedLayer();
       l.specPoints = null;
       l.presetId = null;
       for (let i = 0; i < HARMONIC_COUNT; i++) l.amplitudes[i] = i === 0 ? 1 : 0;
       initLayerSpecPoints(l);
+    } else if (creatorVolSel) {
+      ENVELOPE = clone(DEFAULT_ENVELOPE);
+      clampEnvelopeIndexes();
     } else {
       resetLayerCurve(selectedLayer());
     }
     previewAndSave();
     return;
   }
-  if (hit.type === 'bar') { creatorPtr = null; return; }
-  if (hit.type === 'stable') {
-    PREVIEW_STABLE_MIX = !PREVIEW_STABLE_MIX;
+  if (hit.type === 'harmpreset') {
+    applyPresetToLayer(selectedLayer(), hit.name);
+    initLayerSpecPoints(selectedLayer());
     previewAndSave();
     return;
   }
+  if (hit.type === 'bar') { creatorPtr = null; return; }
   if (hit.type === 'pitch') {
     if (hit.dir !== 0) {
       const positions = pitchPositions();
@@ -535,8 +670,7 @@ canvas.addEventListener('pointerdown', e => {
   }
   if (hit.type === 'envline') {
     const eb = envBoundaries();
-    const ms = clamp01(xToT(x, p)) * eb.total;
-    envSplitAt(hit.c, ms);
+    envSplitAtTime(clamp01(xToT(x, p)) * eb.total);
     previewAndSave();
     return;
   }
@@ -550,11 +684,24 @@ canvas.addEventListener('pointerdown', e => {
     }
     creatorLastTap = { t: performance.now(), x, y };
     if (hit.layerIdx !== selectedLayerIdx) selectedLayerIdx = hit.layerIdx;
+    creatorVolSel = false;
     creatorPtr = { mode: 'point', layerIdx: hit.layerIdx, ptIdx: hit.ptIdx, x0: x, y0: y };
     return;
   }
-  if (hit.type === 'line') { selectedLayerIdx = hit.layerIdx; creatorPtr = null; previewChime(); return; }
-  // Empty: add a breakpoint to the selected layer and grab it.
+  if (hit.type === 'line') {
+    if (hit.layerIdx === selectedLayerIdx && !creatorVolSel) {
+      // Tapping the selected layer's own line adds a point there.
+      const idx = insertCurvePoint(OSC_STACK.layers[hit.layerIdx], xToT(x, p), yToV(y, p));
+      if (idx >= 0) creatorPtr = { mode: 'point', layerIdx: hit.layerIdx, ptIdx: idx, x0: x, y0: y };
+      previewAndSave();
+      return;
+    }
+    selectedLayerIdx = hit.layerIdx; creatorVolSel = false; creatorPtr = null; previewChime();
+    return;
+  }
+  if (hit.type === 'selenv') { creatorVolSel = true; creatorPtr = null; previewChime(); return; }
+  // Empty: add to the selected curve — split the envelope (Vol) or add a mix
+  // breakpoint (a layer).
   const l = selectedLayer();
   if (creatorSubmode === 'harm') {
     const hidx = insertSpecPoint(l, xToT(x, p), yToAmp(y, p));
@@ -562,6 +709,12 @@ canvas.addEventListener('pointerdown', e => {
       syncLayerAmplitudes(l);
       creatorPtr = { mode: 'harmpoint', layerIdx: selectedLayerIdx, idx: hidx, x0: x, y0: y };
     }
+    previewAndSave();
+    return;
+  }
+  if (creatorVolSel) {
+    const eb = envBoundaries();
+    envSplitAtTime(clamp01(xToT(x, p)) * eb.total);
     previewAndSave();
     return;
   }
@@ -591,6 +744,9 @@ canvas.addEventListener('pointermove', e => {
   } else if (creatorPtr.mode === 'envbound') {
     envDragBoundary(creatorPtr.idx, xToT(x, p), yToV(y, p));
     scheduleCreatorPreview();
+  } else if (creatorPtr.mode === 'life') {
+    applyLifeFromX(x);
+    scheduleCreatorPreview();
   } else if (creatorPtr.mode === 'harmpoint') {
     const l = OSC_STACK.layers[creatorPtr.layerIdx];
     const pt = l && l.specPoints[creatorPtr.idx];
@@ -608,9 +764,7 @@ canvas.addEventListener('pointermove', e => {
 
 canvas.addEventListener('pointerup', e => {
   if (!creatorActive || !creatorPtr) return;
-  const wasEnv = creatorPtr.mode === 'marker' || creatorPtr.mode === 'envbound';
   creatorPtr = null;
-  if (wasEnv) renderEnvelopeEditor();
   saveSettings();
 });
 
@@ -657,19 +811,17 @@ function drawCreator(now) {
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.fillText('Sound creator', W / 2, 36);
-  // Prominent readout of the exact preview pitch + frequency the test plays, plus
-// the note's spectral center at the start and end of the note — so a rising
-// "pitch" from the mix morphing is visibly explained.
+// Prominent readout of the exact preview pitch + frequency the test plays,
+// plus the note's spectral center at the start and end of the note — so a
+// rising "pitch" from the mix morphing is visibly explained.
   ctx.font = '700 12px sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText('Test: ' + previewPitchName() + ' · ' + previewPitchFreq().toFixed(1) + ' Hz', 84, 38);
-  const cs = PREVIEW_STABLE_MIX ? centroidPitchName(0.5) : centroidPitchName(0);
-  const ce = PREVIEW_STABLE_MIX ? centroidPitchName(0.5) : centroidPitchName(1);
-  ctx.fillText('spectral center: ' + cs + (PREVIEW_STABLE_MIX ? ' (stable)' : ' → ' + ce), 84, 58);
+  ctx.fillText('spectral center: ' + centroidPitchName(0) + ' → ' + centroidPitchName(1), 84, 58);
   const tabs = creatorTabs();
   let tx = W - 14;
   for (let i = tabs.length - 1; i >= 0; i--) {
-    const w = 74, x = tx - w;
+    const w = 112, x = tx - w;
     tx = x;
     const active = tabs[i].submode === creatorSubmode;
     ctx.globalAlpha = tabs[i].enabled ? 1 : 0.45;
@@ -677,40 +829,64 @@ function drawCreator(now) {
     ctx.fillStyle = active ? '#fff' : 'rgba(255,255,255,0.18)';
     ctx.fill();
     ctx.fillStyle = active ? '#2e5d34' : '#fff';
-    ctx.font = '700 12px sans-serif';
+    ctx.font = '700 11px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(tabs[i].label, x + w / 2, 38);
     ctx.globalAlpha = 1;
   }
 
-  // ---- Legend (layer colors + reset) ----
-  if (creatorSubmode === 'mix' || creatorSubmode === 'harm') {
-    for (let i = 0; i < OSC_STACK.layers.length; i++) {
-      const cx = p.left + i * 76;
-      const sel = i === selectedLayerIdx;
-      ctx.fillStyle = OSC_COLORS[i % OSC_COLORS.length];
-      ctx.beginPath();
-      ctx.arc(cx + 7, 78, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.font = (sel ? '800 ' : '700 ') + '11px sans-serif';
-      ctx.fillStyle = sel ? '#1b4523' : '#6b8e5a';
-      ctx.textAlign = 'left';
-      ctx.fillText('Osc ' + (i + 1), cx + 18, 82);
-    }
-  } else {
-    ctx.font = '800 11px sans-serif';
+  // ---- Legend (Vol + layer colors + add/remove + reset) ----
+  const sw = creatorSubmode === 'note' ? 1 : 0;   // note mode pins a Vol swatch first
+  if (creatorSubmode === 'note') {
     ctx.fillStyle = '#1b4523';
+    ctx.beginPath();
+    ctx.arc(p.left + 7, 78, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = (creatorVolSel ? '800 ' : '700 ') + '11px sans-serif';
+    ctx.fillStyle = creatorVolSel ? '#1b4523' : '#6b8e5a';
     ctx.textAlign = 'left';
-    ctx.fillText('Envelope — note value over time', p.left, 82);
+    ctx.fillText('Vol', p.left + 18, 82);
   }
-  // Stable-test toggle
-  drawRoundRect(W - 292, 68, 92, 22, 8);
-  ctx.fillStyle = PREVIEW_STABLE_MIX ? '#2e5d34' : '#fff';
-  ctx.fill();
-  ctx.fillStyle = PREVIEW_STABLE_MIX ? '#fff' : '#2e5d34';
-  ctx.font = '700 10px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(PREVIEW_STABLE_MIX ? '◉ Stable test' : '◯ Morph test', W - 246, 83);
+  for (let i = 0; i < OSC_STACK.layers.length; i++) {
+    const cx = p.left + sw * 76 + i * 76;
+    const sel = i === selectedLayerIdx;
+    ctx.fillStyle = OSC_COLORS[i % OSC_COLORS.length];
+    ctx.beginPath();
+    ctx.arc(cx + 7, 78, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = (sel ? '800 ' : '700 ') + '11px sans-serif';
+    ctx.fillStyle = sel ? '#1b4523' : '#6b8e5a';
+    ctx.textAlign = 'left';
+    ctx.fillText('Osc ' + (i + 1), cx + 18, 82);
+    // ✕ delete badge on the selected layer (layers only, hidden when it's the last one).
+    if (sel && !creatorVolSel && OSC_STACK.layers.length > 1) {
+      const bx = cx + 62, by = 72;
+      ctx.beginPath();
+      ctx.arc(bx, by, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#c0392b';
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '800 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('✕', bx, by + 4);
+    }
+  }
+  // ➕ add-layer button after the last swatch.
+  if (OSC_STACK.layers.length < 8) {
+    const ax = p.left + sw * 76 + OSC_STACK.layers.length * 76 + 7, ay = 78;
+    ctx.beginPath();
+    ctx.arc(ax, ay, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#9db89c';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = '800 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('+', ax, ay + 4);
+    ctx.font = '700 11px sans-serif';
+    ctx.fillStyle = '#6b8e5a';
+    ctx.textAlign = 'left';
+    ctx.fillText('Add', ax + 14, 82);
+  }
   // Preview pitch selector (◀ name ▶)
   const pcx = W - 196;
   drawRoundRect(pcx, 68, 88, 22, 8);
@@ -728,9 +904,9 @@ function drawCreator(now) {
   ctx.fillStyle = '#2e5d34';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(creatorSubmode === 'env' ? '↺ Reset env' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
+  ctx.fillText(creatorVolSel ? '↺ Reset vol' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
 
-  // ---- Marker grab tabs (Mix & Envelope only) ----
+  // ---- Marker grab tabs (Volume envelope tab only) ----
   if (creatorSubmode !== 'harm') {
     for (const tab of markerTabs(p)) {
       // Connector from the tab down to its dashed line so the pairing is obvious.
@@ -749,6 +925,53 @@ function drawCreator(now) {
       ctx.font = '800 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(tab.label, tab.cx, tab.y + 15);
+    }
+    // Note-lifetime slider (right side of the lane, next to the markers).
+    const L = lifeSlider(p);
+    const totalS = noteLifetimeMs() / 1000;
+    const f = clamp01((totalS - L.minSec) / (L.maxSec - L.minSec));
+    ctx.font = '700 10px sans-serif';
+    ctx.fillStyle = '#6b8e5a';
+    ctx.textAlign = 'right';
+    ctx.fillText('Note life', L.x2, 110);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(46,93,52,0.22)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(L.x1, L.cy); ctx.lineTo(L.x2, L.cy);
+    ctx.stroke();
+    ctx.strokeStyle = '#2e5d34';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(L.x1, L.cy); ctx.lineTo(L.x1 + f * (L.x2 - L.x1), L.cy);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.arc(L.x1 + f * (L.x2 - L.x1), L.cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = '#2e5d34';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#2e5d34';
+    ctx.font = '700 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(totalS.toFixed(1) + 's', L.x2 + 8, L.cy + 4);
+  }
+
+  // ---- Waveform presets (Harmonics tab only) ----
+  if (creatorSubmode === 'harm') {
+    const current = matchPreset(selectedLayer().amplitudes);
+    const accent = OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
+    for (const b of harmPresetButtons(p)) {
+      const active = b.name === current;
+      drawRoundRect(b.x, b.y, b.w, b.h, 8);
+      ctx.fillStyle = active ? accent : '#fff';
+      ctx.fill();
+      ctx.fillStyle = active ? '#fff' : '#2e5d34';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 4);
     }
   }
 
@@ -783,7 +1006,7 @@ function drawCreator(now) {
     ctx.textAlign = 'right';
     ctx.fillText('note life →', p.right, p.bottom - 6);
     ctx.textAlign = 'left';
-    ctx.fillText(creatorSubmode === 'env' ? 'value 100%' : 'mix 100%', p.left + 2, p.top + 10);
+    ctx.fillText('loudness 100%', p.left + 2, p.top + 10);
   }
 
   // ---- Markers (time-based sub-modes only) ----
@@ -801,35 +1024,17 @@ function drawCreator(now) {
     }
   }
 
-  // ---- Envelope (env sub-mode) ----
-  if (creatorSubmode === 'env') {
+  // ---- Volume envelope + layer curves (note sub-mode) ----
+  if (creatorSubmode === 'note') {
     const eb = envBoundaries();
     // Release-region tint (from the hold end).
     const relX = tToX(eb.tOf(eb.b[ENVELOPE.holdEndIndex + 1]), p);
     ctx.fillStyle = 'rgba(217,83,79,0.07)';
     ctx.fillRect(relX, p.top, p.right - relX, p.ph);
-    ctx.strokeStyle = '#2e5d34';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(tToX(eb.tOf(eb.b[0]), p), vToY(eb.vals[0], p));
-    for (let i = 1; i <= eb.n; i++) ctx.lineTo(tToX(eb.tOf(eb.b[i]), p), vToY(eb.vals[i], p));
-    ctx.stroke();
-    for (let i = 0; i <= eb.n; i++) {
-      ctx.fillStyle = '#2e5d34';
-      ctx.beginPath();
-      ctx.arc(tToX(eb.tOf(eb.b[i]), p), vToY(eb.vals[i], p), 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-  }
-
-  // ---- Layer curves (mix sub-mode) ----
-  if (creatorSubmode === 'mix') {
+    // Layer mix curves (the selected layer solid, the others dimmed).
     for (let i = 0; i < OSC_STACK.layers.length; i++) {
       const l = OSC_STACK.layers[i];
-      const sel = i === selectedLayerIdx;
+      const sel = !creatorVolSel && i === selectedLayerIdx;
       ctx.strokeStyle = OSC_COLORS[i % OSC_COLORS.length];
       ctx.globalAlpha = sel ? 1 : 0.5;
       ctx.lineWidth = sel ? 3 : 1.5;
@@ -852,6 +1057,26 @@ function drawCreator(now) {
           ctx.lineWidth = 2;
           ctx.stroke();
         }
+      }
+    }
+    // Master envelope outline (bold when Vol is selected, faint otherwise).
+    ctx.globalAlpha = creatorVolSel ? 1 : 0.45;
+    ctx.strokeStyle = '#2e5d34';
+    ctx.lineWidth = creatorVolSel ? 3 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(tToX(eb.tOf(eb.b[0]), p), vToY(eb.vals[0], p));
+    for (let i = 1; i <= eb.n; i++) ctx.lineTo(tToX(eb.tOf(eb.b[i]), p), vToY(eb.vals[i], p));
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    if (creatorVolSel) {
+      for (let i = 0; i <= eb.n; i++) {
+        ctx.fillStyle = '#2e5d34';
+        ctx.beginPath();
+        ctx.arc(tToX(eb.tOf(eb.b[i]), p), vToY(eb.vals[i], p), 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
     }
   }
@@ -904,11 +1129,9 @@ function drawCreator(now) {
   ctx.fillStyle = '#6b8e5a';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(creatorSubmode === 'env'
-    ? 'Drag a dot to reshape · tap a line to split · double-tap a dot to delete · drag HOLD/CUT/REL markers'
-    : creatorSubmode === 'harm'
-      ? 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete'
-      : 'Tap to add a point · drag to move · double-tap a dot to delete · tap a line to switch layers', W / 2, H - 8);
+  ctx.fillText(creatorSubmode === 'note'
+    ? 'Pick Vol or an oscillator above · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
+    : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
 }
 
 function creatorLoop(now) {

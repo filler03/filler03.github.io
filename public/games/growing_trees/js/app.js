@@ -151,13 +151,13 @@ var GESTURE = clone(DEFAULT_GESTURE);
    transition is a smooth continuation instead of a step to a design start. */
 const DEFAULT_ENVELOPE = {
   components: [
-    { id: 'comp-1', name: 'Attack',  duration: 250,  startValue: 0,   endValue: 100 },
-    { id: 'comp-2', name: 'Decay',   duration: 250,  startValue: 100, endValue: 60 },
-    { id: 'comp-3', name: 'Sustain', duration: 250,  startValue: 60,  endValue: 60 },
-    { id: 'comp-4', name: 'Release', duration: 1200, startValue: 60,  endValue: 0 },
+    { id: 'comp-1', name: 'Attack',  duration: 10,   startValue: 0,   endValue: 100 },
+    { id: 'comp-2', name: 'Decay',   duration: 500,  startValue: 100, endValue: 55 },
+    { id: 'comp-3', name: 'Ring',    duration: 1500, startValue: 55,  endValue: 28 },
+    { id: 'comp-4', name: 'Release', duration: 1200, startValue: 28,  endValue: 0 },
   ],
   beginReleaseIndex: 3,
-  holdStartIndex: 2,
+  holdStartIndex: 1,
   holdEndIndex: 2,
   earlyCutIndex: 2,
 };
@@ -290,7 +290,28 @@ function defaultLayer(id) {
   amplitudes[0] = 1;
   return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null };
 }
-const DEFAULT_OSC_STACK = { layers: [defaultLayer()] };
+// A soothing chime as the out-of-the-box sound: a soft bell body that carries
+// the strike, plus a bright overtone layer that blooms into the tail. Layer
+// gains are normalized per sample, so the mix curves genuinely morph the tone
+// (warm attack → shimmering ring) rather than just scaling loudness.
+function ampFromSpec(spec) {
+  const a = new Array(HARMONIC_COUNT).fill(0);
+  for (const [h, v] of spec) a[h - 1] = clampSign(v);
+  return a;
+}
+function chimeLayer(id, spec, curve, level) {
+  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null };
+}
+const DEFAULT_OSC_STACK = {
+  layers: [
+    chimeLayer('osc-1',
+      [[1, 1], [2, 0.22], [3, 0.08], [4, 0.14], [5, 0.05], [7, 0.02], [10, 0.01]],
+      [{ t: 0, v: 1 }, { t: 1, v: 0.3 }], 1),
+    chimeLayer('osc-2',
+      [[2, 0.4], [4, 0.25], [5, 0.1], [6, 0.05], [8, 0.06], [10, 0.04]],
+      [{ t: 0, v: 0 }, { t: 0.5, v: 0.15 }, { t: 1, v: 1 }], 0.8),
+  ],
+};
 var OSC_STACK = clone(DEFAULT_OSC_STACK);
 
 // A layer's raw mix weight at note progress `prog` (0..1): level × its curve.
@@ -429,9 +450,6 @@ const HARMONIC_PRESETS = {
 // Preview pitch: index into pitchPositions() for the test note (the 🎛️ creator
 // and the settings "Play test" button). 0 = the key root.
 var PREVIEW_PITCH = 0;
-// When true, the test note plays the mix curves held at a fixed point (no
-// time-varying morph), so the perceived pitch can't rise over the note.
-var PREVIEW_STABLE_MIX = true;
 
 // Pitch color zones: the range of scale degrees shown as faint color bands on
 // screen (screen X = pitch). Octaves are relative to the key note's octave —

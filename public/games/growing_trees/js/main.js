@@ -29,7 +29,7 @@ soundOverlay.addEventListener('click', dismissSoundOverlay);
 loadSavedSettings();
 syncWaitBtn();
 syncLineUI();
-syncEnvelopeUI();
+clampEnvelopeIndexes();
 syncPitchZonesUI();
 
 /* ---- Pointer handling ---- */

@@ -272,10 +272,9 @@ function resetToDefaults() {
   for (const k of LEGACY_STORAGE_KEYS) { try { localStorage.removeItem(k); } catch (e) {} }
   loadLevelUI(currentLevel);
   /* loadGestureUI(); syncMinMaxUI(); syncSensUI(); syncPauseUI(); */
-  syncEnvelopeUI();
   syncPitchZonesUI();
   syncVolumeUI();
-  syncHarmonicsUI();
+  clampOscSelection();
   syncWaitBtn();
 }
 
@@ -524,22 +523,10 @@ syncSensUI();
 
 /* ---- Gesture value mapping is pure screen proportions (see lineTimeForSlot) ---- */
 
-/* ---- Oscillator mixer ----
-   OSC_STACK.layers each define a waveform (a named preset or custom harmonic
-   amplitudes), a level, and a Start→End mix morph. The selected layer is edited
-   by the waveform preset dropdown and the harmonic sliders below the mixer. */
-const harmonicSlidersEl = document.getElementById('harmonicSliders');
-const harmonicPresetSelectEl = document.getElementById('harmonicPreset');
-const oscListEl = document.getElementById('oscList');
-const oscAddEl = document.getElementById('oscAdd');
-const oscResetEl = document.getElementById('oscReset');
+/* ---- Oscillator stack helpers (shared with the 🎛️ Sound creator) ----
+   Layers are added, removed, and shaped inside the sound creator; these helpers
+   are shared by the creator, the settings save/load, and the harmonic presets. */
 let selectedLayerIdx = 0;
-
-const PRESET_LABELS = {
-  sine: 'Sine', triangle: 'Triangle', square: 'Square', sawtooth: 'Sawtooth',
-  reverseSaw: 'Reverse sawtooth', pulse25: 'Pulse (25%)', pulse10: 'Pulse (10%)',
-  warm: 'Warm', mellow: 'Mellow', bright: 'Bright', hollow: 'Hollow', ethereal: 'Ethereal',
-};
 
 function selectedLayer() {
   const layers = OSC_STACK.layers;
@@ -548,61 +535,9 @@ function selectedLayer() {
   return layers[selectedLayerIdx];
 }
 
-function presetOptionsHtml(sel) {
-  const groups = [
-    ['Classic', ['sine', 'triangle', 'square', 'sawtooth', 'reverseSaw', 'pulse25', 'pulse10']],
-    ['Spectral', ['warm', 'mellow', 'bright', 'hollow', 'ethereal']],
-  ];
-  let html = '<option value="">Custom…</option>';
-  for (const [label, ids] of groups) {
-    html += '<optgroup label="' + label + '">';
-    for (const id of ids) {
-      html += '<option value="' + id + '"' + (id === sel ? ' selected' : '') + '>' + (PRESET_LABELS[id] || id) + '</option>';
-    }
-    html += '</optgroup>';
-  }
-  return html;
-}
-
-function renderOscList() {
-  let html = '';
-  for (let i = 0; i < OSC_STACK.layers.length; i++) {
-    const l = OSC_STACK.layers[i];
-    const pct = v => Math.round(v * 100) + '%';
-    html += '<div class="env-row osc-card' + (i === selectedLayerIdx ? ' active' : '') + '" data-idx="' + i + '">'
-      + '<div class="env-row-head">'
-      + '<span class="env-name osc-name">Osc ' + (i + 1) + '</span>'
-      + '<button type="button" class="osc-del" data-idx="' + i + '" title="Remove oscillator">✕</button>'
-      + '</div>'
-      + '<div class="env-secs">'
-      + '<label class="env-sec">Wave <select class="osc-wave" data-idx="' + i + '">' + presetOptionsHtml(l.presetId || '') + '</select></label>'
-      + '<label class="env-sec">Level <input type="range" class="osc-level" data-idx="' + i + '" min="0" max="100" step="1" value="' + Math.round(l.level * 100) + '"><b>' + pct(l.level) + '</b></label>'
-      + '</div>'
-      + '<button type="button" class="osc-editmix" data-idx="' + i + '" title="Open the sound creator to draw this oscillator mix curve over time">✎ Draw mix curve</button>'
-      + '</div>';
-  }
-  oscListEl.innerHTML = html;
-}
-
-function renderHarmonicSliders() {
-  const amps = selectedLayer().amplitudes;
-  let html = '';
-  for (let i = 0; i < HARMONIC_COUNT; i++) {
-    const amp = amps[i];
-    const pct = Math.round(Math.abs(amp) * 100);
-    const sign = amp < 0 ? '-' : '';
-    html += '<div class="harm-row"><span class="harm-label">H' + (i + 1) + '</span>'
-      + '<input type="range" class="harm-slider" data-idx="' + i + '" min="-100" max="100" step="1" value="' + Math.round(amp * 100) + '">'
-      + '<span class="harm-val">' + sign + pct + '%</span></div>';
-  }
-  harmonicSlidersEl.innerHTML = html;
-}
-
-function syncHarmonicsUI() {
+// Clamp the selected layer index after load/reset/add/remove.
+function clampOscSelection() {
   selectedLayerIdx = Math.max(0, Math.min(OSC_STACK.layers.length - 1, selectedLayerIdx));
-  renderOscList();
-  renderHarmonicSliders();
-  harmonicPresetSelectEl.value = matchPreset(selectedLayer().amplitudes) || '';
 }
 
 function matchPreset(amplitudes) {
@@ -627,112 +562,6 @@ function applyPresetToLayer(layer, name) {
   layer.specPoints = null;   // a preset replaces any drawn spectrum curve
   return layer;
 }
-
-/* -- Mixer card events -- */
-oscListEl.addEventListener('click', e => {
-  if (e.target.classList.contains('osc-editmix')) {
-    selectedLayerIdx = +e.target.dataset.idx;
-    if (typeof openSoundCreator === 'function') openSoundCreator('mix', selectedLayerIdx);
-    return;
-  }
-  if (e.target.classList.contains('osc-del')) {
-    if (OSC_STACK.layers.length <= 1) return;
-    const i = +e.target.dataset.idx;
-    OSC_STACK.layers.splice(i, 1);
-    if (selectedLayerIdx >= i) selectedLayerIdx = Math.max(0, selectedLayerIdx - 1);
-    syncHarmonicsUI();
-    saveSettings();
-    return;
-  }
-  const card = e.target.closest('.osc-card');
-  if (!card) return;
-  const i = +card.dataset.idx;
-  if (i === selectedLayerIdx) return;
-  selectedLayerIdx = i;
-  renderOscList();
-  renderHarmonicSliders();
-  harmonicPresetSelectEl.value = matchPreset(selectedLayer().amplitudes) || '';
-});
-
-oscListEl.addEventListener('input', e => {
-  const card = e.target.closest('.osc-card');
-  if (!card) return;
-  const i = +card.dataset.idx;
-  const l = OSC_STACK.layers[i];
-  if (!l) return;
-  if (e.target.classList.contains('osc-level')) {
-    l.level = Math.max(0, Math.min(1, +e.target.value / 100));
-    e.target.parentElement.querySelector('b').textContent = Math.round(l.level * 100) + '%';
-  }
-  previewChime();
-});
-
-oscListEl.addEventListener('change', e => {
-  const card = e.target.closest('.osc-card');
-  if (!card) return;
-  const i = +card.dataset.idx;
-  const l = OSC_STACK.layers[i];
-  if (!l) return;
-  if (e.target.classList.contains('osc-wave')) {
-    if (e.target.value) applyPresetToLayer(l, e.target.value);
-    else l.presetId = null;   // Custom: keep the current amplitudes
-    if (i === selectedLayerIdx) {
-      renderHarmonicSliders();
-      harmonicPresetSelectEl.value = matchPreset(selectedLayer().amplitudes) || '';
-    }
-    previewChime();
-  }
-  saveSettings();
-});
-
-oscAddEl.addEventListener('click', () => {
-  if (OSC_STACK.layers.length >= 8) return;
-  OSC_STACK.layers.push(defaultLayer('osc-' + (OSC_STACK.layers.length + 1)));
-  selectedLayerIdx = OSC_STACK.layers.length - 1;
-  syncHarmonicsUI();
-  saveSettings();
-});
-
-oscResetEl.addEventListener('click', () => {
-  OSC_STACK = clone(DEFAULT_OSC_STACK);
-  selectedLayerIdx = 0;
-  syncHarmonicsUI();
-  saveSettings();
-});
-
-/* -- Selected-layer waveform editing -- */
-harmonicSlidersEl.addEventListener('input', e => {
-  if (!e.target.classList.contains('harm-slider')) return;
-  const i = +e.target.dataset.idx;
-  const layer = selectedLayer();
-  layer.amplitudes[i] = Math.max(-1, Math.min(1, +e.target.value / 100));
-  layer.presetId = null;   // any manual edit makes the waveform custom
-  layer.specPoints = null; // ...and replaces any drawn spectrum curve
-  const vEl = e.target.closest('.harm-row').querySelector('.harm-val');
-  if (vEl) {
-    const v = layer.amplitudes[i];
-    const pct = Math.round(Math.abs(v) * 100);
-    vEl.textContent = (v < 0 ? '-' : '') + pct + '%';
-  }
-  harmonicPresetSelectEl.value = matchPreset(layer.amplitudes) || '';
-  const waveSel = oscListEl.querySelector('.osc-wave[data-idx="' + selectedLayerIdx + '"]');
-  if (waveSel) waveSel.value = layer.presetId || '';
-  previewChime();
-});
-
-harmonicSlidersEl.addEventListener('change', () => {
-  saveSettings();
-});
-
-harmonicPresetSelectEl.addEventListener('change', e => {
-  const name = e.target.value;
-  if (!name) return;
-  applyPresetToLayer(selectedLayer(), name);
-  renderHarmonicSliders();
-  renderOscList();
-  previewChime();
-  saveSettings();
-});
 
 /* ---- Playhead speed (ms per % of horizontal travel) ---- */
 const timeMultEl = document.getElementById('timeMult');
@@ -765,17 +594,9 @@ volTopEl.addEventListener('input', () => {
   scheduleSettingsSave();
 });
 
-/* ---- Envelope editor ---- */
-const envAddBtn = document.getElementById('envAdd');
-const envResetBtn = document.getElementById('envReset');
-const envListEl = document.getElementById('envList');
-
+/* ---- Envelope (edited in the 🎛️ Sound creator) ---- */
 let ENV_ID = 0;
 function newCompId() { return 'c' + (++ENV_ID) + Math.random().toString(36).slice(2, 6); }
-
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 // Keep the envelope's markers sane after any add/delete/reorder: the release
 // always starts right after the hold range ends (so no component is ever
@@ -799,175 +620,6 @@ function clampEnvelopeIndexes() {
   ENVELOPE.earlyCutIndex = Math.max(0, Math.min(ENVELOPE.beginReleaseIndex - 1, ENVELOPE.earlyCutIndex));
   chainStartValues(ENVELOPE);
 }
-
-// Markers on each card: begin release and the hold range.
-function markerRadio(name, cls, checked, disabled, label, title) {
-  return `<label class="env-m ${cls}${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}" title="${title}">
-    <input type="radio" name="${name}" value="1"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}>${label}</label>`;
-}
-
-function renderEnvelopeEditor() {
-  clampEnvelopeIndexes();
-  const n = ENVELOPE.components.length;
-  const b = ENVELOPE.beginReleaseIndex;
-
-  let rows = '';
-  for (let i = 0; i < n; i++) {
-    const c = ENVELOPE.components[i];
-    const isRelease = i >= b;
-    const inHold = i >= ENVELOPE.holdStartIndex && i <= ENVELOPE.holdEndIndex;
-    const markers = [
-      markerRadio('envRelease', 'env-m-release', b === i, n > 1 && i === 0, 'Release', 'Release starts here — the card before it becomes the last Hold'),
-      markerRadio('envHoldFrom', 'env-m-holdfrom', ENVELOPE.holdStartIndex === i, i >= b, 'Hold from', 'Hold range starts here'),
-      markerRadio('envHoldTo', 'env-m-holdto', ENVELOPE.holdEndIndex === i, i >= b, 'Hold to', 'Hold range ends here — release always starts on the next card'),
-      markerRadio('envCut', 'env-m-cut', ENVELOPE.earlyCutIndex === i, i >= b, 'Cut', 'Early lift: the sound plays through this card, then jumps to Release')
-    ].join('');
-    const startCell = i === 0
-      ? `<div class="env-sec"><span>Start</span><input type="range" data-f="startValue" min="0" max="100" step="1" value="${c.startValue}"><b data-v="startValue">${c.startValue}%</b></div>`
-      : `<div class="env-sec env-start-ro" title="Starts where the previous component ends"><span>Start</span><b data-v="startValue">${c.startValue}%</b></div>`;
-    rows += `<div class="fx-item env-row${isRelease ? ' release-row' : (inHold ? ' hold-row' : '')}" data-idx="${i}">
-      <div class="env-row-head">
-        <input type="text" class="env-name" value="${esc(c.name)}" maxlength="24" spellcheck="false" aria-label="Component name">
-        <div class="env-markers">${markers}</div>
-        <div class="env-btns">
-          <button class="env-up" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>
-          <button class="env-down" title="Move down" ${i === n - 1 ? 'disabled' : ''}>▼</button>
-          <button class="env-del" title="Delete component" ${n <= 1 ? 'disabled' : ''}>✕</button>
-        </div>
-      </div>
-      <div class="env-secs">
-        <div class="env-sec"><span>Duration</span><input type="range" data-f="duration" min="1" max="5000" step="10" value="${c.duration}"><b data-v="duration">${c.duration}ms</b></div>
-        ${startCell}
-        <div class="env-sec"><span>End</span><input type="range" data-f="endValue" min="0" max="100" step="1" value="${c.endValue}"><b data-v="endValue">${c.endValue}%</b></div>
-      </div>
-    </div>`;
-  }
-  envListEl.innerHTML = rows;
-}
-
-// Values typed straight into a row update ENVELOPE live (no re-render).
-envListEl.addEventListener('input', e => {
-  const row = e.target.closest('.env-row');
-  if (!row) return;
-  const c = ENVELOPE.components[+row.dataset.idx];
-  if (!c) return;
-  if (e.target.classList.contains('env-name')) {
-    c.name = e.target.value.slice(0, 24);
-    scheduleSettingsSave();
-    return;
-  }
-  const f = e.target.dataset.f;
-  if (!f) return;
-  c[f] = Math.max(f === 'duration' ? 1 : 0, Math.min(f === 'duration' ? 5000 : 100, +e.target.value));
-  const vEl = row.querySelector('[data-v="' + f + '"]');
-  if (vEl) vEl.textContent = c[f] + (f === 'duration' ? ' ms' : '%');
-  if (f === 'endValue') {
-    // An end feeds the next component's start: chain it and update that card's
-    // read-only Start readout live.
-    chainStartValues(ENVELOPE);
-    const nextRow = row.nextElementSibling;
-    const nextStart = nextRow && nextRow.querySelector('.env-start-ro b');
-    if (nextStart) nextStart.textContent = c[f] + '%';
-  }
-  scheduleSettingsSave();
-});
-
-envListEl.addEventListener('change', e => {
-  const row = e.target.closest('.env-row');
-  if (!row) return;
-  const idx = +row.dataset.idx;
-  const c = ENVELOPE.components[idx];
-  if (!c) return;
-
-  if (e.target.classList.contains('env-name')) {
-    c.name = e.target.value.slice(0, 24);
-    saveSettings();
-    return;
-  }
-
-  // Card markers: a radio sets the envelope's release/hold position.
-  if (e.target.type === 'radio') {
-    const mark = e.target.closest('.env-m');
-    if (!mark || mark.classList.contains('disabled')) return;
-    if (mark.classList.contains('env-m-release')) ENVELOPE.holdEndIndex = idx - 1;
-    else if (mark.classList.contains('env-m-holdfrom')) {
-      ENVELOPE.holdStartIndex = idx;
-      if (ENVELOPE.holdEndIndex < idx) ENVELOPE.holdEndIndex = idx;
-    } else if (mark.classList.contains('env-m-holdto')) {
-      ENVELOPE.holdEndIndex = idx;
-      if (ENVELOPE.holdStartIndex > idx) ENVELOPE.holdStartIndex = idx;
-    } else if (mark.classList.contains('env-m-cut')) {
-      ENVELOPE.earlyCutIndex = idx;
-    }
-    clampEnvelopeIndexes();
-    renderEnvelopeEditor();
-    saveSettings();
-    return;
-  }
-
-  // Range sliders fire 'change' on thumb release (after live 'input' updates);
-  // persist whatever was last edited.
-  const f = e.target.dataset.f;
-  if (f) {
-    c[f] = Math.max(f === 'duration' ? 1 : 0, Math.min(f === 'duration' ? 5000 : 100, +e.target.value));
-    const vEl = row.querySelector('[data-v="' + f + '"]');
-    if (vEl) vEl.textContent = c[f] + (f === 'duration' ? 'ms' : '%');
-    if (f === 'endValue') chainStartValues(ENVELOPE);
-  }
-  saveSettings();
-});
-
-// Structural edits: reorder, delete, add. All re-render and persist.
-envListEl.addEventListener('click', e => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  const row = btn.closest('.env-row');
-  const idx = row ? +row.dataset.idx : -1;
-  if (btn.classList.contains('env-up') || btn.classList.contains('env-down')) {
-    const j = btn.classList.contains('env-up') ? idx - 1 : idx + 1;
-    const arr = ENVELOPE.components;
-    if (j < 0 || j >= arr.length) return;
-    [arr[idx], arr[j]] = [arr[j], arr[idx]];
-  } else if (btn.classList.contains('env-del')) {
-    ENVELOPE.components.splice(idx, 1);
-  }
-  clampEnvelopeIndexes();
-  renderEnvelopeEditor();
-  saveSettings();
-});
-
-envAddBtn.addEventListener('click', () => {
-  ENVELOPE.components.push({ id: newCompId(), name: 'Component', duration: 250, startValue: 100, endValue: 100 });
-  clampEnvelopeIndexes();
-  renderEnvelopeEditor();
-  saveSettings();
-});
-envResetBtn.addEventListener('click', () => {
-  ENVELOPE = clone(DEFAULT_ENVELOPE);
-  renderEnvelopeEditor();
-  saveSettings();
-});
-
-function syncEnvelopeUI() {
-  renderEnvelopeEditor();
-}
-
-/* ---- Settings window tabs ---- */
-const tabBtns = document.querySelectorAll('.tab-btn');
-const tabPanels = {
-  'tab-sound': document.getElementById('tab-sound'),
-  'tab-components': document.getElementById('tab-components')
-};
-tabBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    tabBtns.forEach(b => b.classList.toggle('active', b === btn));
-    for (const id in tabPanels) {
-      tabPanels[id].classList.toggle('hidden', id !== btn.dataset.tab);
-    }
-    const scroller = document.querySelector('.tab-scroll');
-    if (scroller) scroller.scrollTop = 0;
-  });
-});
 
 /* COMMENTED OUT - new lines are started by a direction change only.
 const pauseEl = document.getElementById('pause');
@@ -1044,10 +696,9 @@ settingsBtn.addEventListener('click', () => {
     loadLevelUI(currentLevel);
     /* loadGestureUI(); */
     syncLineUI();
-    syncEnvelopeUI();
     syncPitchZonesUI();
     syncVolumeUI();
-    syncHarmonicsUI();
+    clampOscSelection();
     populatePreviewPitch();
   } else {
     closeSettingsPanel();
