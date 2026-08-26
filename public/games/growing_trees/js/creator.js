@@ -23,6 +23,12 @@ let creatorPreviewTimer = null;
 // sweep places across the graph; the mode itself is session-only, the count is
 // persisted.
 let creatorDrawMode = false;
+// "Erase" mode: a draw-stroke mode that zeroes the swept region instead of
+// following the finger's value. Existing points inside the swept corridor are
+// absorbed and replaced by zero-value breakpoints, so dragging across a shape
+// flattens it down to the zero line. Turning Erase on also turns Draw on;
+// turning Draw off clears Erase. Session-only, like draw mode.
+let creatorEraseMode = false;
 var creatorDrawPoints = 8;   // 4..HARMONIC_COUNT (clamped)
 // Auto-preview: when on, edits/taps in the creator (and settings sliders) play
 // the current design automatically. When off, only the ▶ Preview button (and
@@ -364,6 +370,22 @@ function envBoundaries() {
   return { env, n, b, tOf, vals, total };
 }
 
+// Envelope value at normalized time t (0..1), linearly interpolated across the
+// component that contains it.
+function envValueAtT(t) {
+  const eb = envBoundaries();
+  const total = eb.total;
+  const ms = clamp01(t) * total;
+  for (let i = 0; i < eb.n; i++) {
+    if (ms >= eb.b[i] && ms <= eb.b[i + 1]) {
+      const span = eb.b[i + 1] - eb.b[i];
+      const f = span > 0 ? (ms - eb.b[i]) / span : 0;
+      return eb.vals[i] + (eb.vals[i + 1] - eb.vals[i]) * f;
+    }
+  }
+  return eb.vals[eb.n];
+}
+
 // Split component `c` at time `ms` (add a breakpoint = a new component).
 function envSplitAt(c, ms) {
   const env = ENVELOPE;
@@ -405,25 +427,35 @@ function envDeleteAt(idx) {
 }
 
 // Drag an envelope boundary: vertical sets the value (chaining the next start),
-// horizontal moves the boundary time between its neighbors.
+// horizontal moves the boundary time. The boundary may be dragged freely across
+// the note's whole span — the boundary list is re-sorted afterwards, so a point
+// can be dragged left or right even when it's densely packed against its
+// neighbors (it would otherwise get stuck with no room to move). Values travel
+// with the dragged boundary, exactly like the free-dragging curve points.
 function envDragBoundary(i, t, v) {
   const env = ENVELOPE;
-  const b = envBoundaries().b;
+  const eb = envBoundaries();
   const n = env.components.length;
-  const value = Math.round(clamp01(v) * 100);
-  if (i === 0) {
-    env.components[0].startValue = value;
-  } else {
-    env.components[i - 1].endValue = value;
-    chainStartValues(env);
-  }
+  const total = eb.total;
+  // Collect each boundary's (time ms, relative value 0..1).
+  const pts = [];
+  for (let k = 0; k <= n; k++) pts.push({ t: eb.b[k], v: eb.vals[k] });
+  const value = clamp01(v);
+  // Vertical: this boundary's value (the first boundary is the envelope start).
+  pts[i].v = value;
+  // Horizontal: move this boundary to the dragged time (i >= 1, the first stays
+  // pinned at the note start), then keep order by re-sorting.
   if (i >= 1 && i <= n - 1) {
-    const ms = clamp01(t) * envBoundaries().total;
-    const lo = b[i - 1] + 1, hi = b[i + 1] - 1;
-    const newMs = Math.max(lo, Math.min(hi, ms));
-    env.components[i - 1].duration = newMs - b[i - 1];
-    env.components[i].duration = b[i + 1] - newMs;
+    pts[i].t = clamp01(t) * total;
   }
+  pts.sort((a, b) => a.t - b.t);
+  // Rebuild each component's duration/end value from the sorted boundaries.
+  for (let c = 0; c < n; c++) {
+    env.components[c].duration = Math.max(1, Math.round(pts[c + 1].t - pts[c].t));
+    env.components[c].endValue = Math.round(clamp01(pts[c + 1].v) * 100);
+  }
+  env.components[0].startValue = Math.round(clamp01(pts[0].v) * 100);
+  chainStartValues(env);
   clampEnvelopeIndexes();
 }
 
@@ -436,7 +468,10 @@ function envDragBoundary(i, t, v) {
    visited slot gets a breakpoint at the finger's value, and pre-existing
    points inside the swept corridor are absorbed, so sweeping at a lower
    density than the existing shape thins it down as you pass through.
-   Insert-dedupe merges revisits, so backtracking adds nothing. */
+   Insert-dedupe merges revisits, so backtracking adds nothing. In Erase mode
+   the drawn value is always the zero line instead of the finger's: swept
+   points are absorbed and zero-value breakpoints replace them, flattening the
+   corridor. */
 function drawPointCount() { return Math.max(4, Math.min(HARMONIC_COUNT, +creatorDrawPoints || 8)); }
 function slotT(s) { const n = drawPointCount(); return n > 1 ? s / (n - 1) : 0; }
 function slotAtX(x, p) {
@@ -446,14 +481,16 @@ function slotAtX(x, p) {
 }
 
 // Toolbar pills floating in the top-right corner of the plot (always visible in
-// both sub-modes, so Draw stays reachable without crowding the busy bars). The
-// points pill is the visual under the native <select> dropdown.
+// both sub-modes, so Draw & Erase stay reachable without crowding the busy
+// bars). The points pill is the visual under the native <select> dropdown.
 function drawToolbar(p) {
   const y = p.top + 8, w = 58, h = 26;
   const drawX = p.right - 4 - w;
-  const densX = drawX - 8 - w;
+  const eraseX = drawX - 8 - w;
+  const densX = eraseX - 8 - w;
   return {
     draw:  { x: drawX, y, w, h },
+    erase: { x: eraseX, y, w, h },
     dens:  { x: densX, y, w, h },
   };
 }
@@ -561,6 +598,15 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
       const kept = env.points.filter(pt => pt.t < loT - eps || pt.t > hiT + eps);
       if (kept.length >= 2) env.points = kept;
     }
+    if (creatorEraseMode) {
+      // Erase on the pitch axis: only place a zero point where the line isn't
+      // already at zero — flat runs stay sparse instead of gaining dots.
+      let idx = -1;
+      for (let k = loS; k <= hiS; k++) {
+        if (Math.abs(pitchStAt(env, slotT(k))) > 1e-9) idx = insertPitchPoint(env, slotT(k), 0);
+      }
+      return idx;
+    }
     let idx = -1;
     for (let k = loS; k <= hiS; k++) idx = insertPitchPoint(env, slotT(k), yToSt(y, r, p));
     return idx;
@@ -573,18 +619,22 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
       if (kept.length >= 2) l.specPoints = kept;
     }
     let idx = -1;
-    for (let k = loS; k <= hiS; k++) idx = insertSpecPoint(l, slotT(k), yToAmp(y, p));
+    for (let k = loS; k <= hiS; k++) {
+      if (!creatorEraseMode || Math.abs(specValueAt(l.specPoints, slotT(k))) > 1e-9) idx = insertSpecPoint(l, slotT(k), creatorEraseMode ? 0 : yToAmp(y, p));
+    }
     if (idx >= 0) syncLayerAmplitudes(l);
     return idx;
   }
-  if (creatorVolSel) { envDrawAt(slotT(s), yToV(y, p), p, loT, hiT); return null; }
+  if (creatorVolSel) { envDrawAt(slotT(s), yToV(y, p), p, loT, hiT, creatorEraseMode); return null; }
   const l = selectedLayer();
   if (l.curve.length > 2) {
     const kept = l.curve.filter(pt => pt.t < loT - eps || pt.t > hiT + eps);
     if (kept.length >= 2) l.curve = kept;
   }
   let idx = -1;
-  for (let k = loS; k <= hiS; k++) idx = insertCurvePoint(l, slotT(k), yToV(y, p));
+  for (let k = loS; k <= hiS; k++) {
+    if (!creatorEraseMode || Math.abs(curveValue(l, slotT(k))) > 1e-9) idx = insertCurvePoint(l, slotT(k), creatorEraseMode ? 0 : yToV(y, p));
+  }
   return idx;
 }
 
@@ -595,7 +645,7 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
 // carries more components than the chosen point count, interior boundaries that
 // fall inside the swept corridor [loT..hiT] are merged away first — so a
 // low-density sweep thins the shape only where it actually passes.
-function envDrawAt(t, v, p, loT, hiT) {
+function envDrawAt(t, v, p, loT, hiT, erase) {
   const comps = ENVELOPE.components;
   const lo = loT == null ? t : Math.min(loT, hiT);
   const hi = loT == null ? t : Math.max(loT, hiT);
@@ -627,6 +677,14 @@ function envDrawAt(t, v, p, loT, hiT) {
   for (let i = 0; i <= eb.n; i++) {
     const d = Math.abs(eb.b[i] - ms);
     if (d < bd) { bd = d; best = i; }
+  }
+  // Erase snaps the swept point to the zero line rather than the finger's value.
+  if (erase) {
+    v = 0;
+    // Where the envelope is already flat at zero, don't place a new boundary —
+    // flat runs stay sparse instead of gaining dots.
+    const ev = envValueAtT(clamp01(t));
+    if (Math.abs(ev) <= 1e-9) return;
   }
   if (best >= 0) { envDragBoundary(best, t, v); return; }
   if (eb.n >= ENV_DRAW_MAX) return;
@@ -861,6 +919,7 @@ function hitTestCreator(x, y) {
     if (creatorSubmode !== 'voices') {
       const tb = drawToolbar(p);
       if (x >= tb.draw.x && x <= tb.draw.x + tb.draw.w && y >= tb.draw.y && y <= tb.draw.y + tb.draw.h) return { type: 'drawtoggle' };
+      if (x >= tb.erase.x && x <= tb.erase.x + tb.erase.w && y >= tb.erase.y && y <= tb.erase.y + tb.erase.h) return { type: 'erasetoggle' };
     }
     // ±range stepper pill (Pitch tab, plot top-left).
     if (creatorSubmode === 'pitch') {
@@ -883,7 +942,7 @@ function hitTestCreator(x, y) {
       }
       return { type: 'bar' };
     }
-    // Draw mode takes over the whole graph: any drag scribbles new points.
+    // Draw/Erase mode takes over the whole graph: any drag scribbles (or zeroes).
     if (creatorDrawMode) return { type: 'draw' };
     if (creatorSubmode === 'harm') return hitTestHarm(x, y, p);
     // Pitch tab: the selected envelope's dots are grabbable; tapping anywhere
@@ -1117,6 +1176,16 @@ canvas.addEventListener('pointerdown', e => {
   }
   if (hit.type === 'drawtoggle') {
     creatorDrawMode = !creatorDrawMode;
+    if (!creatorDrawMode) creatorEraseMode = false;   // Draw off clears Erase
+    creatorPtr = null;
+    return;
+  }
+  if (hit.type === 'erasetoggle') {
+    // Erase is a draw-stroke mode: it implies Draw, so turning it on enables
+    // both; toggling it off returns to plain draw, and Draw off clears it.
+    creatorEraseMode = !creatorEraseMode;
+    if (creatorEraseMode) creatorDrawMode = true;
+    else if (!creatorDrawMode) creatorEraseMode = false;
     creatorPtr = null;
     return;
   }
@@ -1894,6 +1963,14 @@ function drawCreator(now) {
     ctx.stroke();
     ctx.fillStyle = '#2e5d34';
     ctx.fillText(drawPointCount() + ' pts ▾', tb.dens.x + tb.dens.w / 2, tb.dens.y + tb.dens.h / 2 + 1);
+    drawRoundRect(tb.erase.x, tb.erase.y, tb.erase.w, tb.erase.h, 8);
+    ctx.fillStyle = creatorEraseMode ? '#d9534f' : '#fff';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = creatorEraseMode ? '#fff' : '#2e5d34';
+    ctx.fillText(creatorEraseMode ? 'ERASE' : 'Erase', tb.erase.x + tb.erase.w / 2, tb.erase.y + tb.erase.h / 2 + 1);
     drawRoundRect(tb.draw.x, tb.draw.y, tb.draw.w, tb.draw.h, 8);
     ctx.fillStyle = creatorDrawMode ? accent : '#fff';
     ctx.fill();
@@ -1922,7 +1999,9 @@ function drawCreator(now) {
   if (creatorSubmode === 'voices') {
     ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · ✕ deletes a voice · Reset clears them all', W / 2, H - 8);
   } else if (creatorDrawMode) {
-    ctx.fillText(creatorSubmode === 'note'
+    ctx.fillText(creatorEraseMode
+      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to zero it · tap Draw to edit dots'
+      : creatorSubmode === 'note'
       ? 'Drawing the ' + (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots'
       : creatorSubmode === 'pitch'
         ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (all oscillators)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts)'
