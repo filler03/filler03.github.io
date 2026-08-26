@@ -95,12 +95,13 @@ function schedulePathPlayback(ds) {
   const relMs = compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
   const cutMs = earlyCutMs();
   const tail = buildGesturePlaybackPath(ds.pts, ds.cumTime, ds.totalMs || 0, relMs, cutMs);
-  playbacks.push({
+  const pb = {
     pts: tail.pts, cumTime: tail.cum, tailEnd: tail.tailEnd,
     totalMs: Math.max(totalMs, cutMs) + relMs, relMs, startedAt: performance.now(), released: true, looped: true,
-    color: degreeColorForX(ds.startX),
-  });
-  ensureAudioRunning(() => schedulePathAudio(ds, totalMs), Date.now() + 30000);
+    color: degreeColorForX(ds.startX), pitch: pitchFor(ds.startX, ds.startY),
+  };
+  playbacks.push(pb);
+  ensureAudioRunning(() => schedulePathAudio(ds, totalMs, pb), Date.now() + 30000);
 }
 
 // LIVE MODE: the note begins the moment the finger touches down (a tap is just
@@ -116,7 +117,7 @@ function startLivePathNote(ds) {
   // The visual shows immediately; only the audio waits for the AudioContext
   // to be running, since a freshly-created context is still suspended on the
   // very first load and events scheduled at currentTime 0 would be missed.
-  ds.playback = { ds, pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true, color: degreeColorForX(ds.startX) };
+  ds.playback = { ds, pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true, color: degreeColorForX(ds.startX), pitch: pitchFor(ds.startX, ds.startY) };
   syncLivePlaybackPath(ds);
   playbacks.push(ds.playback);
   ensureLiveAudio(ds, Date.now() + 30000);
@@ -215,6 +216,50 @@ function drawPitchZones() {
     if (ctx.measureText(label).width > bw - 4) continue;
     ctx.fillText(label, i * bw + bw / 2, H - 6);
   }
+}
+
+// Centered, faint volume-scale legend: one row each for the upper (full) and
+// lower (low) volume levels, horizontally centered but positioned at the exact
+// screen Y where each gain is actually reached (the top/bottom 10% zones — see
+// baseVolumeFromY), with a dotted guide line on each side of the label. Each
+// label shows the level name plus the actual gain (0-100) played there, so the
+// readout tracks the upper/lower gain settings live.
+function drawVolumeScale() {
+  const markers = [
+    { y: H * 0.05, label: 'full', gain: volumeTop() },
+    { y: H * 0.95, label: 'low',  gain: VOLUME.bottom },
+  ];
+  const cx = W / 2;
+  ctx.save();
+  ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#000';
+  ctx.font = '600 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const m of markers) {
+    const txt = m.label + ' ' + Math.round(m.gain * 100);
+    const half = ctx.measureText(txt).width / 2;
+    const clear = half + 10;                     // gap between label and guide
+    const x0 = W * 0.12, x1 = W * 0.88;
+    ctx.globalAlpha = 0.28;                      // dotted guides: very faint
+    ctx.lineWidth = 1;
+    drawDottedSegment(x0, cx - clear, m.y);
+    drawDottedSegment(cx + clear, x1, m.y);
+    ctx.globalAlpha = 0.55;                      // label: faint but readable
+    ctx.fillText(txt, cx, m.y);
+  }
+  ctx.restore();
+}
+
+function drawDottedSegment(x0, x1, y) {
+  if (x1 <= x0) return;
+  const dot = 4;
+  ctx.beginPath();
+  for (let x = x0; x < x1; x += 2 * dot) {
+    ctx.moveTo(x, y);
+    ctx.lineTo(Math.min(x + dot, x1), y);
+  }
+  ctx.stroke();
 }
 
 // The gesture path is always drawn at the finger's own Y. The line's thickness

@@ -29,13 +29,14 @@ soundOverlay.addEventListener('click', dismissSoundOverlay);
 loadSavedSettings();
 syncWaitBtn();
 syncLineUI();
-syncEnvelopeUI();
+clampEnvelopeIndexes();
 syncPitchZonesUI();
 
 /* ---- Pointer handling ---- */
 
 canvas.addEventListener('pointerdown', e => {
   unlockAudio();
+  if (mode === 'creator' || creatorActive) return;   // sound creator handles its own canvas input
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
@@ -68,6 +69,7 @@ canvas.addEventListener('pointerdown', e => {
 });
 
 canvas.addEventListener('pointermove', e => {
+  if (mode === 'creator' || creatorActive) return;
   const p = pointers.get(e.pointerId);
   if (!p) return;
   const dx = stageX(e) - p.x, dy = stageY(e) - p.y;
@@ -109,6 +111,7 @@ canvas.addEventListener('pointermove', e => {
 
 canvas.addEventListener('pointerup', e => {
   unlockAudio();
+  if (mode === 'creator' || creatorActive) return;
   pointers.delete(e.pointerId);
 
   if (mode === 'plant') {
@@ -127,6 +130,7 @@ canvas.addEventListener('pointerup', e => {
 });
 
 canvas.addEventListener('pointercancel', e => {
+  if (mode === 'creator' || creatorActive) return;
   pointers.delete(e.pointerId);
   pinchState = null;
   if (mode === 'plant') {
@@ -155,8 +159,9 @@ window.addEventListener('blur', () => {
 /* ---------- Main loop ---------- */
 let lastT = performance.now();
 function loop(now) {
-  try {
   lastT = now;
+  if (mode === 'creator' || creatorActive) { requestAnimationFrame(loop); return; }   // sound creator draws its own frame
+  try {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, W, H);
   ctx.setTransform(cam.zoom, 0, 0, cam.zoom, -cam.x, -cam.y);
@@ -176,6 +181,7 @@ function loop(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (mode === 'plant') {
     drawPitchZones();   // faint degree-color bands, one per scale degree
+    drawVolumeScale();  // right-edge lower/middle/upper volume markers
     // Held live-sound gestures keep their attack fade advancing in real time;
     // without this the fade stalls the moment the finger stops drawing.
     for (const ds of dragStates.values()) {

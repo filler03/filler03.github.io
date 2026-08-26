@@ -13,7 +13,8 @@ const statHud = document.getElementById('statHud');
 var playbacks = [];      // { pts, cumTime, totalMs, startedAt, released }
 var gestureNotes = [];   // { osc, gain, cleanupTimer } running gesture-note audio
 
-var mode = 'plant';      // 'plant' | 'nav'
+var mode = 'plant';      // 'plant' | 'nav' | 'creator' (full-screen sound editor)
+var creatorActive = false;   // sound-creator mode is open (declared early: main.js reads it)
 var navState = null;     // single-finger pan drag in nav mode
 var dragStates = new Map();  // plant gestures, one per pointer (multi-finger)
 var pinchState = null;   // { dist } two-finger pinch in nav mode
@@ -89,15 +90,35 @@ const ZONE_FILL_ALPHA = 0.15;   // faintness of a degree's color band (0..1)
 const OCTAVE_BOUND_ALPHA = 0.35;  // slightly stronger line where a new octave begins
 
 // Base volume (gain) comes from where the gesture sits vertically on screen:
-// top is loudest, bottom is quietest. The relative volume — the percentage of
-// this base volume actually being output — comes from the attack/decay/release
-// components and drives the gesture line's thickness.
-const BASE_VOL_MIN = 0.01, BASE_VOL_MAX = 0.5;
+// top is loudest, bottom is quietest. The top 10% of the screen is the
+// full-volume zone (the upper gain) and the bottom 10% the lowest-volume zone
+// (the lower gain); the middle 80% sweeps linearly between the two. The
+// relative volume — the percentage of this base volume actually being output —
+// comes from the attack/decay/release components and drives the gesture line's
+// thickness.
+// Gain is a linear amplitude in 0..1 (1.0 = full scale, the loudest a voice can
+// play). `bottom` is the gain at the bottom of the screen, `top` the gain at
+// the top; both are set directly by the user's lower/upper gain sliders.
+const DEFAULT_VOLUME = { bottom: 0.01, top: 0.5 };
+var VOLUME = clone(DEFAULT_VOLUME);
+
+function volumeTop() {
+  return VOLUME.top;
+}
+
 function baseVolumeFromY(sy) {
-  return mix(BASE_VOL_MIN, BASE_VOL_MAX, clamp01(1 - sy / H));
+  const t = clamp01(1 - sy / H);   // 1 at the top of the screen, 0 at the bottom
+  return mix(VOLUME.bottom, volumeTop(), clamp01((t - 0.1) / 0.8));
 }
 function yForBaseVolume(v) {
-  return H * (1 - (v - BASE_VOL_MIN) / (BASE_VOL_MAX - BASE_VOL_MIN));
+  const span = volumeTop() - VOLUME.bottom;
+  if (span === 0) return H / 2;
+  const r = clamp01((v - VOLUME.bottom) / span);
+  // The top/bottom 10% of the screen are flat full/low zones, so gains at the
+  // top/bottom of the scale sit at the center of their zone.
+  if (r >= 1) return H * 0.05;
+  if (r <= 0) return H * 0.95;
+  return H * (1 - (0.1 + r * 0.8));
 }
 
 // Top-left HUD emoji markers.
@@ -130,13 +151,13 @@ var GESTURE = clone(DEFAULT_GESTURE);
    transition is a smooth continuation instead of a step to a design start. */
 const DEFAULT_ENVELOPE = {
   components: [
-    { id: 'comp-1', name: 'Attack',  duration: 250,  startValue: 0,   endValue: 100 },
-    { id: 'comp-2', name: 'Decay',   duration: 250,  startValue: 100, endValue: 60 },
-    { id: 'comp-3', name: 'Sustain', duration: 250,  startValue: 60,  endValue: 60 },
-    { id: 'comp-4', name: 'Release', duration: 1200, startValue: 60,  endValue: 0 },
+    { id: 'comp-1', name: 'Attack',  duration: 10,   startValue: 0,   endValue: 100 },
+    { id: 'comp-2', name: 'Decay',   duration: 500,  startValue: 100, endValue: 55 },
+    { id: 'comp-3', name: 'Ring',    duration: 1500, startValue: 55,  endValue: 28 },
+    { id: 'comp-4', name: 'Release', duration: 1200, startValue: 28,  endValue: 0 },
   ],
   beginReleaseIndex: 3,
-  holdStartIndex: 2,
+  holdStartIndex: 1,
   holdEndIndex: 2,
   earlyCutIndex: 2,
 };
@@ -253,6 +274,182 @@ const DEFAULT_CHIME = {
   finish: { note: 'C4', wave: 'sine', blend: 0, blendTo: null, attack: 5,   decay: 500, sustain: 10, hold: 0,   release: 300 },  // reserved for later
 };
 var CHIME_SETTINGS = clone(DEFAULT_CHIME);
+
+/* ---------- Oscillator stack ----------
+   A note is a mix of one or more oscillators (layers). Each layer defines its
+   own waveform (32 individual harmonic amplitudes, 0..1 each — harmonic 1 is
+   the fundamental, harmonic N is N× the fundamental frequency), a level, and a
+   drawn mix curve: breakpoints [{t, v}] (t = 0..1 note progress, v = 0..1 mix
+   weight) sampled over the life of the note, so a bright layer can give way to
+   a mellow ring in the tail. Layer gains are normalized at every sample, so the
+   total loudness stays constant as layers are added. */
+const HARMONIC_COUNT = 32;
+const clampSign = v => Math.max(-1, Math.min(1, v));
+function defaultLayer(id) {
+  const amplitudes = new Array(HARMONIC_COUNT).fill(0);
+  amplitudes[0] = 1;
+  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null };
+}
+// A soothing chime as the out-of-the-box sound: a soft bell body that carries
+// the strike, plus a bright overtone layer that blooms into the tail. Layer
+// gains are normalized per sample, so the mix curves genuinely morph the tone
+// (warm attack → shimmering ring) rather than just scaling loudness.
+function ampFromSpec(spec) {
+  const a = new Array(HARMONIC_COUNT).fill(0);
+  for (const [h, v] of spec) a[h - 1] = clampSign(v);
+  return a;
+}
+function chimeLayer(id, spec, curve, level) {
+  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null };
+}
+const DEFAULT_OSC_STACK = {
+  layers: [
+    chimeLayer('osc-1',
+      [[1, 1], [2, 0.22], [3, 0.08], [4, 0.14], [5, 0.05], [7, 0.02], [10, 0.01]],
+      [{ t: 0, v: 1 }, { t: 1, v: 0.3 }], 1),
+    chimeLayer('osc-2',
+      [[2, 0.4], [4, 0.25], [5, 0.1], [6, 0.05], [8, 0.06], [10, 0.04]],
+      [{ t: 0, v: 0 }, { t: 0.5, v: 0.15 }, { t: 1, v: 1 }], 0.8),
+  ],
+};
+var OSC_STACK = clone(DEFAULT_OSC_STACK);
+
+// A layer's raw mix weight at note progress `prog` (0..1): level × its curve.
+function layerMixAt(layer, prog) {
+  return (layer.level || 0) * curveValue(layer, prog);
+}
+
+// Interpolate a layer's drawn mix curve (linear between breakpoints, clamped).
+function curveValue(layer, t) {
+  const pts = layer.curve;
+  if (!pts || !pts.length) return 1;
+  if (pts.length === 1) return clamp01(pts[0].v);
+  const lo = pts[0], hi = pts[pts.length - 1];
+  if (t <= lo.t) return clamp01(lo.v);
+  if (t >= hi.t) return clamp01(hi.v);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const span = b.t - a.t;
+      const f = span > 0 ? (t - a.t) / span : 0;
+      return clamp01(a.v + (b.v - a.v) * f);
+    }
+  }
+  return clamp01(hi.v);
+}
+
+// Value of a drawn spectrum curve at x (0..1 across the 32 harmonics): signed
+// amplitude (-1..1), linear between breakpoints.
+function specValueAt(pts, x) {
+  if (!pts || !pts.length) return 0;
+  x = clamp01(x);
+  const lo = pts[0], hi = pts[pts.length - 1];
+  if (x <= lo.x) return clampSign(lo.a);
+  if (x >= hi.x) return clampSign(hi.a);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (x >= a.x && x <= b.x) {
+      const span = b.x - a.x;
+      const f = span > 0 ? (x - a.x) / span : 0;
+      return clampSign(a.a + (b.a - a.a) * f);
+    }
+  }
+  return clampSign(hi.a);
+}
+
+// A layer's 32 harmonic amplitudes: sampled from its drawn spectrum curve
+// (specPoints: [{x, a}], x 0..1, a signed) when present, else its amplitudes.
+function layerAmplitudes(layer) {
+  if (layer.specPoints && layer.specPoints.length) {
+    const out = new Array(HARMONIC_COUNT).fill(0);
+    for (let i = 0; i < HARMONIC_COUNT; i++) {
+      out[i] = specValueAt(layer.specPoints, HARMONIC_COUNT > 1 ? i / (HARMONIC_COUNT - 1) : 0);
+    }
+    return out;
+  }
+  return layer.amplitudes;
+}
+
+// Normalized per-layer gains at note progress `prog`: each layer's raw weight
+// ÷ the sum across layers (ε-guarded), so layering stays at consistent loudness.
+function layerGainsAt(prog) {
+  const raw = OSC_STACK.layers.map(l => Math.max(0, layerMixAt(l, prog)));
+  const sum = raw.reduce((s, v) => s + v, 0);
+  return raw.map(v => sum > 1e-6 ? v / sum : 0);
+}
+
+// Normalized timeline for the note's design length: body through the hold end
+// plus the release tail. Marker positions (t in 0..1) are shared by every
+// time-based curve and shown by the sound-creator editor.
+function designTimeline() {
+  const holdEndMs = compsMs(ENVELOPE.components.slice(0, ENVELOPE.holdEndIndex + 1));
+  const relMs = compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
+  const total = holdEndMs + relMs;
+  const tOf = ms => (total > 0 ? ms / total : 0);
+  return {
+    bodyMs: holdEndMs, relMs, total,
+    tHoldStart: tOf(compsMs(ENVELOPE.components.slice(0, ENVELOPE.holdStartIndex))),
+    tCut: tOf(earlyCutMs()),
+    tHoldEnd: tOf(holdEndMs),
+  };
+}
+
+// Map an elapsed-ms position in a note to the drawn mix curve's normalized axis
+// (0..1). The body occupies [0, bodyFrac] and the release [bodyFrac, 1], where
+// bodyFrac comes from the DESIGN body (hold end) so curve features line up with
+// the HOLD/CUT/REL markers no matter how long the actual gesture body is.
+function mixProgForTimes(elapsedMs, actualBodyMs, relMs, designBodyMs) {
+  const dBody = designBodyMs != null ? designBodyMs : actualBodyMs;
+  const bodyFrac = (dBody + relMs) > 0 ? dBody / (dBody + relMs) : 1;
+  if (elapsedMs < actualBodyMs) {
+    return (actualBodyMs > 0 ? (elapsedMs / actualBodyMs) : 0) * bodyFrac;
+  }
+  const relElapsed = elapsedMs - actualBodyMs;
+  return Math.min(1, bodyFrac + (relMs > 0 ? (relElapsed / relMs) : 0) * (1 - bodyFrac));
+}
+
+// Fourier coefficients (length HARMONIC_COUNT) for a layer's waveform: the
+// drawn spectrum curve when one exists, else the layer's amplitudes array.
+function layerWaveCoeffs(layer) {
+  const amps = layerAmplitudes(layer);
+  if (!amps) return new Array(HARMONIC_COUNT).fill(0);
+  const a = new Array(HARMONIC_COUNT).fill(0);
+  for (let i = 0; i < HARMONIC_COUNT; i++) {
+    a[i] = Math.max(-1, Math.min(1, +amps[i] || 0));
+  }
+  return a;
+}
+
+// Preset waveforms: pre-computed Fourier coefficients for the first 32 harmonics.
+// Each value is the amplitude (signed) for harmonic n (1-indexed: presets[0] = harmonic 1).
+function pulsePreset(duty) {
+  const a = new Array(HARMONIC_COUNT).fill(0);
+  for (let i = 0; i < HARMONIC_COUNT; i++) {
+    const n = i + 1;
+    a[i] = (2 / Math.PI) * Math.sin(n * Math.PI * duty) / n;
+  }
+  return a;
+}
+const HARMONIC_PRESETS = {
+  sine:     (function () { const a = new Array(HARMONIC_COUNT).fill(0); a[0] = 1; return a; })(),
+  triangle: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 1) a[i] = (8 / (Math.PI * Math.PI)) * (n % 4 === 1 ? 1 : -1) / (n * n); } return a; })(),
+  square:   (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 1) a[i] = (4 / Math.PI) / n; } return a; })(),
+  sawtooth: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; a[i] = (2 / Math.PI) * (n % 2 === 1 ? 1 : -1) / n; } return a; })(),
+  reverseSaw: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; a[i] = (2 / Math.PI) * (n % 2 === 1 ? -1 : 1) / n; } return a; })(),
+  pulse25:  pulsePreset(0.25),
+  pulse10:  pulsePreset(0.10),
+  // Spectral profiles: simple additive stacks (positive amplitudes; the audio
+  // engine peak-normalizes the wave, so only relative levels matter).
+  warm:    (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) a[i] = 1 / (i + 1); return a; })(),
+  mellow:  (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) a[i] = Math.pow(0.5, i); return a; })(),
+  bright:  (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) a[i] = 1 / Math.sqrt(i + 1); return a; })(),
+  hollow:  (function () { const a = new Array(HARMONIC_COUNT).fill(0); a[0] = 1; for (let i = 1; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 0) a[i] = 1 / (n / 2); } return a; })(),
+  ethereal: (function () { const a = new Array(HARMONIC_COUNT).fill(0); for (let i = 0; i < HARMONIC_COUNT; i++) { const n = i + 1; if (n % 2 === 1) a[i] = 1 / n; } return a; })(),
+};
+
+// Preview pitch: index into pitchPositions() for the test note (the 🎛️ creator
+// and the settings "Play test" button). 0 = the key root.
+var PREVIEW_PITCH = 0;
 
 // Pitch color zones: the range of scale degrees shown as faint color bands on
 // screen (screen X = pitch). Octaves are relative to the key note's octave —
