@@ -90,6 +90,7 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`pitchPositions`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
 | `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawPitchZones`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
 | `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring (incl. `syncPitchZonesUI`) |
+| `creator.js` | Sound creator (tabs: Volume envelope / Pitch / Harmonics): envelope editor (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`), mix curves, harmonic spectrum (`initLayerSpecPoints`/`syncLayerAmplitudes`), pitch envelopes (`selectedPitchEnvOrNull`/`ensureSelectedPitchEnv`/`insertPitchPoint`/`pitchStAt` consumer), note-life slider (`applyLifeFromX`) |
 | `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
 
 ### Key constants
@@ -106,9 +107,29 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `PAN_SENS` / `PINCH_SENS` | 2 / 0.4 | nav camera sensitivities (dormant — nav removed for now) |
 | `GESTURE.allowTapNotes` | true | when off, a tap plays a ~0-length gesture note instead of the default tap note |
 
+## Pitch envelopes (v1.10.0)
+
+Each oscillator layer (or all of them at once) can bend pitch over the note's
+life. Envelopes live in the sound creator's **Pitch** tab:
+
+- Shape: `{ range, points: [{ t, st }] }` — `t` = note progress 0..1 across the
+  body + release timeline (aligned to HOLD/CUT/REL like mix curves), `st` =
+  semitone offset, 0 = no shift. `range` is the editor's ±scale in semitones
+  (default ±1, stepper pill in the plot's top-left, max 24).
+- **Master override is non-destructive:** while `MASTER_PITCH_ENV` exists it
+  drives every layer; the ✕ on the Master swatch clears it and per-layer
+  envelopes take over again (they are never erased). Layer envelopes are
+  created lazily on first edit; Reset flattens to 0 st.
+- Audio: one-shot paths sample the active envelope into
+  `osc.frequency.setValueCurveAtTime` (`scheduleLayerPitch`); live gesture
+  notes chase targets (`updateLivePitchTargets`) and continue through the
+  release tail (`rampPitchToEnd`). No envelope → constant base pitch.
+- Persistence: `masterPitchEnv` in the settings payload plus per-layer
+  `pitchEnv`; invalid/absent values load as null.
+
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.7.6`) after changes.
+- **Always bump the `#version` badge** (currently `v1.10.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
