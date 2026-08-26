@@ -88,7 +88,7 @@ creatorBtn.addEventListener('click', () => {
 
 /* ---- Plot geometry ---- */
 function creatorPlot() {
-  const top = 152, bottom = H - 26, left = 20, right = W - 14;
+  const top = 180, bottom = H - 26, left = 20, right = W - 14;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
 }
 const tToX = (t, p) => p.left + clamp01(t) * p.pw;
@@ -105,14 +105,14 @@ const MARKER_DEFS = [
   { key: 'cut', label: 'CUT', color: '#f57c00' },
   { key: 'rel', label: 'REL', color: '#d9534f' },
 ];
-// The marker lane: a grabbable strip between the controls row (ends at y 90)
-// and the plot (starts at creatorPlot().top = 152). Bigger tabs than before,
+// The marker lane: a grabbable strip between the note-life row (ends at y 118)
+// and the plot (starts at creatorPlot().top = 180). Bigger tabs than before,
 // staggered onto two rows, so overlapping markers (e.g. cut == hold end) each
 // keep a separate handle. The plot itself no longer intercepts grabs near a
 // marker's line, so curve points sitting on the same x stay draggable.
-const MARKER_LANE_TOP = 92, MARKER_LANE_BOTTOM = 148;
+const MARKER_LANE_TOP = 122, MARKER_LANE_BOTTOM = 176;
 const MARKER_TAB_W = 58, MARKER_TAB_H = 22;
-const MARKER_TAB_ROW = 98, MARKER_TAB_ROW2 = 124;
+const MARKER_TAB_ROW = 128, MARKER_TAB_ROW2 = 154;
 function markerList() {
   const tl = designTimeline();
   return MARKER_DEFS.map(m => ({
@@ -371,9 +371,13 @@ function envDragBoundary(i, t, v) {
 /* ---- Freehand drawing ----
    Draw mode scribbles breakpoints along the finger's path. The points dropdown
    (4..32) divides the graph into that many evenly-spaced slots (x = i/(N-1));
-   each time the finger enters a slot, a breakpoint is placed/updated there at
-   the finger's value. Insert-dedupe merges revisits, so a full sweep yields at
-   most N points and backtracking adds nothing. */
+   the slot grid is computed across the whole graph, but a stroke only touches
+   the slots it actually sweeps through — points outside the swept corridor are
+   never modified, so starting mid-graph leaves everything else alone. Each
+   visited slot gets a breakpoint at the finger's value, and pre-existing
+   points inside the swept corridor are absorbed, so sweeping at a lower
+   density than the existing shape thins it down as you pass through.
+   Insert-dedupe merges revisits, so backtracking adds nothing. */
 function drawPointCount() { return Math.max(4, Math.min(HARMONIC_COUNT, +creatorDrawPoints || 8)); }
 function slotT(s) { const n = drawPointCount(); return n > 1 ? s / (n - 1) : 0; }
 function slotAtX(x, p) {
@@ -407,47 +411,68 @@ function creatorTopPills() {
   };
 }
 
-// Place/update a breakpoint at slot `s` with the pointer's value. Returns the
-// index of the placed/touched point (spec & curve), or null (env).
-function drawPlacePointAtSlot(s, y, p) {
-  const t = slotT(s);
+// Place/update breakpoints for the slot range `fromS`..`s` (the finger's sweep
+// since the last event) at the pointer's value. Absorption and placement are
+// confined to the swept corridor: existing points between those slots (plus a
+// small dedupe epsilon so a coincident point is replaced) are removed, points
+// outside are untouched. Returns the last placed index (spec & curve), or null.
+function drawPlacePointAtSlot(s, y, p, fromS) {
+  const loS = Math.min(s, fromS == null ? s : fromS), hiS = Math.max(s, fromS == null ? s : fromS);
+  const loT = slotT(loS), hiT = slotT(hiS), eps = 0.008;
   if (creatorSubmode === 'harm') {
     const l = selectedLayer();
-    const idx = insertSpecPoint(l, t, yToAmp(y, p));
+    initLayerSpecPoints(l);
+    if (l.specPoints.length > 2) {
+      const kept = l.specPoints.filter(pt => pt.x < loT - eps || pt.x > hiT + eps);
+      if (kept.length >= 2) l.specPoints = kept;
+    }
+    let idx = -1;
+    for (let k = loS; k <= hiS; k++) idx = insertSpecPoint(l, slotT(k), yToAmp(y, p));
     if (idx >= 0) syncLayerAmplitudes(l);
     return idx;
   }
-  if (creatorVolSel) { envDrawAt(t, yToV(y, p), p); return null; }
-  return insertCurvePoint(selectedLayer(), t, yToV(y, p));
-}
-
-// Rebuild the envelope into the draw grid: N-1 equal-duration components (one
-// between each pair of the N slot boundaries), values 0, markers auto-clamped.
-// Drawing then sets each boundary's value as the finger visits its slot, so a
-// stroke replaces the previous shape with exactly the chosen point count.
-function envResetForDraw() {
-  const n = drawPointCount();
-  const total = Math.max(300, noteLifetimeMs());
-  const per = Math.max(1, Math.round(total / (n - 1)));
-  const comps = [];
-  for (let i = 0; i < n - 1; i++) {
-    comps.push({ id: newCompId(), name: 'Component', duration: i === n - 2 ? Math.max(1, total - per * (n - 2)) : per, startValue: 0, endValue: 0 });
+  if (creatorVolSel) { envDrawAt(slotT(s), yToV(y, p), p, loT, hiT); return null; }
+  const l = selectedLayer();
+  if (l.curve.length > 2) {
+    const kept = l.curve.filter(pt => pt.t < loT - eps || pt.t > hiT + eps);
+    if (kept.length >= 2) l.curve = kept;
   }
-  ENVELOPE = {
-    components: comps,
-    beginReleaseIndex: comps.length - 1,
-    holdStartIndex: 0,
-    holdEndIndex: comps.length - 2,
-    earlyCutIndex: comps.length - 1,
-  };
-  clampEnvelopeIndexes();
+  let idx = -1;
+  for (let k = loS; k <= hiS; k++) idx = insertCurvePoint(l, slotT(k), yToV(y, p));
+  return idx;
 }
 
 // Envelope draw: nudge the nearest boundary (within half the slot spacing) to
 // the drawn time/value, otherwise split the envelope there (capped) and set the
 // new boundary's value. Values chain forward via envDragBoundary, so the drawn
-// path is preserved as a continuous piecewise-linear curve.
-function envDrawAt(t, v, p) {
+// path is preserved as a continuous piecewise-linear curve. While the envelope
+// carries more components than the chosen point count, interior boundaries that
+// fall inside the swept corridor [loT..hiT] are merged away first — so a
+// low-density sweep thins the shape only where it actually passes.
+function envDrawAt(t, v, p, loT, hiT) {
+  const comps = ENVELOPE.components;
+  const lo = loT == null ? t : Math.min(loT, hiT);
+  const hi = loT == null ? t : Math.max(loT, hiT);
+  while (comps.length > drawPointCount() - 1) {
+    const eb0 = envBoundaries();
+    let best = -1, bd = Infinity;
+    for (let i = 1; i < eb0.n; i++) {
+      if (eb0.b[i] < lo * eb0.total - 1 || eb0.b[i] > hi * eb0.total + 1) continue;
+      const d = Math.abs(eb0.b[i] - clamp01(t) * eb0.total);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best <= 0 || comps.length <= 1) break;
+    const c = best - 1;   // the component ending at that boundary
+    if (c > 0) {
+      comps[c - 1].duration += comps[c].duration;
+      comps[c - 1].endValue = comps[c].endValue;
+      comps.splice(c, 1);
+    } else {
+      comps.splice(0, 1);
+    }
+    chainStartValues(ENVELOPE);
+    clampEnvelopeIndexes();
+  }
   const eb = envBoundaries();
   const total = eb.total;
   const ms = clamp01(t) * total;
@@ -490,15 +515,19 @@ function setNoteLifetime(ms) {
   if (comps.length) comps[comps.length - 1].duration = Math.max(1, comps[comps.length - 1].duration + diff);
   clampEnvelopeIndexes();
 }
+// The note-life row: a dedicated full-width strip between the controls row
+// (ends at y 90) and the marker lane, so the slider never competes with the
+// swatches or the Auto/Preview/pitch/reset widgets for horizontal space.
+const LIFE_ROW_CY = 105;
 function lifeSlider(p) {
-  const cy = 122;
-  const x2 = W - 40;
-  const x1 = Math.max(p.left + 120, x2 - 200);
-  return { x1, x2, cy, minSec: 0.3, maxSec: 10 };
+  return { x1: p.left, x2: p.right, cy: LIFE_ROW_CY, minSec: 0.3, maxSec: 10 };
 }
 function applyLifeFromX(x) {
   const L = lifeSlider(creatorPlot());
-  const f = clamp01((x - L.x1) / (L.x2 - L.x1));
+  // Map over the same inset track the thumb is drawn on (label + readout
+  // insets in drawCreator), otherwise grabbing the thumb makes it jump.
+  const tx1 = L.x1 + 60, tx2 = L.x2 - 44;
+  const f = clamp01((x - tx1) / (tx2 - tx1));
   setNoteLifetime((L.minSec + f * (L.maxSec - L.minSec)) * 1000);
 }
 
@@ -516,17 +545,6 @@ function distToCurve(layerIdx, x, y, p) {
 }
 
 // Distance from a point to the master envelope's drawn line (sampled).
-function distToEnv(x, y, p) {
-  const eb = envBoundaries();
-  let best = Infinity;
-  for (let c = 0; c < eb.n; c++) {
-    const d = segDist(x, y,
-      tToX(eb.tOf(eb.b[c]), p), vToY(eb.vals[c], p),
-      tToX(eb.tOf(eb.b[c + 1]), p), vToY(eb.vals[c + 1], p));
-    if (d < best) best = d;
-  }
-  return best;
-}
 
 /* ---- Marker dragging (edit the existing envelope indexes) ---- */
 // Map a normalized time to the nearest component boundary and apply it to the
@@ -647,14 +665,17 @@ function hitTestCreator(x, y) {
     if (x >= W - 104 && x <= W - 14) return { type: 'reset' };
     return { type: 'bar' };
   }
+  // Note-life row: dedicated strip below the controls row (non-harm sub-modes).
+  if (creatorSubmode !== 'harm' && y >= LIFE_ROW_CY - 14 && y <= LIFE_ROW_CY + 14) {
+    const L = lifeSlider(p);
+    if (x >= L.x1 - 10 && x <= L.x2 + 10) return { type: 'life' };
+    return { type: 'bar' };
+  }
   // Marker grab tabs (the lane above the plot; Volume envelope only).
   if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode !== 'harm') {
     for (const tab of markerTabs(p)) {
       if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
     }
-    // Note-lifetime slider (right side of the lane).
-    const L = lifeSlider(p);
-    if (y >= L.cy - 16 && y <= L.cy + 16 && x >= L.x1 - 10 && x <= L.x2 + 10) return { type: 'life' };
     return { type: 'bar' };
   }
   // Waveform preset buttons (the same strip, Harmonics tab only).
@@ -673,33 +694,24 @@ function hitTestCreator(x, y) {
     if (creatorDrawMode) return { type: 'draw' };
     if (creatorSubmode === 'harm') return hitTestHarm(x, y, p);
     // Volume-envelope tab: the selected curve (the master envelope when Vol is
-    // selected, else one layer's mix curve) is editable; taps on any other curve
-    // switch the selection to it.
+    // selected, else one layer's mix curve) is editable. Switching between them
+    // is done only from the swatch row above, never by tapping a curve.
     if (creatorVolSel) {
       // The envelope is selected: dots drag, tapping anywhere else splits it
       // (adds a boundary point at the tapped time). Mix curves don't steal the
       // tap here — switching layers is done from the swatch row above.
       return hitTestEnv(x, y, p);   // 'envbound' | 'envline' | 'empty'
     }
-    // A layer's mix curve is selected: its own breakpoints first, then the others.
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = 0; i < OSC_STACK.layers.length; i++) {
-        if ((pass === 0) !== (i === selectedLayerIdx)) continue;
-        const curve = OSC_STACK.layers[i].curve;
-        for (let j = 0; j < curve.length; j++) {
-          const px = tToX(curve[j].t, p), py = vToY(clamp01(curve[j].v), p);
-          if (Math.hypot(x - px, y - py) < 18) return { type: 'point', layerIdx: i, ptIdx: j };
-        }
-      }
+    // A layer's mix curve is selected: only its own breakpoints are grabbable
+    // and tapping its own line adds a point there. Other layers' curves and the
+    // envelope don't steal the tap — switching is done from the swatch row above
+    // — so they fall through to 'empty' (adds a point to the selected curve).
+    const selCurve = OSC_STACK.layers[selectedLayerIdx].curve;
+    for (let j = 0; j < selCurve.length; j++) {
+      const px = tToX(selCurve[j].t, p), py = vToY(clamp01(selCurve[j].v), p);
+      if (Math.hypot(x - px, y - py) < 18) return { type: 'point', layerIdx: selectedLayerIdx, ptIdx: j };
     }
-    // Nearest curve wins: a layer switches selection to it, the envelope to Vol.
-    let best = null, bd = 22;
-    for (let i = 0; i < OSC_STACK.layers.length; i++) {
-      const d = distToCurve(i, x, y, p);
-      if (d < bd) { bd = d; best = i; }
-    }
-    if (distToEnv(x, y, p) < bd) return { type: 'selenv' };
-    if (best != null) return { type: 'line', layerIdx: best };
+    if (distToCurve(selectedLayerIdx, x, y, p) < 22) return { type: 'line', layerIdx: selectedLayerIdx };
     return { type: 'empty' };
   }
   return { type: 'bar' };
@@ -796,19 +808,13 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'draw') {
-    // Start a scribble on the current selection. A stroke replaces the previous
-    // shape (so the chosen point count is exact): the spectrum and a layer's
-    // mix curve are cleared, the envelope is rebuilt onto the slot grid.
+    // Start a scribble on the current selection. The slot grid spans the whole
+    // graph, but a stroke only touches the slots it sweeps through — points
+    // elsewhere are never modified. Use the Reset button to clear the shape.
     const p = creatorPlot();
-    if (creatorSubmode === 'harm') {
-      selectedLayer().specPoints = [];
-    } else if (creatorVolSel) {
-      envResetForDraw();
-    } else {
-      selectedLayer().curve = [];
-    }
-    drawPlacePointAtSlot(slotAtX(x, p), y, p);
-    creatorPtr = { mode: 'draw', layerIdx: selectedLayerIdx, x0: x, y0: y };
+    const s0 = slotAtX(x, p);
+    drawPlacePointAtSlot(s0, y, p);
+    creatorPtr = { mode: 'draw', layerIdx: selectedLayerIdx, x0: x, y0: y, lastSlot: s0 };
     previewAndSave();
     return;
   }
@@ -864,23 +870,17 @@ canvas.addEventListener('pointerdown', e => {
       return;
     }
     creatorLastTap = { t: performance.now(), x, y };
-    if (hit.layerIdx !== selectedLayerIdx) selectedLayerIdx = hit.layerIdx;
     creatorVolSel = false;
     creatorPtr = { mode: 'point', layerIdx: hit.layerIdx, ptIdx: hit.ptIdx, x0: x, y0: y };
     return;
   }
   if (hit.type === 'line') {
-    if (hit.layerIdx === selectedLayerIdx && !creatorVolSel) {
-      // Tapping the selected layer's own line adds a point there.
-      const idx = insertCurvePoint(OSC_STACK.layers[hit.layerIdx], xToT(x, p), yToV(y, p));
-      if (idx >= 0) creatorPtr = { mode: 'point', layerIdx: hit.layerIdx, ptIdx: idx, x0: x, y0: y };
-      previewAndSave();
-      return;
-    }
-    selectedLayerIdx = hit.layerIdx; creatorVolSel = false; creatorPtr = null; maybeAutoPreview();
+    // Tapping the selected layer's own line adds a point there.
+    const idx = insertCurvePoint(OSC_STACK.layers[hit.layerIdx], xToT(x, p), yToV(y, p));
+    if (idx >= 0) creatorPtr = { mode: 'point', layerIdx: hit.layerIdx, ptIdx: idx, x0: x, y0: y };
+    previewAndSave();
     return;
   }
-  if (hit.type === 'selenv') { creatorVolSel = true; creatorPtr = null; maybeAutoPreview(); return; }
   // Empty: add to the selected curve — split the envelope (Vol) or add a mix
   // breakpoint (a layer).
   const l = selectedLayer();
@@ -940,7 +940,9 @@ canvas.addEventListener('pointermove', e => {
       scheduleCreatorPreview();
     }
   } else if (creatorPtr.mode === 'draw') {
-    drawPlacePointAtSlot(slotAtX(x, p), y, p);
+    const ns = slotAtX(x, p);
+    drawPlacePointAtSlot(ns, y, p, creatorPtr.lastSlot);
+    creatorPtr.lastSlot = ns;
     scheduleCreatorPreview();
   }
   creatorPtr.x0 = x; creatorPtr.y0 = y;
@@ -1112,6 +1114,42 @@ function drawCreator(now) {
   ctx.textAlign = 'center';
   ctx.fillText(creatorVolSel ? '↺ Reset vol' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
 
+  // Note-lifetime slider (note mode only; dedicated row below the controls
+  // row, above the HOLD/CUT/REL marker lane).
+  if (creatorSubmode !== 'harm') {
+    const L = lifeSlider(p);
+    const totalS = noteLifetimeMs() / 1000;
+    const f = clamp01((totalS - L.minSec) / (L.maxSec - L.minSec));
+    const tx1 = L.x1 + 60, tx2 = L.x2 - 44;
+    ctx.font = '700 10px sans-serif';
+    ctx.fillStyle = '#6b8e5a';
+    ctx.textAlign = 'left';
+    ctx.fillText('Note life', L.x1 + 2, L.cy + 4);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(46,93,52,0.22)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(tx1, L.cy); ctx.lineTo(tx2, L.cy);
+    ctx.stroke();
+    ctx.strokeStyle = '#2e5d34';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(tx1, L.cy); ctx.lineTo(tx1 + f * (tx2 - tx1), L.cy);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.arc(tx1 + f * (tx2 - tx1), L.cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = '#2e5d34';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#2e5d34';
+    ctx.font = '700 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(totalS.toFixed(1) + 's', L.x2, L.cy + 4);
+  }
+
   // ---- Marker grab tabs (Volume envelope tab only) ----
   if (creatorSubmode !== 'harm') {
     for (const tab of markerTabs(p)) {
@@ -1132,37 +1170,6 @@ function drawCreator(now) {
       ctx.textAlign = 'center';
       ctx.fillText(tab.label, tab.cx, tab.y + 15);
     }
-    // Note-lifetime slider (right side of the lane, next to the markers).
-    const L = lifeSlider(p);
-    const totalS = noteLifetimeMs() / 1000;
-    const f = clamp01((totalS - L.minSec) / (L.maxSec - L.minSec));
-    ctx.font = '700 10px sans-serif';
-    ctx.fillStyle = '#6b8e5a';
-    ctx.textAlign = 'right';
-    ctx.fillText('Note life', L.x2, 110);
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(46,93,52,0.22)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(L.x1, L.cy); ctx.lineTo(L.x2, L.cy);
-    ctx.stroke();
-    ctx.strokeStyle = '#2e5d34';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(L.x1, L.cy); ctx.lineTo(L.x1 + f * (L.x2 - L.x1), L.cy);
-    ctx.stroke();
-    ctx.lineCap = 'butt';
-    ctx.beginPath();
-    ctx.arc(L.x1 + f * (L.x2 - L.x1), L.cy, 8, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
-    ctx.fill();
-    ctx.strokeStyle = '#2e5d34';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = '#2e5d34';
-    ctx.font = '700 12px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(totalS.toFixed(1) + 's', L.x2 + 8, L.cy + 4);
   }
 
   // ---- Waveform presets (Harmonics tab only) ----
