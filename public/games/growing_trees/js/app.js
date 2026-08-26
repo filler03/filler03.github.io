@@ -288,7 +288,7 @@ const clampSign = v => Math.max(-1, Math.min(1, v));
 function defaultLayer(id) {
   const amplitudes = new Array(HARMONIC_COUNT).fill(0);
   amplitudes[0] = 1;
-  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null };
+  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null };
 }
 // A soothing chime as the out-of-the-box sound: a soft bell body that carries
 // the strike, plus a bright overtone layer that blooms into the tail. Layer
@@ -300,7 +300,7 @@ function ampFromSpec(spec) {
   return a;
 }
 function chimeLayer(id, spec, curve, level) {
-  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null };
+  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null, pitchEnv: null };
 }
 const DEFAULT_OSC_STACK = {
   layers: [
@@ -336,6 +336,51 @@ function curveValue(layer, t) {
     }
   }
   return clamp01(hi.v);
+}
+
+/* ---------- Pitch envelopes ----------
+   A pitch envelope bends frequency over the note's life: breakpoints
+   [{ t, st }] (t = note progress 0..1, st = semitone offset from the note's
+   base pitch) interpolated linearly, 0 = no shift. `range` is the editor's
+   vertical scale in semitones — the drawn curve spans ±range. The master
+   envelope, when set, overrides every layer's own envelope NON-destructively:
+   clearing the master reveals the per-layer shapes again. */
+const MAX_PITCH_ENV_RANGE = 24;
+function defaultPitchEnv() {
+  return { range: 1, points: [{ t: 0, st: 0 }, { t: 1, st: 0 }] };
+}
+var MASTER_PITCH_ENV = null;
+
+// Interpolate a pitch envelope's semitones at note progress t (ends clamp).
+function pitchStAt(env, t) {
+  const pts = env && env.points;
+  if (!pts || !pts.length) return 0;
+  if (pts.length === 1) return clampSign(pts[0].st);
+  const lo = pts[0], hi = pts[pts.length - 1];
+  if (t <= lo.t) return lo.st;
+  if (t >= hi.t) return hi.st;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const span = b.t - a.t;
+      const f = span > 0 ? (t - a.t) / span : 0;
+      return a.st + (b.st - a.st) * f;
+    }
+  }
+  return hi.st;
+}
+
+// The pitch envelope actually driving a layer: the master when present,
+// otherwise that layer's own.
+function activePitchEnv(layerIdx) {
+  if (MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2) return MASTER_PITCH_ENV;
+  const l = OSC_STACK.layers[layerIdx];
+  return (l && l.pitchEnv && l.pitchEnv.points && l.pitchEnv.points.length >= 2) ? l.pitchEnv : null;
+}
+
+// A base frequency shifted by `st` semitones.
+function freqShifted(baseFreq, st) {
+  return Math.max(20, baseFreq * Math.pow(2, st / 12));
 }
 
 // Value of a drawn spectrum curve at x (0..1 across the 32 harmonics): signed

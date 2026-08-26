@@ -73,7 +73,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -217,6 +217,18 @@ function loadSavedSettings() {
         { t: 1, v: Math.max(0, Math.min(1, me || 1)) },
       ];
     }
+    // Pitch envelope (master or per-layer): null/invalid = none (no override,
+    // no bend). Range is the editor's ±scale in semitones.
+    function pitchEnvFromSaved(pe) {
+      if (!pe || !Array.isArray(pe.points) || pe.points.length < 2) return null;
+      const range = Math.max(1, Math.min(MAX_PITCH_ENV_RANGE, +pe.range || 1));
+      const points = pe.points.map((p, k) => ({
+        t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k / (pe.points.length - 1)) || 0)),
+        st: Math.max(-range, Math.min(range, +((p && p.st) != null ? p.st : 0) || 0)),
+      }));
+      points.sort((a, b) => a.t - b.t);
+      return { range, points };
+    }
     function layerFromSaved(l, i) {
       const amplitudes = new Array(HARMONIC_COUNT).fill(0);
       if (l && Array.isArray(l.amplitudes) && l.amplitudes.length) {
@@ -239,6 +251,7 @@ function loadSavedSettings() {
         curve: curveFromSaved(l),
         presetId: (l && l.presetId) || null,
         specPoints,
+        pitchEnv: pitchEnvFromSaved(l && l.pitchEnv),
       };
     }
     const stack = clone(DEFAULT_OSC_STACK);
@@ -248,6 +261,7 @@ function loadSavedSettings() {
       stack.layers = [layerFromSaved({ amplitudes: d.harmonics.amplitudes }, 0)];
     }
     OSC_STACK = stack;
+    MASTER_PITCH_ENV = pitchEnvFromSaved(d.masterPitchEnv);
     if (migrated) {
       // A legacy save was just loaded: persist it under the current key now so
       // later edits land in the right place (and the legacy copy can age out).
@@ -267,6 +281,7 @@ function resetToDefaults() {
   PITCH_ZONES = clone(DEFAULT_PITCH_ZONES);
   VOLUME = clone(DEFAULT_VOLUME);
   OSC_STACK = clone(DEFAULT_OSC_STACK);
+  MASTER_PITCH_ENV = null;
   PREVIEW_PITCH = 0;
   creatorDrawPoints = 8;
   creatorAutoPreview = false;

@@ -88,6 +88,7 @@ function playUnlockChime() {
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd);
   startLayerStack(stack, t0, noteToFreq(s.note), tEnd);
+  scheduleLayerPitch(stack, t0, tEnd, noteToFreq(s.note), null, null);
   setTimeout(() => {
     try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(g => g.disconnect()); gain.disconnect(); } catch (e) {}
   }, (tEnd - t0 + 0.5) * 1000);
@@ -304,6 +305,73 @@ function rampLayerMixToEnd(ds, startT, ms) {
   }
 }
 
+/* ---- Pitch envelopes ----
+   Each layer's oscillator frequency follows its active pitch envelope (the
+   master when set, else its own), sampled across the same body/release timeline
+   as the mix curves so drawn features line up with HOLD/CUT/REL. Layers
+   without an envelope stay at their base pitch. */
+
+// One-shot path (wait mode, chimes, previews): sample each layer's pitch
+// envelope across t0..tEnd into a frequency value curve.
+function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
+  const dur = Math.max(0.004, tEnd - t0);
+  const N = 64;
+  const split = bodyMs != null && relMs != null && (bodyMs + relMs) > 0;
+  const dBody = designBodyMs();
+  for (let i = 0; i < stack.oscs.length; i++) {
+    const env = activePitchEnv(i);
+    if (!env) continue;
+    const p = stack.oscs[i].frequency;
+    p.cancelScheduledValues(t0);
+    const curve = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const audioMs = (k / (N - 1)) * dur * 1000;
+      const prog = split ? mixProgForTimes(audioMs, bodyMs, relMs, dBody) : k / (N - 1);
+      curve[k] = freqShifted(baseFreq, pitchStAt(env, prog));
+    }
+    p.setValueAtTime(curve[0], t0);
+    p.setValueCurveAtTime(curve, t0 + 0.002, dur - 0.002);
+  }
+}
+
+// Chase each live layer's frequency toward its active pitch envelope's current
+// value (same progress mapping as the mix targets).
+function updateLivePitchTargets(ds, at, tc) {
+  if (!ds.oscs || !ds.baseFreq) return;
+  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
+  const relMs = releaseMs();
+  const prog = mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs());
+  for (let i = 0; i < ds.oscs.length; i++) {
+    const env = activePitchEnv(i);
+    if (!env) continue;
+    ds.oscs[i].frequency.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog)), at, tc);
+  }
+}
+
+// On release, each live layer's frequency continues through the release section
+// of its pitch envelope (from the release-begin fraction to the note end), so
+// the bend completes through the tail exactly as it does in wait mode.
+function rampPitchToEnd(ds, startT, ms) {
+  if (!ds.oscs) return;
+  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
+  const relMs = releaseMs();
+  const dBody = designBodyMs();
+  const N = 32;
+  for (let i = 0; i < ds.oscs.length; i++) {
+    const env = activePitchEnv(i);
+    if (!env) continue;
+    const p = ds.oscs[i].frequency;
+    const curve = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const relElapsed = relMs > 0 ? ms * k / (N - 1) : ms;
+      curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody)));
+    }
+    p.cancelScheduledValues(startT);
+    p.setValueAtTime(p.value, startT);
+    p.setValueCurveAtTime(curve, startT + 0.002, Math.max(0.004, ms / 1000) - 0.002);
+  }
+}
+
 /* ---- Preview note ----
    A dedicated, self-contained scheduler for the test/preview sound. It plays
    the CURRENT sound design (oscillator stack + envelope + mix curves) at the
@@ -378,6 +446,7 @@ function previewNote(pitch) {
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd, bodyMs, relMs);
   startLayerStack(stack, t0, freq, tEnd);
+  scheduleLayerPitch(stack, t0, tEnd, freq, bodyMs, relMs);
 
   const voice = { oscs: stack.oscs, mixGains: stack.mixGains, gain, cleanupTimer: null };
   previewVoices.push(voice);
@@ -424,6 +493,7 @@ function chime(level, overrides) {
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd);
   startLayerStack(stack, t0, noteToFreq(s.note), tEnd);
+  scheduleLayerPitch(stack, t0, tEnd, noteToFreq(s.note), null, null);
 
   setTimeout(() => {
     try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(g => g.disconnect()); gain.disconnect(); } catch (e) {}
@@ -579,6 +649,7 @@ function schedulePathAudio(ds, totalMs, pb) {
   const stack = buildLayerStack(audioCtx, gain);
   scheduleLayerMix(stack, t0, tEnd, bodyDurMs, relMs);
   startLayerStack(stack, t0, noteToFreq(pitch), tEnd);
+  scheduleLayerPitch(stack, t0, tEnd, noteToFreq(pitch), bodyDurMs, relMs);
   const note = { oscs: stack.oscs, mixGains: stack.mixGains, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb };
   gestureNotes.push(note);
   setTimeout(() => {
@@ -623,6 +694,7 @@ function initLivePathAudio(ds) {
   gain.connect(masterGain);
   const stack = buildLayerStack(audioCtx, gain);
   const freq = noteToFreq(ds.pitch);
+  ds.baseFreq = freq;   // pitch envelopes shift relative to this
   for (const osc of stack.oscs) { osc.frequency.value = freq; osc.start(ctx0); }
   ds.startedAt = performance.now();
   ds.ctx0 = ctx0;
@@ -661,6 +733,7 @@ function scheduleLivePoint(ds) {
   }
   ds.gainLevel = target;
   updateLiveMixTargets(ds, now, 0.06);
+  updateLivePitchTargets(ds, now, 0.06);
 }
 
 // A held finger adds no new path points, so no volume automation is scheduled
@@ -686,6 +759,7 @@ function tickLiveHold(ds) {
   ds.lastSched = at + 0.001 + horizon;
   ds.gainLevel = scaled[scaled.length - 1];
   updateLiveMixTargets(ds, at, 0.06);
+  updateLivePitchTargets(ds, at, 0.06);
 }
 
 // Where an early release jumps to the release section: the playback time (ms)
@@ -723,6 +797,7 @@ function finishLivePathNote(ds) {
   const now = audioCtx.currentTime;
   const elapsed = performance.now() - ds.startedAt;
   updateLiveMixTargets(ds, now, 0.05);
+  updateLivePitchTargets(ds, now, 0.05);
   if (elapsed >= ds.totalMs) {
     // The circle already caught the fingertip (the drawn body finished). If the
     // envelope hasn't played through the early-cut marker yet — a quick tap or
@@ -796,12 +871,14 @@ function scheduleReleaseTail(ds, startLevel, startT) {
     const stopT = startT + relMs / 1000 + FADE_MS / 1000;
     g.linearRampToValueAtTime(0, stopT);
     rampLayerMixToEnd(ds, startT, relMs);
+    rampPitchToEnd(ds, startT, relMs);
     for (const o of oscs) { try { o.stop(stopT + 0.05); } catch (e) {} }
     scheduleLiveCleanup(ds, stopT);
   } else {
     const stopT = startT + FADE_MS / 1000;
     g.linearRampToValueAtTime(0, stopT);
     rampLayerMixToEnd(ds, startT, FADE_MS);
+    rampPitchToEnd(ds, startT, FADE_MS);
     for (const o of oscs) { try { o.stop(stopT + 0.05); } catch (e) {} }
     scheduleLiveCleanup(ds, stopT);
   }
