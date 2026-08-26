@@ -127,9 +127,33 @@ life. Envelopes live in the sound creator's **Pitch** tab:
 - Persistence: `masterPitchEnv` in the settings payload plus per-layer
   `pitchEnv`; invalid/absent values load as null.
 
+## Layer voices — coupled duplicates (v1.11.0)
+
+Each oscillator layer can carry up to `MAX_LAYER_VOICES` (5) duplicate voices
+that play its same waveform in parallel with per-voice offsets:
+
+- Voice shape: `{ id, st, ct, vol }` — semitone offset (−24..24), cents
+  (−100..100), relative gain (0..2). Voices are **fully coupled** to their
+  layer (no tab per duplicate); they share the waveform, mix curve, and pitch
+  envelope. Only pitch/volume differ, producing chorus/unison thickening.
+- Editing: a **Voices** tab beside Volume envelope / Pitch / Harmonics. Two
+  sub-selection levels: the layer swatch row picks the oscillator, a chip row
+  picks which voice to edit (✕ on a chip deletes it, + adds one — new voices
+  default to +0 st · +7¢ · 100% for instant audible chorus). The graph area
+  shows three draggable sliders (semitones, cents, volume) with −/+ nudge
+  buttons for fine steps; **Reset** ("↺ Clear all") wipes every voice of the
+  selected oscillator. Deleting all voices returns the layer to a single osc.
+- Loudness is **normalized**: each layer's [1, ...voice vols] are divided by
+  their sum (`normalizedVoiceLevels`), so duplicating never gets louder.
+- Audio: `buildLayerStack` spawns one osc per voice (osc → voiceGain → envGain)
+  and exposes parallel arrays (`oscLayer`, `oscVoice`, `oscOffset`, `oscLvl`)
+  that every mix/pitch scheduler indexes per oscillator instead of per layer;
+  static voice offsets add on top of any active pitch envelope.
+- Persistence: per-layer `voices` array, clamped on load; absent → null.
+
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.10.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.11.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).

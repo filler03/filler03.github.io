@@ -13,6 +13,7 @@ const creatorBtn = document.getElementById('creatorBtn');
 let creatorSubmode = 'note';  // 'note' (merged volume envelope + mix), 'harm', or 'pitch'
 let creatorVolSel = true;     // true = master volume envelope selected; false = a layer's mix curve
 let creatorPitchSel = 'master'; // Pitch tab selection: 'master' or a layer index
+let creatorVoiceSel = 0;        // Voices tab: which duplicate voice of the selected layer is being edited
 let creatorPtr = null;        // { mode:'point'|'marker'|'draw', layerIdx, ptIdx|key, x0, y0, moved }
 let creatorLastTap = null;    // { t, x, y } for double-tap-to-delete
 let creatorPreviewTimer = null;
@@ -469,6 +470,82 @@ function creatorTopPills() {
   };
 }
 
+/* ---- Voices tab (coupled duplicates of the selected oscillator) ----
+   Each layer can carry duplicate voices that play its same waveform in
+   parallel with per-voice pitch/volume offsets — chorus/unison thickening
+   without extra tabs or swatches. The Voices tab has two levels of sub-tabs:
+   the layer swatch row picks the oscillator, a chip row below picks which
+   voice to edit, and the graph area holds one draggable slider per parameter
+   (semitones, cents, volume) plus ± nudge buttons for fine steps. */
+// The layer whose voices are being edited (always a concrete layer here).
+function selectedVoicesLayer() {
+  return OSC_STACK.layers[selectedLayerIdx] || null;
+}
+function clampVoiceSel() {
+  const l = selectedVoicesLayer();
+  const n = l ? layerVoices(l).length : 0;
+  creatorVoiceSel = Math.max(0, Math.min(n - 1, creatorVoiceSel));
+  return l && n ? l.voices[creatorVoiceSel] : null;
+}
+function selectedVoice() {
+  return clampVoiceSel();
+}
+function addVoiceToSelected() {
+  const l = selectedVoicesLayer();
+  if (!l || layerVoices(l).length >= MAX_LAYER_VOICES) return null;
+  if (!Array.isArray(l.voices)) l.voices = [];
+  const v = defaultVoice();
+  l.voices.push(v);
+  creatorVoiceSel = l.voices.length - 1;
+  return v;
+}
+// Voice chips strip (replaces the note-life row in the Voices tab).
+function voiceChipRects(p) {
+  const rects = [];
+  const vs = selectedVoicesLayer() ? layerVoices(selectedVoicesLayer()) : [];
+  for (let i = 0; i < vs.length; i++) {
+    rects.push({ x: p.left + i * 84, y: LIFE_ROW_CY - 13, w: 76, h: 26 });
+  }
+  if (vs.length < MAX_LAYER_VOICES) {
+    rects.push({ x: p.left + vs.length * 84 + 6, y: LIFE_ROW_CY - 13, w: 40, h: 26 });
+  }
+  return rects;
+}
+// Parameter sliders in the plot area. Bipolar tracks center on no-shift.
+const VOICE_PARAM_DEFS = [
+  { key: 'st',  label: 'Semitones', min: -24, max: 24, step: 0.25, fmt: v => (Math.round(v * 100) / 100) + ' st' },
+  { key: 'ct',  label: 'Cents',     min: -100, max: 100, step: 1,  fmt: v => Math.round(v) + ' ¢' },
+  { key: 'vol', label: 'Volume',    min: 0,  max: 2,  step: 0.01, fmt: v => Math.round(v * 100) + '%' },
+];
+function voiceSliderRows(p) {
+  // Packed toward the top of the plot so the lowest slider stays well above the
+  // screen's bottom edge (where iOS home-gesture swipes trigger). Spacing
+  // compresses on short windows but the last row always clears the bottom by
+  // ~90px of plot height.
+  const n = VOICE_PARAM_DEFS.length;
+  const topPad = 28;
+  const bottomReserve = 90;
+  const avail = p.ph - topPad - bottomReserve;
+  const spacing = Math.min(76, Math.max(42, avail / (n - 1)));
+  return VOICE_PARAM_DEFS.map((d, i) => {
+    const cy = p.top + topPad + i * spacing;
+    return {
+      def: d,
+      cy,
+      btnW: 26,
+      x1: p.left + 78,
+      x2: p.right - 78,
+    };
+  });
+}
+function voiceParamFromX(row, x) {
+  const f = Math.max(0, Math.min(1, (x - row.x1) / (row.x2 - row.x1)));
+  let v = row.def.min + f * (row.def.max - row.def.min);
+  if (row.def.key === 'ct') v = Math.round(v);
+  else v = Math.round(v * 100) / 100;
+  return Math.max(row.def.min, Math.min(row.def.max, v));
+}
+
 // Place/update breakpoints for the slot range `fromS`..`s` (the finger's sweep
 // since the last event) at the pointer's value. Absorption and placement are
 // confined to the swept corridor: existing points between those slots (plus a
@@ -660,11 +737,13 @@ function scheduleCreatorPreview() {
 /* ---- Hit testing ---- */
 function creatorTabs() {
   return [
-    { submode: 'note', label: 'Volume envelope', enabled: true },
+    { submode: 'note', label: 'Volume', enabled: true },
     { submode: 'pitch', label: 'Pitch', enabled: true },
-    { submode: 'harm', label: 'Harmonics', enabled: true },
+    { submode: 'harm', label: 'Harm', enabled: true },
+    { submode: 'voices', label: 'Voices', enabled: true },
   ];
 }
+const CREATOR_TAB_W = 96;
 
 // Distance from a point to a line segment.
 function segDist(px, py, x1, y1, x2, y2) {
@@ -698,7 +777,7 @@ function hitTestCreator(x, y) {
     const tabs = creatorTabs();
     let tx = W - 14;
     for (let i = tabs.length - 1; i >= 0; i--) {
-      const w = 112;
+      const w = CREATOR_TAB_W;
       tx -= w;
       if (x >= tx && x <= tx + w) return { type: 'tab', submode: tabs[i].submode, enabled: tabs[i].enabled };
     }
@@ -739,14 +818,32 @@ function hitTestCreator(x, y) {
     if (x >= W - 104 && x <= W - 14) return { type: 'reset' };
     return { type: 'bar' };
   }
-  // Note-life row: dedicated strip below the controls row (non-harm sub-modes).
-  if (creatorSubmode !== 'harm' && y >= LIFE_ROW_CY - 14 && y <= LIFE_ROW_CY + 14) {
+  // Note-life row / voice-chips strip below the controls row.
+  if (creatorSubmode === 'voices') {
+    if (y >= LIFE_ROW_CY - 16 && y <= LIFE_ROW_CY + 16) {
+      const l = selectedVoicesLayer();
+      const nV = l ? layerVoices(l).length : 0;
+      const rects = voiceChipRects(p);
+      for (let i = 0; i < rects.length; i++) {
+        const rc = rects[i];
+        if (x >= rc.x && x <= rc.x + rc.w && y >= rc.y && y <= rc.y + rc.h) {
+          if (i >= nV) return { type: 'voiceaddchip' };
+          // ✕ badge on the selected chip deletes that voice.
+          if (i === creatorVoiceSel && Math.hypot(x - (rc.x + rc.w - 12), y - LIFE_ROW_CY) < 12) return { type: 'voicedelchip', idx: i };
+          return { type: 'voicechip', idx: i };
+        }
+      }
+      return { type: 'bar' };
+    }
+    // else: fall through so taps below the strip reach the slider area.
+  }
+  if ((creatorSubmode === 'note' || creatorSubmode === 'pitch') && y >= LIFE_ROW_CY - 14 && y <= LIFE_ROW_CY + 14) {
     const L = lifeSlider(p);
     if (x >= L.x1 - 10 && x <= L.x2 + 10) return { type: 'life' };
     return { type: 'bar' };
   }
   // Marker grab tabs (the lane above the plot; Volume envelope only).
-  if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode !== 'harm') {
+  if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && (creatorSubmode === 'note' || creatorSubmode === 'pitch')) {
     for (const tab of markerTabs(p)) {
       if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
     }
@@ -760,16 +857,31 @@ function hitTestCreator(x, y) {
     return { type: 'bar' };
   }
   if (y >= p.top && y <= p.bottom) {
-    // Draw-mode toolbar (top-right of the plot, both sub-modes). The points
-    // pill is covered by a native <select>, so only the Draw toggle is hit.
-    const tb = drawToolbar(p);
-    if (x >= tb.draw.x && x <= tb.draw.x + tb.draw.w && y >= tb.draw.y && y <= tb.draw.y + tb.draw.h) return { type: 'drawtoggle' };
+    // Draw-mode toolbar (top-right of the plot; not in the Voices tab).
+    if (creatorSubmode !== 'voices') {
+      const tb = drawToolbar(p);
+      if (x >= tb.draw.x && x <= tb.draw.x + tb.draw.w && y >= tb.draw.y && y <= tb.draw.y + tb.draw.h) return { type: 'drawtoggle' };
+    }
     // ±range stepper pill (Pitch tab, plot top-left).
     if (creatorSubmode === 'pitch') {
       const rp = pitchRangePill(p);
       if (x >= rp.x && x <= rp.x + rp.w && y >= rp.y && y <= rp.y + rp.h) {
         return { type: 'pitchrange', dir: x < rp.x + rp.w * 0.35 ? -1 : (x > rp.x + rp.w * 0.65 ? 1 : 0) };
       }
+    }
+    // Voices tab: one slider per parameter with −/+ nudge buttons at both ends.
+    if (creatorSubmode === 'voices') {
+      const rows = voiceSliderRows(p);
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (y >= r.cy - 16 && y <= r.cy + 16) {
+          if (x >= r.x1 - r.btnW - 8 && x <= r.x1 - 8) return { type: 'vparam', keyIdx: i, dir: -1 };
+          if (x >= r.x2 + 8 && x <= r.x2 + 8 + r.btnW) return { type: 'vparam', keyIdx: i, dir: 1 };
+          if (x >= r.x1 - 8 && x <= r.x2 + 8) return { type: 'voiceslider', keyIdx: i };
+          return { type: 'bar' };
+        }
+      }
+      return { type: 'bar' };
     }
     // Draw mode takes over the whole graph: any drag scribbles new points.
     if (creatorDrawMode) return { type: 'draw' };
@@ -825,6 +937,7 @@ canvas.addEventListener('pointerdown', e => {
       creatorSubmode = hit.submode;
       creatorVolSel = creatorSubmode === 'note';
       if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
+      if (creatorSubmode === 'voices') clampVoiceSel();
     }
     return;
   }
@@ -835,6 +948,53 @@ canvas.addEventListener('pointerdown', e => {
   }
   if (hit.type === 'previewbtn') {
     previewChime();
+    return;
+  }
+  if (hit.type === 'voicechip') {
+    creatorVoiceSel = hit.idx;
+    creatorPtr = null;
+    maybeAutoPreview();
+    return;
+  }
+  if (hit.type === 'voiceaddchip') {
+    if (addVoiceToSelected()) {
+      creatorPtr = null;
+      previewAndSave();
+    }
+    return;
+  }
+  if (hit.type === 'voicedelchip') {
+    const l = selectedVoicesLayer();
+    if (l && l.voices && l.voices[hit.idx] != null) {
+      l.voices.splice(hit.idx, 1);
+      if (!l.voices.length) l.voices = null;   // back to a plain single osc
+      clampVoiceSel();
+      creatorPtr = null;
+      previewAndSave();
+    }
+    return;
+  }
+  if (hit.type === 'vparam') {
+    // −/+ nudge buttons: fine steps on the selected voice's parameter.
+    const v = selectedVoice();
+    const d = VOICE_PARAM_DEFS[hit.keyIdx];
+    if (v && d) {
+      const cur = +v[d.key] || 0;
+      v[d.key] = Math.max(d.min, Math.min(d.max, Math.round(cur / d.step) * d.step + hit.dir * d.step));
+      if (d.key === 'vol') v.vol = Math.round((v.vol || 0) * 100) / 100;
+      previewAndSave();
+    }
+    return;
+  }
+  if (hit.type === 'voiceslider') {
+    // Grab a slider: continuous fine control while dragging.
+    const v = selectedVoice();
+    const row = voiceSliderRows(creatorPlot())[hit.keyIdx];
+    if (v && row) {
+      v[row.def.key] = voiceParamFromX(row, x);
+      creatorPtr = { mode: 'voiceparam', keyIdx: hit.keyIdx, x0: x, y0: y };
+      previewAndSave();
+    }
     return;
   }
   if (hit.type === 'vol') {
@@ -865,6 +1025,7 @@ canvas.addEventListener('pointerdown', e => {
     creatorVolSel = false;
     if (creatorSubmode === 'pitch') creatorPitchSel = hit.layerIdx;
     if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
+    if (creatorSubmode === 'voices') clampVoiceSel();
     creatorPtr = null;
     maybeAutoPreview();
     return;
@@ -913,6 +1074,7 @@ canvas.addEventListener('pointerdown', e => {
     OSC_STACK.layers.splice(selectedLayerIdx, 1);
     selectedLayerIdx = Math.max(0, Math.min(OSC_STACK.layers.length - 1, selectedLayerIdx));
     if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
+    if (creatorSubmode === 'voices') clampVoiceSel();
     previewAndSave();
     return;
   }
@@ -932,6 +1094,12 @@ canvas.addEventListener('pointerdown', e => {
     } else if (creatorSubmode === 'pitch') {
       const env = ensureSelectedPitchEnv();
       env.points = [{ t: 0, st: 0 }, { t: 1, st: 0 }];   // flat: no bend (range kept)
+    } else if (creatorSubmode === 'voices') {
+      const l = selectedVoicesLayer();
+      if (l) {
+        l.voices = null;      // clear all duplicates → back to a plain single osc
+        creatorVoiceSel = 0;
+      }
     } else if (creatorVolSel) {
       ENVELOPE = clone(DEFAULT_ENVELOPE);
       clampEnvelopeIndexes();
@@ -1073,6 +1241,14 @@ canvas.addEventListener('pointermove', e => {
   } else if (creatorPtr.mode === 'life') {
     applyLifeFromX(x);
     scheduleCreatorPreview();
+  } else if (creatorPtr.mode === 'voiceparam') {
+    const v = selectedVoice();
+    const row = voiceSliderRows(p)[creatorPtr.keyIdx];
+    if (v && row) {
+      v[row.def.key] = voiceParamFromX(row, x);
+      if (row.def.key === 'vol') v.vol = Math.round((v.vol || 0) * 100) / 100;
+      scheduleCreatorPreview();
+    }
   } else if (creatorPtr.mode === 'pitchpoint') {
     const env = ensureSelectedPitchEnv();
     const r = Math.max(1, env.range || 1);
@@ -1152,7 +1328,11 @@ function drawCreator(now) {
   ctx.font = '700 16px sans-serif';
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
-  ctx.fillText('Sound creator', W / 2, 36);
+  // Clamp the title left of the tabs so it never slides underneath them on
+  // narrow screens.
+  const tabs = creatorTabs();
+  const tabLeft = W - 14 - tabs.length * CREATOR_TAB_W;
+  ctx.fillText('Sound creator', Math.min(W / 2, tabLeft - 72), 36);
 // Prominent readout of the exact preview pitch + frequency the test plays,
 // plus the note's spectral center at the start and end of the note — so a
 // rising "pitch" from the mix morphing is visibly explained.
@@ -1160,10 +1340,9 @@ function drawCreator(now) {
   ctx.textAlign = 'left';
   ctx.fillText('Test: ' + previewPitchName() + ' · ' + previewPitchFreq().toFixed(1) + ' Hz', 84, 38);
   ctx.fillText('spectral center: ' + centroidPitchName(0) + ' → ' + centroidPitchName(1), 84, 58);
-  const tabs = creatorTabs();
   let tx = W - 14;
   for (let i = tabs.length - 1; i >= 0; i--) {
-    const w = 112, x = tx - w;
+    const w = CREATOR_TAB_W, x = tx - w;
     tx = x;
     const active = tabs[i].submode === creatorSubmode;
     ctx.globalAlpha = tabs[i].enabled ? 1 : 0.45;
@@ -1292,11 +1471,58 @@ function drawCreator(now) {
   ctx.fillStyle = '#2e5d34';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(creatorVolSel ? '↺ Reset vol' : creatorSubmode === 'pitch' ? '↺ Reset pitch' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
+  ctx.fillText(creatorVolSel ? '↺ Reset vol' : creatorSubmode === 'pitch' ? '↺ Reset pitch' : creatorSubmode === 'voices' ? '↺ Clear all' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
 
-  // Note-lifetime slider (note mode only; dedicated row below the controls
+  // Voice chips strip (Voices tab): pick which duplicate to edit, or add one.
+  if (creatorSubmode === 'voices') {
+    const l = selectedVoicesLayer();
+    const nV = l ? layerVoices(l).length : 0;
+    const rects = voiceChipRects(p);
+    ctx.textAlign = 'center';
+    for (let i = 0; i < nV; i++) {
+      const rc = rects[i], selChip = i === creatorVoiceSel;
+      drawRoundRect(rc.x, rc.y, rc.w, rc.h, 8);
+      ctx.fillStyle = selChip ? '#2e5d34' : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      const v = l.voices[i];
+      const lbl = 'V' + (i + 1) + ' · ' + (Math.round((+v.st || 0) * 100) / 100) + ' st';
+      ctx.fillStyle = selChip ? '#fff' : '#2e5d34';
+      ctx.font = '700 10px sans-serif';
+      ctx.fillText(lbl, rc.x + rc.w / 2 - (selChip ? 6 : 0), rc.y + 17);
+      if (selChip) {
+        ctx.fillStyle = '#c0392b';
+        ctx.beginPath();
+        ctx.arc(rc.x + rc.w - 12, LIFE_ROW_CY, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '800 9px sans-serif';
+        ctx.fillText('✕', rc.x + rc.w - 12, LIFE_ROW_CY + 3);
+      }
+    }
+    if (nV < MAX_LAYER_VOICES) {
+      const rc = rects[nV];
+      drawRoundRect(rc.x, rc.y, rc.w, rc.h, 8);
+      ctx.fillStyle = '#eef5ea';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#2e5d34';
+      ctx.font = '800 11px sans-serif';
+      ctx.fillText('+', rc.x + rc.w / 2, rc.y + 17);
+    }
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#6b8e5a';
+    ctx.font = '700 10px sans-serif';
+    ctx.fillText(nV ? 'Pick a voice to edit (✕ deletes it)' : 'Add a duplicate voice for Osc ' + (selectedLayerIdx + 1), rects[0].x, rects[0].y + 38);
+  }
+
+  // Note-lifetime slider (note + pitch tabs; dedicated row below the controls
   // row, above the HOLD/CUT/REL marker lane).
-  if (creatorSubmode !== 'harm') {
+  if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
     const L = lifeSlider(p);
     const totalS = noteLifetimeMs() / 1000;
     const f = clamp01((totalS - L.minSec) / (L.maxSec - L.minSec));
@@ -1330,8 +1556,8 @@ function drawCreator(now) {
     ctx.fillText(totalS.toFixed(1) + 's', L.x2, L.cy + 4);
   }
 
-  // ---- Marker grab tabs (Volume envelope tab only) ----
-  if (creatorSubmode !== 'harm') {
+  // ---- Marker grab tabs (Volume envelope / Pitch tabs only) ----
+  if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
     for (const tab of markerTabs(p)) {
       // Connector from the tab down to its dashed line so the pairing is obvious.
       ctx.strokeStyle = tab.color;
@@ -1403,6 +1629,10 @@ function drawCreator(now) {
     ctx.fillText('−' + r + ' st', p.left + 2, p.bottom - 4);
     ctx.textAlign = 'right';
     ctx.fillText('note life →', p.right, p.bottom - 6);
+  } else if (creatorSubmode === 'voices') {
+    // No axis labels; the sliders carry their own labels/readouts below.
+    ctx.textAlign = 'right';
+    ctx.fillText('Osc ' + (selectedLayerIdx + 1) + ' · voice ' + (creatorVoiceSel + 1) + ' of ' + Math.max(1, layerVoices(selectedVoicesLayer() || {}).length), p.right, p.bottom - 6);
   } else {
     ctx.fillText('0%', p.left + 2, p.bottom - 6);
     ctx.textAlign = 'right';
@@ -1412,7 +1642,7 @@ function drawCreator(now) {
   }
 
   // ---- Markers (time-based sub-modes only) ----
-  if (creatorSubmode !== 'harm') {
+  if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
     const markers = markerList();
     for (const m of markers) {
       const x = tToX(m.t, p);
@@ -1545,6 +1775,66 @@ function drawCreator(now) {
     ctx.fillText('−  ±' + rr + ' st  +', rp.x + rp.w / 2, rp.y + rp.h / 2 + 4);
   }
 
+  // ---- Voices sliders (voices sub-mode) ----
+  if (creatorSubmode === 'voices') {
+    const v = selectedVoice();
+    const rows = voiceSliderRows(p);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i], d = r.def;
+      // Label above-left, current value above-right.
+      ctx.fillStyle = '#6b8e5a';
+      ctx.font = '700 10px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(d.label, r.x1 - r.btnW - 8, r.cy - 14);
+      ctx.textAlign = 'right';
+      ctx.fillText(v ? d.fmt(+v[d.key] || 0) : '—', r.x2 + r.btnW + 8, r.cy - 14);
+      // −/+ nudge buttons.
+      ctx.font = '700 13px sans-serif';
+      ctx.textAlign = 'center';
+      for (const side of ['-', '+']) {
+        const bx = side === '-' ? r.x1 - r.btnW - 8 : r.x2 + 8;
+        drawRoundRect(bx, r.cy - r.btnW / 2, r.btnW, r.btnW, 6);
+        ctx.fillStyle = '#eef5ea';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#2e5d34';
+        ctx.fillText(side === '-' ? '−' : '+', bx + r.btnW / 2, r.cy + 5);
+      }
+      // Track.
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(46,93,52,0.22)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(r.x1, r.cy); ctx.lineTo(r.x2, r.cy);
+      ctx.stroke();
+      // Bipolar center marker for semitones/cents; volume starts at zero.
+      const midX = r.x1 + (r.x2 - r.x1) * ((0 - d.min) / (d.max - d.min));
+      ctx.strokeStyle = 'rgba(46,93,52,0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(midX, r.cy - 9); ctx.lineTo(midX, r.cy + 9);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      // Fill + thumb for the current value.
+      const cur = v ? Math.max(d.min, Math.min(d.max, +v[d.key] || 0)) : d.min;
+      const tx = r.x1 + (r.x2 - r.x1) * ((cur - d.min) / (d.max - d.min));
+      ctx.strokeStyle = '#2e5d34';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(r.x1, r.cy); ctx.lineTo(tx, r.cy);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(tx, r.cy, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#2e5d34';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
   // ---- Spectrum (harm sub-mode) ----
   if (creatorSubmode === 'harm') {
     const l = selectedLayer();
@@ -1589,45 +1879,49 @@ function drawCreator(now) {
     }
   }
 
-  // ---- Draw-mode toolbar (top-right of the plot, both sub-modes) ----
-  const tb = drawToolbar(p);
-  const accent = OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
-  ctx.textBaseline = 'middle';
-  ctx.font = '700 10px sans-serif';
-  ctx.textAlign = 'center';
-  drawRoundRect(tb.dens.x, tb.dens.y, tb.dens.w, tb.dens.h, 8);
-  ctx.fillStyle = creatorDrawMode ? 'rgba(255,255,255,0.92)' : '#fff';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(46,93,52,0.4)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.fillStyle = '#2e5d34';
-  ctx.fillText(drawPointCount() + ' pts ▾', tb.dens.x + tb.dens.w / 2, tb.dens.y + tb.dens.h / 2 + 1);
-  drawRoundRect(tb.draw.x, tb.draw.y, tb.draw.w, tb.draw.h, 8);
-  ctx.fillStyle = creatorDrawMode ? accent : '#fff';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(46,93,52,0.4)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.fillStyle = creatorDrawMode ? '#fff' : '#2e5d34';
-  ctx.fillText(creatorDrawMode ? 'ON' : 'Draw', tb.draw.x + tb.draw.w / 2, tb.draw.y + tb.draw.h / 2 + 1);
-  ctx.textBaseline = 'alphabetic';
+  // ---- Draw-mode toolbar (top-right of the plot; not in the Voices tab) ----
+  if (creatorSubmode !== 'voices') {
+    const tb = drawToolbar(p);
+    const accent = OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 10px sans-serif';
+    ctx.textAlign = 'center';
+    drawRoundRect(tb.dens.x, tb.dens.y, tb.dens.w, tb.dens.h, 8);
+    ctx.fillStyle = creatorDrawMode ? 'rgba(255,255,255,0.92)' : '#fff';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#2e5d34';
+    ctx.fillText(drawPointCount() + ' pts ▾', tb.dens.x + tb.dens.w / 2, tb.dens.y + tb.dens.h / 2 + 1);
+    drawRoundRect(tb.draw.x, tb.draw.y, tb.draw.w, tb.draw.h, 8);
+    ctx.fillStyle = creatorDrawMode ? accent : '#fff';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = creatorDrawMode ? '#fff' : '#2e5d34';
+    ctx.fillText(creatorDrawMode ? 'ON' : 'Draw', tb.draw.x + tb.draw.w / 2, tb.draw.y + tb.draw.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
 
-  // Position the native points <select> over the pill (creator-active only).
-  const ptsSel = document.getElementById('creatorPoints');
-  if (ptsSel) {
-    ptsSel.style.left = tb.dens.x + 'px';
-    ptsSel.style.top = tb.dens.y + 'px';
-    ptsSel.style.width = tb.dens.w + 'px';
-    ptsSel.style.height = tb.dens.h + 'px';
-    ptsSel.style.display = creatorActive ? 'block' : 'none';
+    // Position the native points <select> over the pill (creator-active only).
+    const ptsSel = document.getElementById('creatorPoints');
+    if (ptsSel) {
+      ptsSel.style.left = tb.dens.x + 'px';
+      ptsSel.style.top = tb.dens.y + 'px';
+      ptsSel.style.width = tb.dens.w + 'px';
+      ptsSel.style.height = tb.dens.h + 'px';
+      ptsSel.style.display = creatorActive ? 'block' : 'none';
+    }
   }
 
   // ---- Hint ----
   ctx.fillStyle = '#6b8e5a';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  if (creatorDrawMode) {
+  if (creatorSubmode === 'voices') {
+    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · ✕ deletes a voice · Reset clears them all', W / 2, H - 8);
+  } else if (creatorDrawMode) {
     ctx.fillText(creatorSubmode === 'note'
       ? 'Drawing the ' + (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots'
       : creatorSubmode === 'pitch'
@@ -1636,9 +1930,9 @@ function drawCreator(now) {
   } else {
     ctx.fillText(creatorSubmode === 'note'
       ? 'Pick Vol or an oscillator above · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
-      : creatorSubmode === 'pitch'
-        ? 'Master bends every oscillator while it exists (✕ clears it, revealing per-layer envelopes) · drag dots · tap to add · set ±range top-left'
-        : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
+: creatorSubmode === 'pitch'
+          ? 'Master bends every oscillator while it exists (✕ clears it, revealing per-layer envelopes) · drag dots · tap to add · set ±range top-left'
+          : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
   }
 }
 

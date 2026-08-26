@@ -229,6 +229,18 @@ function loadSavedSettings() {
       points.sort((a, b) => a.t - b.t);
       return { range, points };
     }
+    // Duplicate voices of a layer (coupled unison offsets): null = none.
+    // Each voice clamps st/cents/vol to the editor's ranges; extras are dropped.
+    function voicesFromSaved(vs) {
+      if (!Array.isArray(vs) || !vs.length) return null;
+      const out = vs.slice(0, MAX_LAYER_VOICES).map((v, k) => ({
+        id: (v && v.id) || 'voice-' + k + '-' + Date.now().toString(36),
+        st: Math.max(-24, Math.min(24, +((v && v.st) != null ? v.st : 0) || 0)),
+        ct: Math.max(-100, Math.min(100, +((v && v.ct) != null ? v.ct : 0) || 0)),
+        vol: Math.max(0, Math.min(2, +((v && v.vol) != null ? v.vol : 1) || 0)),
+      }));
+      return out.length ? out : null;
+    }
     function layerFromSaved(l, i) {
       const amplitudes = new Array(HARMONIC_COUNT).fill(0);
       if (l && Array.isArray(l.amplitudes) && l.amplitudes.length) {
@@ -252,6 +264,7 @@ function loadSavedSettings() {
         presetId: (l && l.presetId) || null,
         specPoints,
         pitchEnv: pitchEnvFromSaved(l && l.pitchEnv),
+        voices: voicesFromSaved(l && l.voices),
       };
     }
     const stack = clone(DEFAULT_OSC_STACK);

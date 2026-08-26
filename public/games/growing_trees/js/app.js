@@ -285,10 +285,22 @@ var CHIME_SETTINGS = clone(DEFAULT_CHIME);
    total loudness stays constant as layers are added. */
 const HARMONIC_COUNT = 32;
 const clampSign = v => Math.max(-1, Math.min(1, v));
+
+/* ---------- Layer voices (coupled duplicates) ----------
+   A layer can carry up to MAX_LAYER_VOICES duplicate voices that play its same
+   waveform in parallel. Each voice only carries offsets: st (semitones),
+   ct (cents), vol (relative gain multiplier). Voices are fully coupled to
+   their layer: they share the mix curve, the pitch envelope, and every other
+   layer property — only pitch/volume differ per voice, which is what produces
+   chorus/unison thickening. */
+const MAX_LAYER_VOICES = 5;
+function defaultVoice(id) {
+  return { id: id || 'voice-' + Date.now().toString(36), st: 0, ct: 7, vol: 1 };
+}
 function defaultLayer(id) {
   const amplitudes = new Array(HARMONIC_COUNT).fill(0);
   amplitudes[0] = 1;
-  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null };
+  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null, voices: null };
 }
 // A soothing chime as the out-of-the-box sound: a soft bell body that carries
 // the strike, plus a bright overtone layer that blooms into the tail. Layer
@@ -300,7 +312,7 @@ function ampFromSpec(spec) {
   return a;
 }
 function chimeLayer(id, spec, curve, level) {
-  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null, pitchEnv: null };
+  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null, pitchEnv: null, voices: null };
 }
 const DEFAULT_OSC_STACK = {
   layers: [
@@ -381,6 +393,27 @@ function activePitchEnv(layerIdx) {
 // A base frequency shifted by `st` semitones.
 function freqShifted(baseFreq, st) {
   return Math.max(20, baseFreq * Math.pow(2, st / 12));
+}
+
+/* ---- Layer voices (coupled duplicates) ---- */
+// A layer's voices: the validated list, or [] when none.
+function layerVoices(layer) {
+  return (layer && Array.isArray(layer.voices)) ? layer.voices : [];
+}
+// Total static pitch offset of a voice in semitones (cents fold in at /100).
+function voiceStOffset(v) {
+  return (+v.st || 0) + (+v.ct || 0) / 100;
+}
+// Normalized per-oscillator gains for a layer's [fundamental, ...voices]:
+// each level divided by the sum so duplicating thickens via beating/chorus
+// without changing loudness. An all-silent stack stays silent (no divide blowup).
+function normalizedVoiceLevels(layer) {
+  const vs = layerVoices(layer);
+  const raw = [1];
+  for (const v of vs) raw.push(Math.max(0, Math.min(2, +v.vol || 0)));
+  const sum = raw.reduce((s, v) => s + v, 0);
+  if (sum <= 0.001) return raw.map(() => 0);
+  return raw.map(v => v / sum);
 }
 
 // Value of a drawn spectrum curve at x (0..1 across the 32 harmonics): signed

@@ -205,34 +205,52 @@ function layerWave(ctx, layer) {
   return w;
 }
 
-// Build the oscillator layers for a note (osc → mixGain, all into envGain).
-// mixParams[i] is the AudioParam carrying layer i's time-varying mix.
+// Build the oscillator layers for a note (osc → voiceGain → envGain). Each
+// layer spawns one oscillator per voice (fundamental + duplicates); all of a
+// layer's voices share its normalized mix gain, scaled by the voice's own
+// normalized level. Parallel arrays describe each oscillator:
+//   oscLayer[i]  — index of the owning layer
+//   oscVoice[i]  — the voice spec (null = fundamental)
+//   oscOffset[i] — static pitch offset in semitones (voice st + cents)
+//   oscLvl[i]    — normalized gain multiplier for this voice
 function buildLayerStack(ctx, envGain) {
   const oscs = [], mixGains = [], mixParams = [];
+  const oscLayer = [], oscVoice = [], oscOffset = [], oscLvl = [];
   const g0 = layerGainsAt(0);
   for (let i = 0; i < OSC_STACK.layers.length; i++) {
     const layer = OSC_STACK.layers[i];
-    const osc = ctx.createOscillator();
-    osc.setPeriodicWave(layerWave(ctx, layer));
-    osc.frequency.value = 440;
-    const g = ctx.createGain();
-    g.gain.value = g0[i];
-    osc.connect(g);
-    g.connect(envGain);
-    oscs.push(osc);
-    mixGains.push(g);
-    mixParams.push(g.gain);
+    const wave = layerWave(ctx, layer);
+    const lvls = normalizedVoiceLevels(layer);
+    const group = [null].concat(layerVoices(layer));
+    for (let j = 0; j < group.length; j++) {
+      const v = group[j];
+      const osc = ctx.createOscillator();
+      osc.setPeriodicWave(wave);
+      osc.frequency.value = 440;
+      const g = ctx.createGain();
+      g.gain.value = g0[i] * lvls[j];
+      osc.connect(g);
+      g.connect(envGain);
+      oscs.push(osc);
+      mixGains.push(g);
+      mixParams.push(g.gain);
+      oscLayer.push(i);
+      oscVoice.push(v);
+      oscOffset.push(v ? voiceStOffset(v) : 0);
+      oscLvl.push(lvls[j]);
+    }
   }
-  return { oscs, mixGains, mixParams };
+  return { oscs, mixGains, mixParams, oscLayer, oscVoice, oscOffset, oscLvl };
 }
 
 // Start every oscillator at t0 (and stop at stopAt, when provided — live notes
-// schedule their own stop at release). Each layer plays the same pitch `freq`.
+// schedule their own stop at release). Each oscillator plays the note's pitch
+// plus any static offset its voice carries.
 function startLayerStack(stack, t0, freq, stopAt) {
-  for (const osc of stack.oscs) {
-    osc.frequency.value = freq;
-    osc.start(t0);
-    if (stopAt != null) osc.stop(stopAt);
+  for (let i = 0; i < stack.oscs.length; i++) {
+    stack.oscs[i].frequency.value = freqShifted(freq, stack.oscOffset[i]);
+    stack.oscs[i].start(t0);
+    if (stopAt != null) stack.oscs[i].stop(stopAt);
   }
 }
 
@@ -265,8 +283,9 @@ function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
   }
   for (let i = 0; i < stack.mixParams.length; i++) {
     const p = stack.mixParams[i];
+    const layerIdx = stack.oscLayer[i], lvl = stack.oscLvl[i];
     const curve = new Float32Array(N);
-    for (let k = 0; k < N; k++) curve[k] = gains[k][i];
+    for (let k = 0; k < N; k++) curve[k] = gains[k][layerIdx] * lvl;
     p.setValueAtTime(curve[0], t0);
     p.setValueCurveAtTime(curve, t0 + 0.002, dur - 0.002);
   }
@@ -280,7 +299,7 @@ function updateLiveMixTargets(ds, at, tc) {
   const relMs = releaseMs();
   const gains = layerGainsAt(mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs()));
   for (let i = 0; i < ds.mixParams.length; i++) {
-    ds.mixParams[i].setTargetAtTime(gains[i], at, tc);
+    ds.mixParams[i].setTargetAtTime(gains[ds.oscLayer[i]] * ds.oscLvl[i], at, tc);
   }
 }
 
@@ -294,10 +313,11 @@ function rampLayerMixToEnd(ds, startT, ms) {
   const N = 32;
   for (let i = 0; i < (ds.mixParams || []).length; i++) {
     const p = ds.mixParams[i];
+    const layerIdx = ds.oscLayer[i], lvl = ds.oscLvl[i];
     const curve = new Float32Array(N);
     for (let k = 0; k < N; k++) {
       const relElapsed = relMs > 0 ? ms * k / (N - 1) : ms;
-      curve[k] = layerGainsAt(mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody))[i];
+      curve[k] = layerGainsAt(mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody))[layerIdx] * lvl;
     }
     p.cancelScheduledValues(startT);
     p.setValueAtTime(Math.max(1e-4, p.value), startT);
@@ -319,15 +339,16 @@ function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
   const split = bodyMs != null && relMs != null && (bodyMs + relMs) > 0;
   const dBody = designBodyMs();
   for (let i = 0; i < stack.oscs.length; i++) {
-    const env = activePitchEnv(i);
+    const env = activePitchEnv(stack.oscLayer[i]);
     if (!env) continue;
     const p = stack.oscs[i].frequency;
     p.cancelScheduledValues(t0);
+    const off = stack.oscOffset[i];
     const curve = new Float32Array(N);
     for (let k = 0; k < N; k++) {
       const audioMs = (k / (N - 1)) * dur * 1000;
       const prog = split ? mixProgForTimes(audioMs, bodyMs, relMs, dBody) : k / (N - 1);
-      curve[k] = freqShifted(baseFreq, pitchStAt(env, prog));
+      curve[k] = freqShifted(baseFreq, pitchStAt(env, prog) + off);
     }
     p.setValueAtTime(curve[0], t0);
     p.setValueCurveAtTime(curve, t0 + 0.002, dur - 0.002);
@@ -342,9 +363,9 @@ function updateLivePitchTargets(ds, at, tc) {
   const relMs = releaseMs();
   const prog = mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs());
   for (let i = 0; i < ds.oscs.length; i++) {
-    const env = activePitchEnv(i);
+    const env = activePitchEnv(ds.oscLayer[i]);
     if (!env) continue;
-    ds.oscs[i].frequency.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog)), at, tc);
+    ds.oscs[i].frequency.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog) + ds.oscOffset[i]), at, tc);
   }
 }
 
@@ -358,13 +379,14 @@ function rampPitchToEnd(ds, startT, ms) {
   const dBody = designBodyMs();
   const N = 32;
   for (let i = 0; i < ds.oscs.length; i++) {
-    const env = activePitchEnv(i);
+    const env = activePitchEnv(ds.oscLayer[i]);
     if (!env) continue;
     const p = ds.oscs[i].frequency;
+    const off = ds.oscOffset[i];
     const curve = new Float32Array(N);
     for (let k = 0; k < N; k++) {
       const relElapsed = relMs > 0 ? ms * k / (N - 1) : ms;
-      curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody)));
+      curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody)) + off);
     }
     p.cancelScheduledValues(startT);
     p.setValueAtTime(p.value, startT);
@@ -703,6 +725,9 @@ function initLivePathAudio(ds) {
   ds.oscs = stack.oscs;
   ds.mixGains = stack.mixGains;
   ds.mixParams = stack.mixParams;
+  ds.oscLayer = stack.oscLayer;
+  ds.oscLvl = stack.oscLvl;
+  ds.oscOffset = stack.oscOffset;
   ds.osc = stack.oscs[0];
   ds.gainLevel = baseVol0 * relValueBody(ENVELOPE, 0, true);
   ds.lastSched = ctx0;
