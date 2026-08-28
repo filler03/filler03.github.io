@@ -96,7 +96,7 @@ creatorBtn.addEventListener('click', () => {
 
 /* ---- Plot geometry ---- */
 function creatorPlot() {
-  const top = 180, bottom = H - 26, left = 20, right = W - 14;
+  const top = 180, bottom = H - 38, left = 20, right = W - 14;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
 }
 const tToX = (t, p) => p.left + clamp01(t) * p.pw;
@@ -1687,8 +1687,6 @@ function drawCreator(now) {
     const y0 = ampToY(0, p);
     ctx.fillText('0', p.left + 2, y0 + 3);
     ctx.fillText('−100%', p.left + 2, p.bottom - 4);
-    ctx.textAlign = 'right';
-    ctx.fillText('H1 → H32', p.right, p.bottom - 6);
   } else if (creatorSubmode === 'pitch') {
     const env = selectedPitchEnvOrNull();
     const r = env ? Math.max(1, env.range || 1) : 1;
@@ -1917,17 +1915,19 @@ function drawCreator(now) {
     ctx.beginPath();
     ctx.moveTo(p.left, y0); ctx.lineTo(p.right, y0);
     ctx.stroke();
-    ctx.fillStyle = '#9db89c';
-    ctx.font = '700 9px sans-serif';
+    ctx.fillStyle = '#000';
+    ctx.font = '700 8px sans-serif';
     ctx.textAlign = 'center';
-    for (let i = 4; i < 32; i += 4) {
-      const x = tToX(i / 31, p);
-      ctx.strokeStyle = 'rgba(46,93,52,0.1)';
-      ctx.beginPath();
-      ctx.moveTo(x, p.top); ctx.lineTo(x, p.bottom);
-      ctx.stroke();
-      ctx.fillStyle = '#9db89c';
-      ctx.fillText('H' + (i + 1), x, p.bottom + 9);
+    for (let i = 0; i < HARMONIC_COUNT; i++) {
+      const x = tToX(i / (HARMONIC_COUNT - 1), p);
+      if (i >= 4 && i % 4 === 0) {
+        ctx.strokeStyle = 'rgba(46,93,52,0.1)';
+        ctx.beginPath();
+        ctx.moveTo(x, p.top); ctx.lineTo(x, p.bottom);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#000';
+      ctx.fillText(String(i + 1), x, p.bottom + 10);
     }
     // Curve + dots (extend the clamped ends out to the plot edges)
     ctx.strokeStyle = color;
