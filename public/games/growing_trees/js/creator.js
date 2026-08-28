@@ -34,6 +34,10 @@ var creatorDrawPoints = 8;   // 4..HARMONIC_COUNT (clamped)
 // the current design automatically. When off, only the ▶ Preview button (and
 // the settings panel's Play test) make a sound. Persisted; default off.
 var creatorAutoPreview = false;
+// Voice slider snapping (Voices tab): when on, the Semitones slider snaps to
+// whole semitones and the ± nudge buttons step by exactly 1 st. Cents keep
+// providing fine sub-semitone tuning. Persisted; default off.
+var creatorVoiceSnap = false;
 // Hard cap on envelope components created by drawing (the other editors cap via
 // their own insert helpers, raised to HARMONIC_COUNT for drawing).
 const ENV_DRAW_MAX = 48;
@@ -554,24 +558,37 @@ const VOICE_PARAM_DEFS = [
   { key: 'ct',  label: 'Cents',     min: -100, max: 100, step: 1,  fmt: v => Math.round(v) + ' ¢' },
   { key: 'vol', label: 'Volume',    min: 0,  max: 2,  step: 0.01, fmt: v => Math.round(v * 100) + '%' },
 ];
+// Snap-to-semitone toggle pill, floating in the strip above the plot (Voices
+// tab only) — the band where the note-life slider / marker tabs live in the
+// other tabs, and which is free in Voices mode. Keeps the sliders in the plot
+// at their usual height.
+function voiceSnapPill(p) {
+  const y = MARKER_LANE_TOP + 22, w = 70, h = 26;
+  return { x: p.left + 4, y, w, h };
+}
+
 function voiceSliderRows(p) {
-  // Packed toward the top of the plot so the lowest slider stays well above the
-  // screen's bottom edge (where iOS home-gesture swipes trigger). Spacing
-  // compresses on short windows but the last row always clears the bottom by
-  // ~90px of plot height.
+  // One row per parameter, everything aligned on the track's line: the label
+  // right-aligned just before the − button, the readout after the + button,
+  // and the track between them. Keeping the label and readout on the line
+  // (instead of a row above) shrinks each row's vertical footprint to the
+  // buttons (±13px), so rows stay comfortably apart even on short landscape
+  // plots instead of smushing together. Spacing grows up to 56px on roomy
+  // screens but never drops below 30px, and the last row always clears the
+  // bottom axis label.
   const n = VOICE_PARAM_DEFS.length;
-  const topPad = 28;
-  const bottomReserve = 90;
-  const avail = p.ph - topPad - bottomReserve;
-  const spacing = Math.min(76, Math.max(42, avail / (n - 1)));
+  const topInset = 18;        // first row's buttons clear the plot top
+  const bottomReserve = 24;   // last row clears the bottom axis label
+  const span = Math.max(0, p.ph - topInset - bottomReserve);
+  const spacing = n > 1 ? Math.min(56, Math.max(30, span / (n - 1))) : 0;
   return VOICE_PARAM_DEFS.map((d, i) => {
-    const cy = p.top + topPad + i * spacing;
+    const cy = p.top + topInset + i * spacing;
     return {
       def: d,
       cy,
       btnW: 26,
-      x1: p.left + 78,
-      x2: p.right - 78,
+      x1: p.left + 130,   // inline label + − button
+      x2: p.right - 96,   // + button + inline readout
     };
   });
 }
@@ -579,6 +596,7 @@ function voiceParamFromX(row, x) {
   const f = Math.max(0, Math.min(1, (x - row.x1) / (row.x2 - row.x1)));
   let v = row.def.min + f * (row.def.max - row.def.min);
   if (row.def.key === 'ct') v = Math.round(v);
+  else if (row.def.key === 'st' && creatorVoiceSnap) v = Math.round(v);
   else v = Math.round(v * 100) / 100;
   return Math.max(row.def.min, Math.min(row.def.max, v));
 }
@@ -914,6 +932,12 @@ function hitTestCreator(x, y) {
     }
     return { type: 'bar' };
   }
+  // Snap-to-semitone toggle pill (the same strip, Voices tab only).
+  if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode === 'voices') {
+    const sp = voiceSnapPill(p);
+    if (x >= sp.x - 6 && x <= sp.x + sp.w + 6 && y >= sp.y - 4 && y <= sp.y + sp.h + 4) return { type: 'voicesnap' };
+    return { type: 'bar' };
+  }
   if (y >= p.top && y <= p.bottom) {
     // Draw-mode toolbar (top-right of the plot; not in the Voices tab).
     if (creatorSubmode !== 'voices') {
@@ -1033,13 +1057,23 @@ canvas.addEventListener('pointerdown', e => {
     }
     return;
   }
+  if (hit.type === 'voicesnap') {
+    creatorVoiceSnap = !creatorVoiceSnap;
+    saveSettings();
+    return;
+  }
   if (hit.type === 'vparam') {
-    // −/+ nudge buttons: fine steps on the selected voice's parameter.
+    // −/+ nudge buttons: fine steps on the selected voice's parameter. When
+    // snapping is on, the Semitones row moves by whole semitones instead.
     const v = selectedVoice();
     const d = VOICE_PARAM_DEFS[hit.keyIdx];
     if (v && d) {
-      const cur = +v[d.key] || 0;
-      v[d.key] = Math.max(d.min, Math.min(d.max, Math.round(cur / d.step) * d.step + hit.dir * d.step));
+      if (d.key === 'st' && creatorVoiceSnap) {
+        v.st = Math.max(d.min, Math.min(d.max, Math.round(+v.st || 0) + hit.dir));
+      } else {
+        const cur = +v[d.key] || 0;
+        v[d.key] = Math.max(d.min, Math.min(d.max, Math.round(cur / d.step) * d.step + hit.dir * d.step));
+      }
       if (d.key === 'vol') v.vol = Math.round((v.vol || 0) * 100) / 100;
       previewAndSave();
     }
@@ -1583,10 +1617,6 @@ function drawCreator(now) {
       ctx.font = '800 11px sans-serif';
       ctx.fillText('+', rc.x + rc.w / 2, rc.y + 17);
     }
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#6b8e5a';
-    ctx.font = '700 10px sans-serif';
-    ctx.fillText(nV ? 'Pick a voice to edit (✕ deletes it)' : 'Add a duplicate voice for Osc ' + (selectedLayerIdx + 1), rects[0].x, rects[0].y + 38);
   }
 
   // Note-lifetime slider (note + pitch tabs; dedicated row below the controls
@@ -1663,6 +1693,21 @@ function drawCreator(now) {
     }
   }
 
+  // ---- Snap-to-semitone toggle pill (Voices tab only, above the plot) ----
+  if (creatorSubmode === 'voices') {
+    const sp = voiceSnapPill(p);
+    drawRoundRect(sp.x, sp.y, sp.w, sp.h, 8);
+    ctx.fillStyle = creatorVoiceSnap ? '#2e5d34' : '#fff';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = creatorVoiceSnap ? '#fff' : '#2e5d34';
+    ctx.font = '700 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(creatorVoiceSnap ? 'Snap on' : 'Snap', sp.x + sp.w / 2, sp.y + sp.h / 2 + 3);
+  }
+
   // ---- Grid ----
   ctx.strokeStyle = 'rgba(46,93,52,0.14)';
   ctx.lineWidth = 1;
@@ -1698,8 +1743,6 @@ function drawCreator(now) {
     ctx.fillText('note life →', p.right, p.bottom - 6);
   } else if (creatorSubmode === 'voices') {
     // No axis labels; the sliders carry their own labels/readouts below.
-    ctx.textAlign = 'right';
-    ctx.fillText('Osc ' + (selectedLayerIdx + 1) + ' · voice ' + (creatorVoiceSel + 1) + ' of ' + Math.max(1, layerVoices(selectedVoicesLayer() || {}).length), p.right, p.bottom - 6);
   } else {
     ctx.fillText('0%', p.left + 2, p.bottom - 6);
     ctx.textAlign = 'right';
@@ -1848,13 +1891,13 @@ function drawCreator(now) {
     const rows = voiceSliderRows(p);
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i], d = r.def;
-      // Label above-left, current value above-right.
+      // Label before the − button, current value after the + button — both on
+      // the track's line, so a row's footprint is just its buttons.
       ctx.fillStyle = '#6b8e5a';
       ctx.font = '700 10px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(d.label, r.x1 - r.btnW - 8, r.cy - 14);
       ctx.textAlign = 'right';
-      ctx.fillText(v ? d.fmt(+v[d.key] || 0) : '—', r.x2 + r.btnW + 8, r.cy - 14);
+      ctx.fillText(d.label, r.x1 - r.btnW - 12, r.cy + 3);
+      ctx.fillText(v ? d.fmt(+v[d.key] || 0) : '—', p.right - 6, r.cy + 3);
       // −/+ nudge buttons.
       ctx.font = '700 13px sans-serif';
       ctx.textAlign = 'center';
@@ -1883,6 +1926,18 @@ function drawCreator(now) {
       ctx.beginPath();
       ctx.moveTo(midX, r.cy - 9); ctx.lineTo(midX, r.cy + 9);
       ctx.stroke();
+      // Snap grid: tick marks at each whole semitone along the track (visible
+      // only while snapping is on, so the snap positions are obvious).
+      if (d.key === 'st' && creatorVoiceSnap) {
+        ctx.strokeStyle = 'rgba(46,93,52,0.30)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let s = Math.ceil(d.min); s <= Math.floor(d.max); s++) {
+          const gx = r.x1 + (r.x2 - r.x1) * ((s - d.min) / (d.max - d.min));
+          ctx.moveTo(gx, r.cy - 6); ctx.lineTo(gx, r.cy + 6);
+        }
+        ctx.stroke();
+      }
       ctx.lineCap = 'butt';
       // Fill + thumb for the current value.
       const cur = v ? Math.max(d.min, Math.min(d.max, +v[d.key] || 0)) : d.min;
@@ -1997,7 +2052,7 @@ function drawCreator(now) {
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
   if (creatorSubmode === 'voices') {
-    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · ✕ deletes a voice · Reset clears them all', W / 2, H - 8);
+    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · Snap makes Semitones land on whole tones · ✕ deletes a voice · Reset clears them all', W / 2, H - 8);
   } else if (creatorDrawMode) {
     ctx.fillText(creatorEraseMode
       ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to zero it · tap Draw to edit dots'

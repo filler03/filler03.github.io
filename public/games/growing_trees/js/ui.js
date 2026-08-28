@@ -73,7 +73,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 
 function saveSettings() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview, voiceSnap: creatorVoiceSnap }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -193,6 +193,7 @@ function loadSavedSettings() {
     if (d.previewPitch != null) PREVIEW_PITCH = Math.max(0, Math.min(64, +d.previewPitch || 0));
     if (d.drawPoints != null) creatorDrawPoints = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+d.drawPoints || 8)));
     if (d.autoPreview != null) creatorAutoPreview = !!d.autoPreview;
+    if (d.voiceSnap != null) creatorVoiceSnap = !!d.voiceSnap;
     // v9+: oscillator stack. New saves store `oscStack`; older saves stored a
     // single `harmonics` amplitude set, which becomes one custom layer.
     function curveFromSaved(l) {
@@ -298,6 +299,7 @@ function resetToDefaults() {
   PREVIEW_PITCH = 0;
   creatorDrawPoints = 8;
   creatorAutoPreview = false;
+  creatorVoiceSnap = false;
   selectedLayerIdx = 0;
   // Clear legacy copies too, or the next load would migrate them straight back.
   try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
