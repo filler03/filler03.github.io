@@ -493,8 +493,20 @@ const SEG_PARAM_DEFS = {
   freq:   { label: 'Freq',  min: 0.25, max: 16, step: 0.25, fmt: v => (Math.round(v * 100) / 100) + '×' },
   depth:  { label: 'Depth', min: 0, max: 1, step: 0.05,  fmt: v => Math.round(v * 100) + '%' },
 };
-// How finely a non-line segment is sampled when drawn on screen.
+// How finely a non-line segment is sampled when drawn on screen. The base
+// count scales with the segment's shape so high freq wobbles and many steps
+// render smooth instead of aliased: ~16 samples per wobble cycle, ~2 per
+// stair step, all clamped between the base count and a per-frame cap.
 const SEG_DRAW_SAMPLES = 24;
+const SEG_SAMPLES_PER_CYCLE = 16;
+const SEG_SAMPLES_PER_STEP = 2;
+const SEG_DRAW_SAMPLES_MAX = 256;
+function segDrawSamples(seg) {
+  const n = seg.type === 'stairs'
+    ? SEG_SAMPLES_PER_STEP * seg.stairs
+    : Math.ceil(SEG_SAMPLES_PER_CYCLE * seg.freq);
+  return Math.max(SEG_DRAW_SAMPLES, Math.min(SEG_DRAW_SAMPLES_MAX, n));
+}
 
 // Selection state: from/to point indexes (component boundaries for the volume
 // envelope, breakpoint indexes for mix/pitch curves) and which end the next
@@ -718,8 +730,9 @@ function strokeSegPath(pts, scale, yOf) {
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
     if (a.el && segOf(a.el).type !== 'line') {
-      for (let k = 0; k <= SEG_DRAW_SAMPLES; k++) {
-        const f = k / SEG_DRAW_SAMPLES;
+      const n = segDrawSamples(segOf(a.el));
+      for (let k = 0; k <= n; k++) {
+        const f = k / n;
         const x = a.x + (b.x - a.x) * f;
         const y = yOf(segValueAt(a.el, a.v, b.v, f, scale));
         if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
