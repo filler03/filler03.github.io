@@ -295,12 +295,12 @@ const clampSign = v => Math.max(-1, Math.min(1, v));
    chorus/unison thickening. */
 const MAX_LAYER_VOICES = 5;
 function defaultVoice(id) {
-  return { id: id || 'voice-' + Date.now().toString(36), st: 0, ct: 7, vol: 1 };
+  return { id: id || 'voice-' + Date.now().toString(36), st: 0, ct: 7, vol: 1, muted: false };
 }
 function defaultLayer(id) {
   const amplitudes = new Array(HARMONIC_COUNT).fill(0);
   amplitudes[0] = 1;
-  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null, voices: null };
+  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null, voices: null, muted: false };
 }
 // A soothing chime as the out-of-the-box sound: a soft bell body that carries
 // the strike, plus a bright overtone layer that blooms into the tail. Layer
@@ -312,7 +312,7 @@ function ampFromSpec(spec) {
   return a;
 }
 function chimeLayer(id, spec, curve, level) {
-  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null, pitchEnv: null, voices: null };
+  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null, pitchEnv: null, voices: null, muted: false };
 }
 const DEFAULT_OSC_STACK = {
   layers: [
@@ -327,7 +327,10 @@ const DEFAULT_OSC_STACK = {
 var OSC_STACK = clone(DEFAULT_OSC_STACK);
 
 // A layer's raw mix weight at note progress `prog` (0..1): level × its curve.
+// A muted layer contributes nothing, so the shared mix normalization excludes it
+// and the other layers keep the loudness constant — muting "subtracts" the layer.
 function layerMixAt(layer, prog) {
+  if (layer && layer.muted) return 0;
   return (layer.level || 0) * curveValue(layer, prog);
 }
 
@@ -400,17 +403,27 @@ function freqShifted(baseFreq, st) {
 function layerVoices(layer) {
   return (layer && Array.isArray(layer.voices)) ? layer.voices : [];
 }
+// The oscillator group a layer plays: the fundamental (null) plus every
+// unmuted duplicate voice. Muted voices are dropped entirely, so the parallel
+// arrays in the audio engine and the level normalization below stay aligned.
+function layerPlayableVoices(layer) {
+  const out = [null];
+  for (const v of layerVoices(layer)) if (!v || !v.muted) out.push(v);
+  return out;
+}
 // Total static pitch offset of a voice in semitones (cents fold in at /100).
 function voiceStOffset(v) {
   return (+v.st || 0) + (+v.ct || 0) / 100;
 }
 // Normalized per-oscillator gains for a layer's [fundamental, ...voices]:
 // each level divided by the sum so duplicating thickens via beating/chorus
-// without changing loudness. An all-silent stack stays silent (no divide blowup).
+// without changing loudness. Muted voices drop out of the sum, so unmuting
+// never needs re-tuning and muting thickens the rest (like the layer mute).
+// An all-silent stack stays silent (no divide blowup).
 function normalizedVoiceLevels(layer) {
-  const vs = layerVoices(layer);
+  const group = layerPlayableVoices(layer);
   const raw = [1];
-  for (const v of vs) raw.push(Math.max(0, Math.min(2, +v.vol || 0)));
+  for (let j = 1; j < group.length; j++) raw.push(Math.max(0, Math.min(2, +group[j].vol || 0)));
   const sum = raw.reduce((s, v) => s + v, 0);
   if (sum <= 0.001) return raw.map(() => 0);
   return raw.map(v => v / sum);

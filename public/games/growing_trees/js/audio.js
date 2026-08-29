@@ -219,9 +219,10 @@ function buildLayerStack(ctx, envGain) {
   const g0 = layerGainsAt(0);
   for (let i = 0; i < OSC_STACK.layers.length; i++) {
     const layer = OSC_STACK.layers[i];
+    if (layer && layer.muted) continue;   // muted layer: no oscillators at all
     const wave = layerWave(ctx, layer);
     const lvls = normalizedVoiceLevels(layer);
-    const group = [null].concat(layerVoices(layer));
+    const group = layerPlayableVoices(layer);   // fundamental + unmuted voices
     for (let j = 0; j < group.length; j++) {
       const v = group[j];
       const osc = ctx.createOscillator();

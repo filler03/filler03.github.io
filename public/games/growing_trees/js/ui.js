@@ -239,6 +239,7 @@ function loadSavedSettings() {
         st: Math.max(-24, Math.min(24, +((v && v.st) != null ? v.st : 0) || 0)),
         ct: Math.max(-100, Math.min(100, +((v && v.ct) != null ? v.ct : 0) || 0)),
         vol: Math.max(0, Math.min(2, +((v && v.vol) != null ? v.vol : 1) || 0)),
+        muted: !!(v && v.muted),
       }));
       return out.length ? out : null;
     }
@@ -266,6 +267,7 @@ function loadSavedSettings() {
         specPoints,
         pitchEnv: pitchEnvFromSaved(l && l.pitchEnv),
         voices: voicesFromSaved(l && l.voices),
+        muted: !!(l && l.muted),
       };
     }
     const stack = clone(DEFAULT_OSC_STACK);

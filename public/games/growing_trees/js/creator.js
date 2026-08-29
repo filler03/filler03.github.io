@@ -545,10 +545,10 @@ function voiceChipRects(p) {
   const rects = [];
   const vs = selectedVoicesLayer() ? layerVoices(selectedVoicesLayer()) : [];
   for (let i = 0; i < vs.length; i++) {
-    rects.push({ x: p.left + i * 84, y: LIFE_ROW_CY - 13, w: 76, h: 26 });
+    rects.push({ x: p.left + i * 88, y: LIFE_ROW_CY - 13, w: 84, h: 26 });
   }
   if (vs.length < MAX_LAYER_VOICES) {
-    rects.push({ x: p.left + vs.length * 84 + 6, y: LIFE_ROW_CY - 13, w: 40, h: 26 });
+    rects.push({ x: p.left + vs.length * 88 + 6, y: LIFE_ROW_CY - 13, w: 40, h: 26 });
   }
   return rects;
 }
@@ -879,6 +879,8 @@ function hitTestCreator(x, y) {
     }
     for (let i = 0; i < OSC_STACK.layers.length; i++) {
       const cx = p.left + sw * 76 + i * 76;
+      // The 🔊/🔇 button (the swatch's icon) toggles the layer's mute.
+      if (x >= cx && x <= cx + 22 && y >= 67 && y <= 89) return { type: 'layermute', layerIdx: i };
       if (x >= cx && x <= cx + 70) return { type: 'layer', layerIdx: i };
     }
     // Master swatch (pinned first in the Pitch tab), with its ✕ clear badge.
@@ -906,6 +908,8 @@ function hitTestCreator(x, y) {
           if (i >= nV) return { type: 'voiceaddchip' };
           // ✕ badge on the selected chip deletes that voice.
           if (i === creatorVoiceSel && Math.hypot(x - (rc.x + rc.w - 12), y - LIFE_ROW_CY) < 12) return { type: 'voicedelchip', idx: i };
+          // M badge (left) toggles that voice's mute.
+          if (Math.hypot(x - (rc.x + 12), y - LIFE_ROW_CY) < 16) return { type: 'voicemute', idx: i };
           return { type: 'voicechip', idx: i };
         }
       }
@@ -1052,6 +1056,24 @@ canvas.addEventListener('pointerdown', e => {
       l.voices.splice(hit.idx, 1);
       if (!l.voices.length) l.voices = null;   // back to a plain single osc
       clampVoiceSel();
+      creatorPtr = null;
+      previewAndSave();
+    }
+    return;
+  }
+  if (hit.type === 'voicemute') {
+    const l = selectedVoicesLayer();
+    if (l && l.voices && l.voices[hit.idx] != null) {
+      l.voices[hit.idx].muted = !l.voices[hit.idx].muted;
+      creatorPtr = null;
+      previewAndSave();
+    }
+    return;
+  }
+  if (hit.type === 'layermute') {
+    const l = OSC_STACK.layers[hit.layerIdx];
+    if (l) {
+      l.muted = !l.muted;
       creatorPtr = null;
       previewAndSave();
     }
@@ -1498,14 +1520,25 @@ function drawCreator(now) {
   for (let i = 0; i < OSC_STACK.layers.length; i++) {
     const cx = p.left + sw * 76 + i * 76;
     const sel = creatorSubmode === 'pitch' ? creatorPitchSel === i : i === selectedLayerIdx;
-    ctx.fillStyle = OSC_COLORS[i % OSC_COLORS.length];
-    ctx.beginPath();
-    ctx.arc(cx + 7, 78, 6, 0, Math.PI * 2);
+    const muted = !!(OSC_STACK.layers[i].muted);
+    const color = OSC_COLORS[i % OSC_COLORS.length];
+    // Mute button (the swatch's icon): 🔊 when the layer is live, 🔇 when
+    // muted. A white chip with a layer-colored border (red border when muted).
+    drawRoundRect(cx + 1, 68, 20, 20, 6);
+    ctx.fillStyle = muted ? '#fdecea' : '#fff';
     ctx.fill();
+    ctx.strokeStyle = muted ? '#c0392b' : color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(muted ? '🔇' : '🔊', cx + 11, 78);
+    ctx.textBaseline = 'alphabetic';
     ctx.font = (sel ? '800 ' : '700 ') + '11px sans-serif';
-    ctx.fillStyle = sel ? '#1b4523' : '#6b8e5a';
+    ctx.fillStyle = muted ? '#9db89c' : (sel ? '#1b4523' : '#6b8e5a');
     ctx.textAlign = 'left';
-    ctx.fillText('Osc ' + (i + 1), cx + 18, 82);
+    ctx.fillText('Osc ' + (i + 1), cx + 27, 82);
     // ✕ delete badge on the selected layer (layers only, hidden when it's the last one).
     if (sel && (creatorSubmode === 'pitch' || !creatorVolSel) && OSC_STACK.layers.length > 1) {
       const bx = cx + 62, by = 72;
@@ -1584,17 +1617,38 @@ function drawCreator(now) {
     ctx.textAlign = 'center';
     for (let i = 0; i < nV; i++) {
       const rc = rects[i], selChip = i === creatorVoiceSel;
+      const v = l.voices[i];
+      const vMuted = !!(v && v.muted);
       drawRoundRect(rc.x, rc.y, rc.w, rc.h, 8);
-      ctx.fillStyle = selChip ? '#2e5d34' : '#fff';
+      ctx.fillStyle = selChip ? (vMuted ? '#5c8a62' : '#2e5d34') : (vMuted ? '#e5eee1' : '#fff');
       ctx.fill();
-      ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+      ctx.strokeStyle = vMuted ? 'rgba(107,142,90,0.55)' : 'rgba(46,93,52,0.4)';
       ctx.lineWidth = 1;
       ctx.stroke();
-      const v = l.voices[i];
+      // Mute badge: the button at the left of each chip (tap it to mute/unmute).
+      const mbx = rc.x + 12, mby = LIFE_ROW_CY;
+      ctx.beginPath();
+      ctx.arc(mbx, mby, 8.5, 0, Math.PI * 2);
+      ctx.fillStyle = vMuted ? '#c0392b' : '#eef5ea';
+      ctx.fill();
+      ctx.strokeStyle = vMuted ? '#c0392b' : 'rgba(46,93,52,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.font = '12px sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(vMuted ? '🔇' : '🔊', mbx, mby + 1);
+      ctx.textBaseline = 'alphabetic';
       const lbl = 'V' + (i + 1) + ' · ' + (Math.round((+v.st || 0) * 100) / 100) + ' st';
-      ctx.fillStyle = selChip ? '#fff' : '#2e5d34';
+      ctx.fillStyle = selChip ? '#fff' : (vMuted ? '#9db89c' : '#2e5d34');
       ctx.font = '700 10px sans-serif';
-      ctx.fillText(lbl, rc.x + rc.w / 2 - (selChip ? 6 : 0), rc.y + 17);
+      ctx.fillText(lbl, rc.x + rc.w / 2 + 8 - (selChip ? 6 : 0), rc.y + 17);
+      if (vMuted && !selChip) {
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(rc.x + 4, rc.y + 4); ctx.lineTo(rc.x + rc.w - 4, rc.y + rc.h - 4);
+        ctx.stroke();
+      }
       if (selChip) {
         ctx.fillStyle = '#c0392b';
         ctx.beginPath();
@@ -1777,8 +1831,9 @@ function drawCreator(now) {
     for (let i = 0; i < OSC_STACK.layers.length; i++) {
       const l = OSC_STACK.layers[i];
       const sel = !creatorVolSel && i === selectedLayerIdx;
+      const muted = !!(l.muted);
       ctx.strokeStyle = OSC_COLORS[i % OSC_COLORS.length];
-      ctx.globalAlpha = sel ? 1 : 0.5;
+      ctx.globalAlpha = muted ? 0.22 : (sel ? 1 : 0.5);
       ctx.lineWidth = sel ? 3 : 1.5;
       ctx.beginPath();
       const curve = l.curve || [];
@@ -1790,6 +1845,7 @@ function drawCreator(now) {
       ctx.stroke();
       ctx.globalAlpha = 1;
       if (sel) {
+        ctx.globalAlpha = muted ? 0.5 : 1;
         for (const pt of curve) {
           ctx.fillStyle = OSC_COLORS[i % OSC_COLORS.length];
           ctx.beginPath();
@@ -1799,6 +1855,7 @@ function drawCreator(now) {
           ctx.lineWidth = 2;
           ctx.stroke();
         }
+        ctx.globalAlpha = 1;
       }
     }
     // Master envelope outline (bold when Vol is selected, faint otherwise).
@@ -1984,7 +2041,9 @@ function drawCreator(now) {
       ctx.fillStyle = '#000';
       ctx.fillText(String(i + 1), x, p.bottom + 10);
     }
-    // Curve + dots (extend the clamped ends out to the plot edges)
+    // Curve + dots (extend the clamped ends out to the plot edges); a muted
+    // layer draws dimmed with a label so it reads as silent.
+    ctx.globalAlpha = l.muted ? 0.3 : 1;
     ctx.strokeStyle = color;
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -2000,6 +2059,12 @@ function drawCreator(now) {
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
       ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    if (l.muted) {
+      ctx.fillStyle = '#c0392b';
+      ctx.font = '700 12px sans-serif';
+      ctx.fillText('MUTED', p.left + p.pw / 2, p.top + 24);
     }
   }
 
@@ -2052,7 +2117,7 @@ function drawCreator(now) {
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
   if (creatorSubmode === 'voices') {
-    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · Snap makes Semitones land on whole tones · ✕ deletes a voice · Reset clears them all', W / 2, H - 8);
+    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · Snap makes Semitones land on whole tones · tap a chip\u2019s 🔊 to mute it · ✕ deletes it · Reset clears them all', W / 2, H - 8);
   } else if (creatorDrawMode) {
     ctx.fillText(creatorEraseMode
       ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to zero it · tap Draw to edit dots'
@@ -2063,7 +2128,7 @@ function drawCreator(now) {
         : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots', W / 2, H - 8);
   } else {
     ctx.fillText(creatorSubmode === 'note'
-      ? 'Pick Vol or an oscillator above · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
+      ? 'Pick Vol or an oscillator above · tap a swatch\u2019s 🔊 to mute it · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
 : creatorSubmode === 'pitch'
           ? 'Master bends every oscillator while it exists (✕ clears it, revealing per-layer envelopes) · drag dots · tap to add · set ±range top-left'
           : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
