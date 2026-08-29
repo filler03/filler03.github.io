@@ -473,9 +473,9 @@ function envDragBoundary(i, t, v) {
    points inside the swept corridor are absorbed, so sweeping at a lower
    density than the existing shape thins it down as you pass through.
    Insert-dedupe merges revisits, so backtracking adds nothing. In Erase mode
-   the drawn value is always the zero line instead of the finger's: swept
-   points are absorbed and zero-value breakpoints replace them, flattening the
-   corridor. */
+   the drawn value is the erase line instead of the finger's: swept points are
+   absorbed and erase-line breakpoints replace them, flattening the corridor to
+   that line. */
 function drawPointCount() { return Math.max(4, Math.min(HARMONIC_COUNT, +creatorDrawPoints || 8)); }
 function slotT(s) { const n = drawPointCount(); return n > 1 ? s / (n - 1) : 0; }
 function slotAtX(x, p) {
@@ -485,18 +485,25 @@ function slotAtX(x, p) {
 }
 
 // Toolbar pills floating in the top-right corner of the plot (always visible in
-// both sub-modes, so Draw & Erase stay reachable without crowding the busy
-// bars). The points pill is the visual under the native <select> dropdown.
+// both sub-modes, so the mode switch stays reachable without crowding the busy
+// bars). One mode button cycles Point -> Draw -> Erase; the points pill is the
+// visual under the native <select> dropdown.
 function drawToolbar(p) {
   const y = p.top + 8, w = 58, h = 26;
-  const drawX = p.right - 4 - w;
-  const eraseX = drawX - 8 - w;
-  const densX = eraseX - 8 - w;
+  const modeX = p.right - 4 - w;
+  const densX = modeX - 8 - w;
   return {
-    draw:  { x: drawX, y, w, h },
-    erase: { x: eraseX, y, w, h },
-    dens:  { x: densX, y, w, h },
+    mode: { x: modeX, y, w, h },
+    dens: { x: densX, y, w, h },
   };
+}
+
+// Current editor mode name for the mode pill: Point (grab/edit dots), Draw
+// (scribble with the finger's value), or Erase (scribble along the erase line).
+function creatorModeName() {
+  if (creatorEraseMode) return 'Erase';
+  if (creatorDrawMode) return 'Draw';
+  return 'Point';
 }
 
 // Auto-preview toggle + manual preview button, anchored just left of the pitch
@@ -651,7 +658,9 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
   }
   let idx = -1;
   for (let k = loS; k <= hiS; k++) {
-    if (!creatorEraseMode || Math.abs(curveValue(l, slotT(k))) > 1e-9) idx = insertCurvePoint(l, slotT(k), creatorEraseMode ? 0 : yToV(y, p));
+    // Erase snaps the swept curve to the full-volume line (1) rather than the
+    // finger's value; flat full-volume runs stay sparse instead of gaining dots.
+    if (!creatorEraseMode || Math.abs(curveValue(l, slotT(k)) - 1) > 1e-9) idx = insertCurvePoint(l, slotT(k), creatorEraseMode ? 1 : yToV(y, p));
   }
   return idx;
 }
@@ -696,13 +705,15 @@ function envDrawAt(t, v, p, loT, hiT, erase) {
     const d = Math.abs(eb.b[i] - ms);
     if (d < bd) { bd = d; best = i; }
   }
-  // Erase snaps the swept point to the zero line rather than the finger's value.
+  // Erase snaps the swept point to the full-volume line rather than the finger's value.
   if (erase) {
-    v = 0;
-    // Where the envelope is already flat at zero, don't place a new boundary —
-    // flat runs stay sparse instead of gaining dots.
+    v = 100;
+    // Where the envelope is already flat at full volume and there's no nearby
+    // boundary to grab, don't split — flat runs stay sparse instead of gaining
+    // dots. A nearby boundary (best >= 0) is still dragged below, so a lone
+    // point can be picked up and moved even though it's already at full volume.
     const ev = envValueAtT(clamp01(t));
-    if (Math.abs(ev) <= 1e-9) return;
+    if (Math.abs(ev - 100) <= 1e-9 && best < 0) return;
   }
   if (best >= 0) { envDragBoundary(best, t, v); return; }
   if (eb.n >= ENV_DRAW_MAX) return;
@@ -946,8 +957,7 @@ function hitTestCreator(x, y) {
     // Draw-mode toolbar (top-right of the plot; not in the Voices tab).
     if (creatorSubmode !== 'voices') {
       const tb = drawToolbar(p);
-      if (x >= tb.draw.x && x <= tb.draw.x + tb.draw.w && y >= tb.draw.y && y <= tb.draw.y + tb.draw.h) return { type: 'drawtoggle' };
-      if (x >= tb.erase.x && x <= tb.erase.x + tb.erase.w && y >= tb.erase.y && y <= tb.erase.y + tb.erase.h) return { type: 'erasetoggle' };
+      if (x >= tb.mode.x && x <= tb.mode.x + tb.mode.w && y >= tb.mode.y && y <= tb.mode.y + tb.mode.h) return { type: 'modetoggle' };
     }
     // ±range stepper pill (Pitch tab, plot top-left).
     if (creatorSubmode === 'pitch') {
@@ -1230,18 +1240,16 @@ canvas.addEventListener('pointerdown', e => {
     previewAndSave();
     return;
   }
-  if (hit.type === 'drawtoggle') {
-    creatorDrawMode = !creatorDrawMode;
-    if (!creatorDrawMode) creatorEraseMode = false;   // Draw off clears Erase
-    creatorPtr = null;
-    return;
-  }
-  if (hit.type === 'erasetoggle') {
-    // Erase is a draw-stroke mode: it implies Draw, so turning it on enables
-    // both; toggling it off returns to plain draw, and Draw off clears it.
-    creatorEraseMode = !creatorEraseMode;
-    if (creatorEraseMode) creatorDrawMode = true;
-    else if (!creatorDrawMode) creatorEraseMode = false;
+  if (hit.type === 'modetoggle') {
+    // Single mode button cycles Point -> Draw -> Erase -> Point.
+    if (creatorEraseMode) {
+      creatorDrawMode = false;      // Erase -> Point
+      creatorEraseMode = false;
+    } else if (creatorDrawMode) {
+      creatorEraseMode = true;      // Draw -> Erase (Erase implies Draw)
+    } else {
+      creatorDrawMode = true;       // Point -> Draw
+    }
     creatorPtr = null;
     return;
   }
@@ -2083,22 +2091,14 @@ function drawCreator(now) {
     ctx.stroke();
     ctx.fillStyle = '#2e5d34';
     ctx.fillText(drawPointCount() + ' pts ▾', tb.dens.x + tb.dens.w / 2, tb.dens.y + tb.dens.h / 2 + 1);
-    drawRoundRect(tb.erase.x, tb.erase.y, tb.erase.w, tb.erase.h, 8);
-    ctx.fillStyle = creatorEraseMode ? '#d9534f' : '#fff';
+    drawRoundRect(tb.mode.x, tb.mode.y, tb.mode.w, tb.mode.h, 8);
+    ctx.fillStyle = creatorEraseMode ? '#d9534f' : creatorDrawMode ? accent : '#fff';
     ctx.fill();
     ctx.strokeStyle = 'rgba(46,93,52,0.4)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.fillStyle = creatorEraseMode ? '#fff' : '#2e5d34';
-    ctx.fillText(creatorEraseMode ? 'ERASE' : 'Erase', tb.erase.x + tb.erase.w / 2, tb.erase.y + tb.erase.h / 2 + 1);
-    drawRoundRect(tb.draw.x, tb.draw.y, tb.draw.w, tb.draw.h, 8);
-    ctx.fillStyle = creatorDrawMode ? accent : '#fff';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = creatorDrawMode ? '#fff' : '#2e5d34';
-    ctx.fillText(creatorDrawMode ? 'ON' : 'Draw', tb.draw.x + tb.draw.w / 2, tb.draw.y + tb.draw.h / 2 + 1);
+    ctx.fillStyle = (creatorDrawMode || creatorEraseMode) ? '#fff' : '#2e5d34';
+    ctx.fillText(creatorModeName(), tb.mode.x + tb.mode.w / 2, tb.mode.y + tb.mode.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
 
     // Position the native points <select> over the pill (creator-active only).
@@ -2120,12 +2120,12 @@ function drawCreator(now) {
     ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · Snap makes Semitones land on whole tones · tap a chip\u2019s 🔊 to mute it · ✕ deletes it · Reset clears them all', W / 2, H - 8);
   } else if (creatorDrawMode) {
     ctx.fillText(creatorEraseMode
-      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to zero it · tap Draw to edit dots'
+      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Mode to edit dots'
       : creatorSubmode === 'note'
-      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots'
+      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
       : creatorSubmode === 'pitch'
-        ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (all oscillators)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts)'
-        : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Draw to edit dots', W / 2, H - 8);
+        ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (all oscillators)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
+        : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots', W / 2, H - 8);
   } else {
     ctx.fillText(creatorSubmode === 'note'
       ? 'Pick Vol or an oscillator above · tap a swatch\u2019s 🔊 to mute it · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete'
