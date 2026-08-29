@@ -892,8 +892,20 @@ function scheduleReleaseTail(ds, startLevel, startT) {
   g.cancelScheduledValues(Math.max(now, startT));
   g.setValueAtTime(Math.max(1e-4, startLevel), startT);
   if (relMs > 0) {
-    const rel = sampleComps(relComps, 32, startLevel);
-    g.setValueCurveAtTime(rel.curve, startT + 0.002, relMs / 1000);
+    // The release section must stay relative to the gesture's Y (base volume),
+    // exactly like the body. `startLevel` is an ABSOLUTE gain (base × envelope),
+    // so convert it back to a relative seed before sampling, then scale the
+    // sampled curve by the base volume — otherwise the release ramps toward the
+    // component's raw relative end (0..1) and climbs to full scale regardless
+    // of the screen position.
+    const baseVol = ds.pts && ds.pts.length ? baseVolumeFromY(ds.pts[ds.pts.length - 1].y) : 0;
+    const relSeed = baseVol > 0.0001 ? Math.max(0, Math.min(1, startLevel / baseVol)) : 0;
+    const rel = sampleComps(relComps, 32, relSeed);
+    const curve = rel.curve;
+    if (baseVol > 0.0001) {
+      for (let k = 0; k < curve.length; k++) curve[k] *= baseVol;
+    }
+    g.setValueCurveAtTime(curve, startT + 0.002, relMs / 1000);
     const stopT = startT + relMs / 1000 + FADE_MS / 1000;
     g.linearRampToValueAtTime(0, stopT);
     rampLayerMixToEnd(ds, startT, relMs);
