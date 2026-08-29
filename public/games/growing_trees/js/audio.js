@@ -845,7 +845,7 @@ function tickLiveHold(ds) {
 function earlyCutMs() {
   const env = ENVELOPE;
   const maxIdx = Math.max(0, env.beginReleaseIndex - 1);
-  const idx = Math.max(0, Math.min(maxIdx, env.earlyCutIndex == null ? maxIdx : env.earlyCutIndex));
+  const idx = Math.max(-1, Math.min(maxIdx, env.earlyCutIndex == null ? maxIdx : env.earlyCutIndex));
   return compsMs(env.components.slice(0, idx + 1));
 }
 

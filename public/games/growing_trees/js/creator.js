@@ -154,6 +154,29 @@ function markerTabs(p) {
   return tabs;
 }
 
+// Dimmed per-marker variants for tabs that show the HOLD/CUT/REL markers but
+// don't edit them (the Pitch tab): keep each marker's hue so it stays
+// identifiable, but drop the saturation/brightness so they read as display-only.
+function markerHue(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return 0;
+  const r = parseInt(m[1].slice(0, 2), 16) / 255;
+  const g = parseInt(m[1].slice(2, 4), 16) / 255;
+  const b = parseInt(m[1].slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return h;
+}
+const markerDim = (hex, sat, light) => 'hsl(' + markerHue(hex).toFixed(1) + ',' + sat + '%,' + light + '%)';
+
 // Waveform presets offered in the Harmonics tab. They reuse the shared
 // HARMONIC_PRESETS via applyPresetToLayer, so a picked waveform is the exact
 // same sound as choosing it in the settings panel.
@@ -223,7 +246,9 @@ function insertCurvePoint(l, t, v) {
 }
 
 function removeCurvePoint(l, idx) {
-  if (!l.curve.length || !l.curve[idx]) return;
+  const pt = l.curve[idx];
+  if (!pt) return;
+  if (pt.t === 0 || pt.t === 1) return;   // the far-left/right anchors are protected
   if (l.curve.length <= 2) {
     // Keep two points: collapse to a flat silent line the user can draw up.
     l.curve = [{ t: 0, v: 0 }, { t: 1, v: 0 }];
@@ -286,7 +311,10 @@ function insertSpecPoint(l, x, a) {
 
 function removeSpecPoint(l, idx) {
   const pts = l.specPoints;
-  if (!pts.length || !pts[idx]) return;
+  if (!pts || !pts.length) return;
+  const pt = pts[idx];
+  if (!pt) return;
+  if (pt.x === 0 || pt.x === 1) return;   // the far-left/right anchors are protected
   if (pts.length <= 2) {
     l.specPoints = [{ x: 0, a: 0 }, { x: 1, a: 0 }];
     syncLayerAmplitudes(l);
@@ -349,7 +377,9 @@ function insertPitchPoint(env, t, st) {
 
 function removePitchPoint(env, idx) {
   const pts = env.points;
-  if (!pts.length || !pts[idx]) return;
+  const pt = pts[idx];
+  if (!pt) return;
+  if (pt.t === 0 || pt.t === 1) return;   // the far-left/right anchors are protected
   if (pts.length <= 2) {
     // Keep two points: collapse to a flat no-shift line the user can draw up.
     env.points = [{ t: 0, st: 0 }, { t: 1, st: 0 }];
@@ -1054,7 +1084,7 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
     const env = ensureSelectedPitchEnv();
     const r = Math.max(1, env.range || 1);
     if (env.points.length > 2) {
-      const kept = env.points.filter(pt => pt.t < loT - eps || pt.t > hiT + eps);
+      const kept = env.points.filter(pt => pt.t === 0 || pt.t === 1 || pt.t < loT - eps || pt.t > hiT + eps);
       if (kept.length >= 2) env.points = kept;
     }
     if (creatorEraseMode) {
@@ -1074,7 +1104,7 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
     const l = selectedLayer();
     initLayerSpecPoints(l);
     if (l.specPoints.length > 2) {
-      const kept = l.specPoints.filter(pt => pt.x < loT - eps || pt.x > hiT + eps);
+      const kept = l.specPoints.filter(pt => pt.x === 0 || pt.x === 1 || pt.x < loT - eps || pt.x > hiT + eps);
       if (kept.length >= 2) l.specPoints = kept;
     }
     let idx = -1;
@@ -1087,7 +1117,7 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
   if (creatorVolSel) { envDrawAt(slotT(s), yToV(y, p), p, loT, hiT, creatorEraseMode); return null; }
   const l = selectedLayer();
   if (l.curve.length > 2) {
-    const kept = l.curve.filter(pt => pt.t < loT - eps || pt.t > hiT + eps);
+    const kept = l.curve.filter(pt => pt.t === 0 || pt.t === 1 || pt.t < loT - eps || pt.t > hiT + eps);
     if (kept.length >= 2) l.curve = kept;
   }
   let idx = -1;
@@ -1367,10 +1397,13 @@ function hitTestCreator(x, y) {
     if (x >= L.x1 - 10 && x <= L.x2 + 10) return { type: 'life' };
     return { type: 'bar' };
   }
-  // Marker grab tabs (the lane above the plot; Volume envelope only).
+  // Marker grab tabs (the lane above the plot; Volume envelope only). In the
+  // Pitch tab the markers are display-only, so the lane isn't grabbable there.
   if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && (creatorSubmode === 'note' || creatorSubmode === 'pitch')) {
-    for (const tab of markerTabs(p)) {
-      if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
+    if (creatorSubmode === 'note') {
+      for (const tab of markerTabs(p)) {
+        if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
+      }
     }
     return { type: 'bar' };
   }
@@ -2248,10 +2281,14 @@ function drawCreator(now) {
 
   // ---- Marker grab tabs (Volume envelope / Pitch tabs only) ----
   if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
+    const dimmed = creatorSubmode === 'pitch';
     for (const tab of markerTabs(p)) {
+      const lineColor = dimmed ? markerDim(tab.color, 25, 52) : tab.color;
+      const fillColor = dimmed ? markerDim(tab.color, 30, 82) : tab.color;
+      const labelColor = dimmed ? markerDim(tab.color, 32, 28) : '#fff';
       // Connector from the tab down to its dashed line so the pairing is obvious.
-      ctx.strokeStyle = tab.color;
-      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = lineColor;
+      ctx.globalAlpha = dimmed ? 0.7 : 0.55;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(tab.cx, tab.y + tab.h);
@@ -2259,9 +2296,9 @@ function drawCreator(now) {
       ctx.stroke();
       ctx.globalAlpha = 1;
       drawRoundRect(tab.x, tab.y, tab.w, tab.h, 7);
-      ctx.fillStyle = tab.color;
+      ctx.fillStyle = fillColor;
       ctx.fill();
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = labelColor;
       ctx.font = '800 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(tab.label, tab.cx, tab.y + 15);
@@ -2365,10 +2402,11 @@ function drawCreator(now) {
 
   // ---- Markers (time-based sub-modes only) ----
   if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
+    const dimmed = creatorSubmode === 'pitch';
     const markers = markerList();
     for (const m of markers) {
       const x = tToX(m.t, p);
-      ctx.strokeStyle = m.color;
+      ctx.strokeStyle = dimmed ? markerDim(m.color, 25, 52) : m.color;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 4]);
       ctx.beginPath();

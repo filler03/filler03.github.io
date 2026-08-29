@@ -670,22 +670,23 @@ let ENV_ID = 0;
 function newCompId() { return 'c' + (++ENV_ID) + Math.random().toString(36).slice(2, 6); }
 
 // Keep the envelope's markers sane after any add/delete/reorder: the release
-// always starts right after the hold range ends (so no component is ever
-// skipped) and the hold range is non-empty and lies before the release. Start
-// values chain into the next component, so only the first one keeps an
-// independent start.
+// starts right after the hold range ends (so no component is ever skipped) and
+// the hold range is non-empty and lies before the release (it may be empty when
+// the whole envelope is one hold with no release). Start values chain into the
+// next component, so only the first one keeps an independent start.
 function clampEnvelopeIndexes() {
   const n = ENVELOPE.components.length;
   if (n <= 1) {
-    // A lone component is the whole release: no hold, no body.
+    // A lone component is the whole body/hold: no release section. REL then
+    // sits at the far right, HOLD and CUT at the far left.
     ENVELOPE.holdStartIndex = 0;
     ENVELOPE.holdEndIndex = 0;
-    ENVELOPE.beginReleaseIndex = 0;
-    ENVELOPE.earlyCutIndex = 0;
+    ENVELOPE.beginReleaseIndex = 1;
+    ENVELOPE.earlyCutIndex = -1;
     chainStartValues(ENVELOPE);
     return;
   }
-  ENVELOPE.holdEndIndex = Math.max(0, Math.min(n - 2, ENVELOPE.holdEndIndex));
+  ENVELOPE.holdEndIndex = Math.max(0, Math.min(n - 1, ENVELOPE.holdEndIndex));
   ENVELOPE.holdStartIndex = Math.max(0, Math.min(ENVELOPE.holdEndIndex, ENVELOPE.holdStartIndex));
   ENVELOPE.beginReleaseIndex = ENVELOPE.holdEndIndex + 1;
   ENVELOPE.earlyCutIndex = Math.max(0, Math.min(ENVELOPE.beginReleaseIndex - 1, ENVELOPE.earlyCutIndex));
