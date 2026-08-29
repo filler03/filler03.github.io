@@ -106,11 +106,13 @@ function schedulePathPlayback(ds) {
 
 // LIVE MODE: the note begins the moment the finger touches down (a tap is just
 // a gesture with no travel). The audio clock is real time, so each
-// newly-recorded path point is scheduled at the audio time its horizontal
-// travel implies. If the circle catches the fingertip (the user is drawing
-// slower than the playback clock), later points schedule in the past and are
-// chased with setTargetAtTime, which makes the sound hold at the fingertip's
-// volume and resume as the finger moves again.
+// newly-recorded path point is baked into sampled value curves over the audio
+// window its horizontal travel implies (see scheduleLiveCurves in audio.js).
+// The volume envelope plays its true shape — stairs, spring wobbles, pulse
+// corners included — scaled by the fingertip's base volume, exactly as wait
+// mode samples it. If the circle catches the fingertip (the user is drawing
+// slower than the playback clock), the note keeps playing forward in real time
+// at the fingertip's volume over a short horizon.
 function startLivePathNote(ds) {
   initAudio();
   ds.started = true;   // stop repeated pointermoves from double-starting the note

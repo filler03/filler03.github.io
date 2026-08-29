@@ -273,7 +273,7 @@ function designBodyMs() {
 // uniformly.
 function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
   const dur = Math.max(0.004, tEnd - t0);
-  const N = 64;
+  const N = 256;
   const gains = [];
   const split = actualBodyMs != null && relMs != null && (actualBodyMs + relMs) > 0;
   const dBody = designBodyMs();
@@ -294,13 +294,17 @@ function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
 
 // Chase the live mix params toward their current progress value. The body runs
 // from note start to the release point (max of the drawn time and the early-cut
-// marker), then the release section, mapped onto the same curve axis.
+// marker), then the release section, mapped onto the same curve axis. Pending
+// value-curve automation is cancelled first so the chase never overlaps it.
 function updateLiveMixTargets(ds, at, tc) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
   const gains = layerGainsAt(mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs()));
   for (let i = 0; i < ds.mixParams.length; i++) {
-    ds.mixParams[i].setTargetAtTime(gains[ds.oscLayer[i]] * ds.oscLvl[i], at, tc);
+    const p = ds.mixParams[i];
+    p.cancelScheduledValues(at);
+    p.setValueAtTime(Math.max(1e-4, p.value), at);
+    p.setTargetAtTime(gains[ds.oscLayer[i]] * ds.oscLvl[i], at, tc);
   }
 }
 
@@ -311,7 +315,7 @@ function rampLayerMixToEnd(ds, startT, ms) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
   const dBody = designBodyMs();
-  const N = 32;
+  const N = 96;
   for (let i = 0; i < (ds.mixParams || []).length; i++) {
     const p = ds.mixParams[i];
     const layerIdx = ds.oscLayer[i], lvl = ds.oscLvl[i];
@@ -336,7 +340,7 @@ function rampLayerMixToEnd(ds, startT, ms) {
 // envelope across t0..tEnd into a frequency value curve.
 function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
   const dur = Math.max(0.004, tEnd - t0);
-  const N = 64;
+  const N = 256;
   const split = bodyMs != null && relMs != null && (bodyMs + relMs) > 0;
   const dBody = designBodyMs();
   for (let i = 0; i < stack.oscs.length; i++) {
@@ -357,7 +361,8 @@ function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
 }
 
 // Chase each live layer's frequency toward its active pitch envelope's current
-// value (same progress mapping as the mix targets).
+// value (same progress mapping as the mix targets). Pending value-curve
+// automation is cancelled first so the chase never overlaps it.
 function updateLivePitchTargets(ds, at, tc) {
   if (!ds.oscs || !ds.baseFreq) return;
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
@@ -366,7 +371,10 @@ function updateLivePitchTargets(ds, at, tc) {
   for (let i = 0; i < ds.oscs.length; i++) {
     const env = activePitchEnv(ds.oscLayer[i]);
     if (!env) continue;
-    ds.oscs[i].frequency.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog) + ds.oscOffset[i]), at, tc);
+    const p = ds.oscs[i].frequency;
+    p.cancelScheduledValues(at);
+    p.setValueAtTime(p.value, at);
+    p.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog) + ds.oscOffset[i]), at, tc);
   }
 }
 
@@ -378,7 +386,7 @@ function rampPitchToEnd(ds, startT, ms) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
   const dBody = designBodyMs();
-  const N = 32;
+  const N = 96;
   for (let i = 0; i < ds.oscs.length; i++) {
     const env = activePitchEnv(ds.oscLayer[i]);
     if (!env) continue;
@@ -447,7 +455,7 @@ function previewNote(pitch) {
   const gain = audioCtx.createGain();
   const g = gain.gain;
   g.setValueAtTime(0, t0);
-  const NB = 64;
+  const NB = 256;
   const body = new Float32Array(NB);
   for (let k = 0; k < NB; k++) body[k] = Math.max(0, base * relValueBody(ENVELOPE, bodyMs * k / (NB - 1), true));
   const bodyDur = Math.max(0.004, bodyMs / 1000);
@@ -456,7 +464,7 @@ function previewNote(pitch) {
   if (relMs > 0) {
     const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
     const seed = relValueBody(ENVELOPE, bodyMs, true);
-    const tail = new Float32Array(32);
+    const tail = new Float32Array(64);
     for (let k = 0; k < tail.length; k++) tail[k] = Math.max(0, base * relValueAtList(relComps, relMs * k / (tail.length - 1), seed));
     g.setValueAtTime(tail[0], tRel);
     g.setValueCurveAtTime(tail, tRel + 0.002, relMs / 1000);
@@ -615,12 +623,15 @@ function retriggerPitch(pitch, keep) {
 
 /* ---- Gesture note audio ----
    WAIT MODE (schedulePathAudio): the whole note is played with a single
-   setValueCurveAtTime over 128 volume samples (attack fade baked in) plus a
+   setValueCurveAtTime over 256 volume samples (attack fade baked in) plus a
    fade-out tail.
    LIVE MODE (initLivePathAudio + scheduleLivePoint + tickLiveHold +
    finishLivePathNote): the note begins the moment the finger touches down; each
-   newly-recorded point is scheduled at the audio time its horizontal travel
-   implies, with setTargetAtTime catch-up when the circle catches the fingertip. */
+   newly-recorded point is baked into sampled value curves over the audio window
+   its horizontal travel implies (see scheduleLiveCurves), so the envelope plays
+   its true shape (including stairs/spring/pulse segments) relative to the
+   fingertip's base volume. When the circle catches the fingertip the note keeps
+   playing forward in real time over a short horizon. */
 
 function schedulePathAudio(ds, totalMs, pb) {
   if (!audioCtx || !masterGain) return;
@@ -638,7 +649,7 @@ function schedulePathAudio(ds, totalMs, pb) {
   // Body: the base volume along the path × the envelope's pre-release shape
   // (one pass — once the body domain is exhausted the value holds at the hold
   // window's end), scheduled as a sampled curve.
-  const body = buildVolumeCurve(ds.pts, ds.cumTime, bodyDurMs, 128);
+  const body = buildVolumeCurve(ds.pts, ds.cumTime, bodyDurMs, 256);
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const curveStart = t0 + 0.002;   // tiny offset: no automation overlap with the setValue below
@@ -656,7 +667,7 @@ function schedulePathAudio(ds, totalMs, pb) {
     const endBase = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
     const bodyEnd = body[body.length - 1];
     const relSeed = endBase > 0.0001 ? Math.max(0, Math.min(1, bodyEnd / endBase)) : 0;
-    const tail = new Float32Array(64);
+    const tail = new Float32Array(128);
     for (let k = 0; k < tail.length; k++) {
       const t = relMs * k / (tail.length - 1);
       tail[k] = endBase * relValueAtList(relComps, t, relSeed);
@@ -739,27 +750,75 @@ function initLivePathAudio(ds) {
   if (ds.finished) finishLivePathNote(ds);
 }
 
+// Bake the live note's volume envelope, layer mix, and pitch envelopes across
+// the audio window [fromT, toT] into sampled value curves — the same sampling
+// wait mode uses — so envelope segment shapes (stairs/spring/pulse) play
+// faithfully while the finger is drawing instead of being smeared into a single
+// ramp. `baseVol` is the fingertip's base volume, which scales the volume
+// envelope's relative shape (the envelope itself plays as designed).
+function scheduleLiveCurves(ds, fromT, toT, baseVol) {
+  const fromMs = (fromT - ds.ctx0) * 1000;
+  const toMs = (toT - ds.ctx0) * 1000;
+  const dur = Math.max(0.004, toT - fromT);
+  // Roughly 2ms per sample so fast wobbles/steps stay faithful, capped for sanity.
+  const N = Math.min(256, Math.max(32, Math.round((toMs - fromMs) / 2)));
+  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
+  const relMs = releaseMs();
+  const dBody = designBodyMs();
+  const prog = ms => mixProgForTimes(ms, actualBodyMs, relMs, dBody);
+  const atMs = k => fromMs + (toMs - fromMs) * k / (N - 1);
+  // Volume envelope (the note's loudness), scaled by the fingertip base volume.
+  const gainCurve = new Float32Array(N);
+  for (let k = 0; k < N; k++) gainCurve[k] = Math.max(0, baseVol * relValueBody(ENVELOPE, atMs(k), true));
+  ds.gain.cancelScheduledValues(fromT);
+  ds.gain.setValueAtTime(Math.max(1e-4, gainCurve[0]), fromT);
+  ds.gain.setValueCurveAtTime(gainCurve, fromT + 0.001, dur - 0.001);
+  ds.lastSched = fromT + dur;
+  ds.gainLevel = gainCurve[gainCurve.length - 1];
+  // Layer mix gains (each oscillator's share of the mix at each sample).
+  const gains = new Array(N);
+  for (let k = 0; k < N; k++) gains[k] = layerGainsAt(prog(atMs(k)));
+  for (let i = 0; i < (ds.mixParams || []).length; i++) {
+    const p = ds.mixParams[i];
+    const layerIdx = ds.oscLayer[i], lvl = ds.oscLvl[i];
+    const curve = new Float32Array(N);
+    for (let k = 0; k < N; k++) curve[k] = Math.max(0, gains[k][layerIdx] * lvl);
+    p.cancelScheduledValues(fromT);
+    p.setValueAtTime(Math.max(1e-4, curve[0]), fromT);
+    p.setValueCurveAtTime(curve, fromT + 0.001, dur - 0.001);
+  }
+  // Pitch envelopes (each oscillator's frequency follows its active envelope).
+  for (let i = 0; i < (ds.oscs || []).length; i++) {
+    const env = activePitchEnv(ds.oscLayer[i]);
+    if (!env) continue;
+    const p = ds.oscs[i].frequency;
+    const off = ds.oscOffset[i];
+    const curve = new Float32Array(N);
+    for (let k = 0; k < N; k++) curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, prog(atMs(k))) + off);
+    p.cancelScheduledValues(fromT);
+    p.setValueAtTime(curve[0], fromT);
+    p.setValueCurveAtTime(curve, fromT + 0.001, dur - 0.001);
+  }
+}
+
 function scheduleLivePoint(ds) {
   if (!ds.gain) return;
   const pt = ds.pts[ds.pts.length - 1];
-  // The relative value is the envelope's body shape at this moment (looped so
-  // a held note cycles the hold range). The progress never steps backward when
-  // a held gesture resumes drawing.
-  const prog = liveFadeProgress(ds);
-  const target = baseVolumeFromY(pt.y) * relValueBody(ENVELOPE, prog, true);
-  const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
   const now = audioCtx.currentTime;
-  if (targetT > now + 0.005) {
-    const startT = Math.max(now, ds.lastSched);
-    ds.gain.setValueAtTime(ds.gainLevel, startT);
-    ds.gain.linearRampToValueAtTime(target, targetT);
-    ds.lastSched = targetT;
+  const targetT = ds.ctx0 + ds.totalMs / 1000;   // audio-clock time this point plays
+  const startT = Math.max(now, ds.lastSched);
+  const baseVol = baseVolumeFromY(pt.y);
+  if (targetT > startT + 0.005) {
+    // The drawn span plays in the future: bake the full envelope shape across
+    // it, scaled by the fingertip's base volume.
+    scheduleLiveCurves(ds, startT, targetT, baseVol);
   } else {
-    ds.gain.setTargetAtTime(target, now, 0.06);   // catch-up: chase the fingertip
+    // The circle caught the fingertip (the finger outran the audio clock):
+    // keep the envelope advancing in real time at the fingertip's base volume
+    // over a short horizon, exactly like a held note. The next point replaces it.
+    const horizon = 0.08;
+    scheduleLiveCurves(ds, now, now + horizon, baseVol);
   }
-  ds.gainLevel = target;
-  updateLiveMixTargets(ds, now, 0.06);
-  updateLivePitchTargets(ds, now, 0.06);
 }
 
 // A held finger adds no new path points, so no volume automation is scheduled
@@ -777,15 +836,7 @@ function tickLiveHold(ds) {
   if (schedProg >= he && !(he > hs)) return;                   // body done, no loop to cycle
   const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
   const horizon = Math.max(0.06, Math.min(0.3, (he > hs ? he - hs : 200) / 1000));   // seconds of shape scheduled per frame
-  const curve = sampleRelBody(ENVELOPE, schedProg, schedProg + horizon * 1000, 24);
-  const scaled = curve.map(v => baseVol * v);
-  ds.gain.cancelScheduledValues(at);
-  ds.gain.setValueAtTime(Math.max(1e-4, scaled[0]), at);
-  ds.gain.setValueCurveAtTime(scaled, at + 0.001, horizon);
-  ds.lastSched = at + 0.001 + horizon;
-  ds.gainLevel = scaled[scaled.length - 1];
-  updateLiveMixTargets(ds, at, 0.06);
-  updateLivePitchTargets(ds, at, 0.06);
+  scheduleLiveCurves(ds, at, at + horizon, baseVol);
 }
 
 // Where an early release jumps to the release section: the playback time (ms)
@@ -832,7 +883,7 @@ function finishLivePathNote(ds) {
     const prog = liveFadeProgress(ds);
     if (prog < cutMs) {
       const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
-      const N = 32;
+      const N = 96;
       const curve = new Float32Array(N);
       curve[0] = Math.max(1e-4, ds.gain.value);
       for (let k = 1; k < N; k++) {
@@ -859,7 +910,7 @@ function finishLivePathNote(ds) {
       const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
       const p0 = ds.totalMs;
       const t0 = Math.max(now, ds.ctx0 + p0 / 1000);
-      const N = 32;
+      const N = 96;
       const curve = new Float32Array(N);
       curve[0] = Math.max(1e-4, ds.gainLevel || ds.gain.value);
       for (let k = 1; k < N; k++) {
@@ -900,7 +951,7 @@ function scheduleReleaseTail(ds, startLevel, startT) {
     // of the screen position.
     const baseVol = ds.pts && ds.pts.length ? baseVolumeFromY(ds.pts[ds.pts.length - 1].y) : 0;
     const relSeed = baseVol > 0.0001 ? Math.max(0, Math.min(1, startLevel / baseVol)) : 0;
-    const rel = sampleComps(relComps, 32, relSeed);
+    const rel = sampleComps(relComps, 96, relSeed);
     const curve = rel.curve;
     if (baseVol > 0.0001) {
       for (let k = 0; k < curve.length; k++) curve[k] *= baseVol;
