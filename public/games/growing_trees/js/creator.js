@@ -565,6 +565,17 @@ const VOICE_PARAM_DEFS = [
   { key: 'ct',  label: 'Cents',     min: -100, max: 100, step: 1,  fmt: v => Math.round(v) + ' ¢' },
   { key: 'vol', label: 'Volume',    min: 0,  max: 2,  step: 0.01, fmt: v => Math.round(v * 100) + '%' },
 ];
+// One-tap interval presets for the Semitones row, shown as chips in the strip
+// above the plot (Voices tab). Tapping one sets the selected voice's semitone
+// offset to that interval from the fundamental.
+const VOICE_INTERVALS = [
+  { st: -12, label: '−8' },   // lower octave
+  { st: 3,  label: 'b3' },    // minor 3rd up
+  { st: 4,  label: '3' },     // major 3rd up
+  { st: 5,  label: '4' },     // perfect 4th up
+  { st: 7,  label: '5' },     // perfect 5th up
+  { st: 12, label: '8' },     // upper octave
+];
 // Snap-to-semitone toggle pill, floating in the strip above the plot (Voices
 // tab only) — the band where the note-life slider / marker tabs live in the
 // other tabs, and which is free in Voices mode. Keeps the sliders in the plot
@@ -572,6 +583,18 @@ const VOICE_PARAM_DEFS = [
 function voiceSnapPill(p) {
   const y = MARKER_LANE_TOP + 22, w = 70, h = 26;
   return { x: p.left + 4, y, w, h };
+}
+// Interval preset chips, filling the strip to the right of the Snap pill. Chips
+// share the pill's row and height, distributing the available width so they
+// never overflow the screen (each settles between 34 and 46px wide).
+function voiceIntervalButtons(p) {
+  const sp = voiceSnapPill(p);
+  const gap = 6;
+  const avail = Math.max(0, p.right - (sp.x + sp.w + 10));
+  const n = VOICE_INTERVALS.length;
+  const w = Math.min(46, Math.max(34, (avail - gap * (n - 1)) / n));
+  const x0 = sp.x + sp.w + 10;
+  return VOICE_INTERVALS.map((it, i) => ({ ...it, x: x0 + i * (w + gap), y: sp.y, w, h: sp.h }));
 }
 
 function voiceSliderRows(p) {
@@ -947,10 +970,14 @@ function hitTestCreator(x, y) {
     }
     return { type: 'bar' };
   }
-  // Snap-to-semitone toggle pill (the same strip, Voices tab only).
+  // Snap-to-semitone toggle pill + interval preset chips (the same strip,
+  // Voices tab only).
   if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode === 'voices') {
     const sp = voiceSnapPill(p);
     if (x >= sp.x - 6 && x <= sp.x + sp.w + 6 && y >= sp.y - 4 && y <= sp.y + sp.h + 4) return { type: 'voicesnap' };
+    for (const b of voiceIntervalButtons(p)) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return { type: 'voiceint', st: b.st };
+    }
     return { type: 'bar' };
   }
   if (y >= p.top && y <= p.bottom) {
@@ -1092,6 +1119,16 @@ canvas.addEventListener('pointerdown', e => {
   if (hit.type === 'voicesnap') {
     creatorVoiceSnap = !creatorVoiceSnap;
     saveSettings();
+    return;
+  }
+  if (hit.type === 'voiceint') {
+    // Jump the selected voice's semitone offset to the tapped interval.
+    const v = selectedVoice();
+    if (v) {
+      v.st = Math.max(VOICE_PARAM_DEFS[0].min, Math.min(VOICE_PARAM_DEFS[0].max, hit.st));
+      creatorPtr = null;
+      previewAndSave();
+    }
     return;
   }
   if (hit.type === 'vparam') {
@@ -1770,6 +1807,27 @@ function drawCreator(now) {
     ctx.fillText(creatorVoiceSnap ? 'Snap on' : 'Snap', sp.x + sp.w / 2, sp.y + sp.h / 2 + 3);
   }
 
+  // ---- Interval preset chips (Voices tab only, right of the Snap pill) ----
+  if (creatorSubmode === 'voices') {
+    const v = selectedVoice();
+    const active = v ? Math.round(+v.st || 0) : NaN;
+    for (const b of voiceIntervalButtons(p)) {
+      const on = active === b.st;
+      drawRoundRect(b.x, b.y, b.w, b.h, 8);
+      ctx.fillStyle = on ? '#2e5d34' : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = on ? '#2e5d34' : 'rgba(46,93,52,0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.globalAlpha = v ? 1 : 0.4;
+      ctx.fillStyle = on ? '#fff' : '#2e5d34';
+      ctx.font = '700 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 3);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // ---- Grid ----
   ctx.strokeStyle = 'rgba(46,93,52,0.14)';
   ctx.lineWidth = 1;
@@ -2117,7 +2175,7 @@ function drawCreator(now) {
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
   if (creatorSubmode === 'voices') {
-    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · Snap makes Semitones land on whole tones · tap a chip\u2019s 🔊 to mute it · ✕ deletes it · Reset clears them all', W / 2, H - 8);
+    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · tap an interval chip (−8 b3 3 4 5 8) to jump Semitones · Snap makes Semitones land on whole tones · tap a chip\u2019s 🔊 to mute it · ✕ deletes it · Reset clears them all', W / 2, H - 8);
   } else if (creatorDrawMode) {
     ctx.fillText(creatorEraseMode
       ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Mode to edit dots'

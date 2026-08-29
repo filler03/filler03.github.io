@@ -72,6 +72,7 @@ const STORAGE_KEY = 'growingTrees.settings.v9';
 const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.v7', 'growingTrees.settings.v6'];
 
 function saveSettings() {
+  if (storageWiped) return false;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview, voiceSnap: creatorVoiceSnap }));
     return true;
@@ -85,6 +86,9 @@ function saveSettings() {
 // 'input' (even mid-slider-drag) is cheap, and there is never a debounce window
 // in which an edit exists only in memory and could be lost on a fast reload.
 let settingsSaveTimer = null;
+// Set when the user wipes saved data so the pagehide/visibility flush on the
+// way out skips re-writing the just-cleared keys.
+let storageWiped = false;
 function scheduleSettingsSave() {
   clearTimeout(settingsSaveTimer);
   saveSettings();
@@ -782,4 +786,15 @@ document.getElementById('resetDefaults').addEventListener('click', () => {
 document.getElementById('clear').addEventListener('click', () => {
   stopGestureNote();
   clearHud();
+});
+
+// Wipe everything the game has saved to localStorage, then reload so the next
+// boot starts from fresh defaults.
+document.getElementById('clearStorage').addEventListener('click', () => {
+  if (!window.confirm('Clear all saved data for Growing Trees?\n\nThis erases every sound, gesture, and view setting from this browser and reloads the page with fresh defaults.')) return;
+  clearTimeout(settingsSaveTimer);
+  storageWiped = true;
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  for (const k of LEGACY_STORAGE_KEYS) { try { localStorage.removeItem(k); } catch (e) {} }
+  location.reload();
 });

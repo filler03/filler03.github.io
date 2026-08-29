@@ -402,6 +402,18 @@
     margin-bottom: 8px;
   }
   #resetDefaults:hover { background: #e7f4d7; }
+  #clearStorage {
+    width: 100%;
+    padding: 9px;
+    border: 1px solid #d9534f;
+    border-radius: 10px;
+    background: #fdf0ef;
+    color: #d9534f;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 0;
+  }
+  #clearStorage:hover { background: #fbe3e2; }
 </style>
 </head>
 <body>
@@ -417,6 +429,9 @@
   </div>
   <div class="tab-scroll">
   <div class="panel-cols">
+  <div class="panel-actions top">
+    <button id="clearStorage">🗑 Clear saved data</button>
+  </div>
   <div class="panel-actions top">
     <button id="clear">Stop sounds 🛑</button>
     <button id="resetDefaults">↺ Reset defaults</button>
