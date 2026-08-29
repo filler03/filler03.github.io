@@ -123,6 +123,19 @@ document.addEventListener('visibilitychange', () => {
 // swipe-to-close, so also flush on pagehide.
 window.addEventListener('pagehide', flushSettingsSave);
 
+// Preserve a segment's line-type config through a save/load round trip. A
+// missing or malformed seg collapses to null (the straight-line default).
+function segFromSaved(s) {
+  if (!s || typeof s !== 'object') return null;
+  const t = (s.type === 'stairs' || s.type === 'spring' || s.type === 'pulse') ? s.type : 'line';
+  return {
+    type: t,
+    stairs: Math.max(2, Math.min(16, Math.round(+s.stairs || 4))),
+    freq: Math.max(0.25, Math.min(16, +s.freq || 2)),
+    depth: Math.max(0, Math.min(1, +s.depth || 0.15)),
+  };
+}
+
 // Merge saved settings over the defaults (in case older saves lack keys).
 function loadSavedSettings() {
   try {
@@ -147,13 +160,17 @@ function loadSavedSettings() {
     GESTURE = g;
     const env = clone(DEFAULT_ENVELOPE);
     if (d.envelope && Array.isArray(d.envelope.components) && d.envelope.components.length) {
-      env.components = d.envelope.components.map((c, i) => ({
-        id: c.id || newCompId(),
-        name: String(c.name || ('Component ' + (i + 1))).slice(0, 24),
-        duration: Math.max(1, Math.min(5000, +c.duration || 250)),
-        startValue: Math.max(0, Math.min(100, +c.startValue || 0)),
-        endValue: Math.max(0, Math.min(100, +c.endValue || 100)),
-      }));
+      env.components = d.envelope.components.map((c, i) => {
+        const comp = {
+          id: c.id || newCompId(),
+          name: String(c.name || ('Component ' + (i + 1))).slice(0, 24),
+          duration: Math.max(1, Math.min(5000, +c.duration || 250)),
+          startValue: Math.max(0, Math.min(100, +c.startValue || 0)),
+          endValue: Math.max(0, Math.min(100, +c.endValue || 100)),
+        };
+        if (c && c.seg) comp.seg = segFromSaved(c.seg);
+        return comp;
+      });
       if (d.envelope.beginReleaseIndex != null) env.beginReleaseIndex = +d.envelope.beginReleaseIndex;
       if (d.envelope.holdStartIndex != null) env.holdStartIndex = +d.envelope.holdStartIndex;
       if (d.envelope.holdEndIndex != null) env.holdEndIndex = +d.envelope.holdEndIndex;
@@ -202,10 +219,14 @@ function loadSavedSettings() {
     // single `harmonics` amplitude set, which becomes one custom layer.
     function curveFromSaved(l) {
       if (l && Array.isArray(l.curve) && l.curve.length >= 2) {
-        const pts = l.curve.map((p, k) => ({
-          t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k) || 0)),
-          v: Math.max(0, Math.min(1, +((p && p.v) != null ? p.v : 1) || 1)),
-        }));
+        const pts = l.curve.map((p, k) => {
+          const pt = {
+            t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k) || 0)),
+            v: Math.max(0, Math.min(1, +((p && p.v) != null ? p.v : 1) || 1)),
+          };
+          if (p && p.seg) pt.seg = segFromSaved(p.seg);
+          return pt;
+        });
         pts.sort((a, b) => a.t - b.t);
         const out = [];
         for (const p of pts) {
@@ -227,10 +248,14 @@ function loadSavedSettings() {
     function pitchEnvFromSaved(pe) {
       if (!pe || !Array.isArray(pe.points) || pe.points.length < 2) return null;
       const range = Math.max(1, Math.min(MAX_PITCH_ENV_RANGE, +pe.range || 1));
-      const points = pe.points.map((p, k) => ({
-        t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k / (pe.points.length - 1)) || 0)),
-        st: Math.max(-range, Math.min(range, +((p && p.st) != null ? p.st : 0) || 0)),
-      }));
+      const points = pe.points.map((p, k) => {
+        const pt = {
+          t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k / (pe.points.length - 1)) || 0)),
+          st: Math.max(-range, Math.min(range, +((p && p.st) != null ? p.st : 0) || 0)),
+        };
+        if (p && p.seg) pt.seg = segFromSaved(p.seg);
+        return pt;
+      });
       points.sort((a, b) => a.t - b.t);
       return { range, points };
     }
@@ -645,22 +670,23 @@ let ENV_ID = 0;
 function newCompId() { return 'c' + (++ENV_ID) + Math.random().toString(36).slice(2, 6); }
 
 // Keep the envelope's markers sane after any add/delete/reorder: the release
-// always starts right after the hold range ends (so no component is ever
-// skipped) and the hold range is non-empty and lies before the release. Start
-// values chain into the next component, so only the first one keeps an
-// independent start.
+// starts right after the hold range ends (so no component is ever skipped) and
+// the hold range is non-empty and lies before the release (it may be empty when
+// the whole envelope is one hold with no release). Start values chain into the
+// next component, so only the first one keeps an independent start.
 function clampEnvelopeIndexes() {
   const n = ENVELOPE.components.length;
   if (n <= 1) {
-    // A lone component is the whole release: no hold, no body.
+    // A lone component is the whole body/hold: no release section. REL then
+    // sits at the far right, HOLD and CUT at the far left.
     ENVELOPE.holdStartIndex = 0;
     ENVELOPE.holdEndIndex = 0;
-    ENVELOPE.beginReleaseIndex = 0;
-    ENVELOPE.earlyCutIndex = 0;
+    ENVELOPE.beginReleaseIndex = 1;
+    ENVELOPE.earlyCutIndex = -1;
     chainStartValues(ENVELOPE);
     return;
   }
-  ENVELOPE.holdEndIndex = Math.max(0, Math.min(n - 2, ENVELOPE.holdEndIndex));
+  ENVELOPE.holdEndIndex = Math.max(0, Math.min(n - 1, ENVELOPE.holdEndIndex));
   ENVELOPE.holdStartIndex = Math.max(0, Math.min(ENVELOPE.holdEndIndex, ENVELOPE.holdStartIndex));
   ENVELOPE.beginReleaseIndex = ENVELOPE.holdEndIndex + 1;
   ENVELOPE.earlyCutIndex = Math.max(0, Math.min(ENVELOPE.beginReleaseIndex - 1, ENVELOPE.earlyCutIndex));

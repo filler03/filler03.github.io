@@ -171,6 +171,59 @@ function chainStartValues(env) {
   }
 }
 
+/* ---- Segment line types ----
+   Every envelope segment — an envelope component, a mix-curve span, or a
+   pitch-envelope span — interpolates from its start value to its end value via
+   one of four shapes:
+   - 'line':   the straight ramp (the default; old data has no seg at all).
+   - 'stairs': N equal-width steps; each holds its level, the last lands on end.
+   - 'spring': a damped sine wobble around the ramp, settling on the end point.
+   - 'pulse':  like spring but with hard corners (square-wave wobble).
+   A segment stores { type, stairs, freq, depth } on its FROM element (the
+   component / the segment's start point). stairs = step count (2..16);
+   freq = the number of up-and-down wobble cycles across the segment (0.25..16);
+   depth = wobble amplitude as a fraction of the curve's full value scale
+   (0..1) — the depth is absolute (independent of the segment's rise), while
+   the freq is a count of cycles within the segment itself. */
+const DEFAULT_SEG = { type: 'line', stairs: 4, freq: 2, depth: 0.15 };
+
+// The validated segment config for an element (one carrying a .seg, or a bare
+// seg object). Anything missing falls back to the defaults, so old data reads
+// as a straight line.
+function segOf(x) {
+  const s = (x && typeof x === 'object' && x.seg && typeof x.seg === 'object') ? x.seg : x;
+  if (!s || typeof s !== 'object') return DEFAULT_SEG;
+  const t = (s.type === 'stairs' || s.type === 'spring' || s.type === 'pulse') ? s.type : 'line';
+  return {
+    type: t,
+    stairs: Math.max(2, Math.min(16, Math.round(+s.stairs || DEFAULT_SEG.stairs))),
+    freq: Math.max(0.25, Math.min(16, +s.freq || DEFAULT_SEG.freq)),
+    depth: Math.max(0, Math.min(1, +s.depth || DEFAULT_SEG.depth)),
+  };
+}
+
+// The value at progress p (0..1) through a segment from `from` to `to` (in the
+// curve's native units), with `scale` the curve's full value span (1 for the
+// normalized volume/mix curves, the semitone range for pitch envelopes). freq
+// is the count of wobble cycles across the segment (each cycle is one up and
+// one down); depth is a fixed fraction of full scale, so the wobble amplitude
+// does not depend on how far the segment rises or falls.
+function segValueAt(x, from, to, p, scale) {
+  const s = segOf(x);
+  const q = clamp01(p);
+  if (s.type === 'stairs') {
+    const n = Math.max(2, s.stairs);
+    return from + (to - from) * clamp01(Math.min(1, Math.floor(q * n) / (n - 1)));
+  }
+  const base = from + (to - from) * q;
+  if (s.type === 'spring' || s.type === 'pulse') {
+    const ph = Math.PI * 2 * s.freq * q;
+    const w = Math.sin(ph);
+    return base + s.depth * scale * (1 - q) * (s.type === 'pulse' ? Math.sign(w) : w);
+  }
+  return base;
+}
+
 /* ---- Envelope math (pure) ----
    Relative component value (0..1) from a 0..100 setting. */
 function compValue(c, v) {
@@ -192,7 +245,7 @@ function relValueAtList(comps, t, seed) {
     const end = compValue(c, c.endValue);
     if (t < acc + dur) {
       const p = dur > 0 ? (t - acc) / dur : 1;
-      return cur + (end - cur) * p;
+      return clamp01(segValueAt(c, cur, end, p, 1));
     }
     cur = end;
     acc += dur;
@@ -253,16 +306,6 @@ function sampleComps(comps, N, seed) {
     curve[k] = relValueAtList(comps, t, seed);
   }
   return { curve, totalMs: total };
-}
-
-// Sample the looping body shape over a real-time window (used while holding).
-function sampleRelBody(env, from, to, N) {
-  const curve = new Float32Array(Math.max(2, N));
-  for (let k = 0; k < curve.length; k++) {
-    const t = from + (to - from) * k / (curve.length - 1);
-    curve[k] = relValueBody(env, t, true);
-  }
-  return curve;
 }
 
 // Per-level chime settings: key/root note (pitch), wave type, and ADSR
@@ -347,7 +390,7 @@ function curveValue(layer, t) {
     if (t >= a.t && t <= b.t) {
       const span = b.t - a.t;
       const f = span > 0 ? (t - a.t) / span : 0;
-      return clamp01(a.v + (b.v - a.v) * f);
+      return clamp01(segValueAt(a, a.v, b.v, f, 1));
     }
   }
   return clamp01(hi.v);
@@ -379,7 +422,7 @@ function pitchStAt(env, t) {
     if (t >= a.t && t <= b.t) {
       const span = b.t - a.t;
       const f = span > 0 ? (t - a.t) / span : 0;
-      return a.st + (b.st - a.st) * f;
+      return segValueAt(a, a.st, b.st, f, Math.max(1, env.range || 1));
     }
   }
   return hi.st;
