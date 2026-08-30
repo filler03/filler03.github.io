@@ -336,11 +336,12 @@ function hitTestHarm(x, y, p) {
 }
 
 /* ---- Pitch envelope helpers ----
-   The Pitch tab edits either the master envelope (all layers) or one layer's
-   own. Both are breakpoint curves over the note's timeline with a signed
-   semitone axis (± the envelope's range). A layer's own envelope may not exist
-   yet — it's created lazily on first edit, and Reset clears it away again.
-   The master overrides every layer while it exists (non-destructively). */
+   The Pitch tab edits either the master envelope (fallback for layers without
+   their own) or one layer's own. Both are breakpoint curves over the note's
+   timeline with a signed semitone axis (± the envelope's range). A layer's own
+   envelope may not exist yet — it's created lazily on first edit, and Reset
+   clears it away again. A layer plays its OWN envelope when it has one; the
+   master only applies to layers without one. */
 function selectedPitchEnvOrNull() {
   if (creatorPitchSel === 'master') {
     return (MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2)
@@ -392,6 +393,72 @@ function removePitchPoint(env, idx) {
 function pitchRangePill(p) {
   const y = p.top + 8, w = 96, h = 26;
   return { x: p.left + 4, y, w, h };
+}
+
+// Clear pill: removes the envelope being edited (a layer's own, or the master
+// fallback) so that layer reverts to the master / base pitch. Present only in
+// the Pitch tab and only when the selected envelope actually exists.
+function pitchClearPill(p) {
+  const rp = pitchRangePill(p);
+  const w = 64, h = 26;
+  const x = rp.x + rp.w + 8, y = rp.y;
+  return { x, y, w, h };
+}
+
+// Is the envelope currently being edited present (and therefore clearable)?
+function selectedPitchEnvExists() {
+  return !!selectedPitchEnvOrNull();
+}
+
+/* ---- Volume envelope helpers ----
+   The master volume envelope (Vol) is the note's ADSR: it shapes every
+   oscillator's loudness. Each oscillator also has its own mix curve — its
+   level over the note. A layer "has its own" when that curve is customized;
+   layers still on the default flat curve simply follow Vol. */
+// A layer's curve is customized (differs from the default flat full-level).
+function layerHasCustomCurve(l) {
+  const c = l && l.curve;
+  if (!c || !c.length) return false;
+  if (c.length !== 2) return true;
+  const a = c[0], b = c[1];
+  if (a && a.seg && typeof a.seg === 'object') return true;
+  if (Math.abs((a && a.t || 0) - 0) > 1e-9 || Math.abs((a && a.v != null ? a.v : 1) - 1) > 1e-9) return true;
+  if (Math.abs((b && b.t != null ? b.t : 1) - 1) > 1e-9 || Math.abs((b && b.v != null ? b.v : 1) - 1) > 1e-9) return true;
+  return false;
+}
+
+// Is the master volume envelope still its default ADSR (nothing to clear)?
+function envelopeIsDefault(env) {
+  const d = DEFAULT_ENVELOPE;
+  if (!env || !env.components || env.components.length !== d.components.length) return false;
+  if (env.holdStartIndex !== d.holdStartIndex || env.holdEndIndex !== d.holdEndIndex ||
+      env.beginReleaseIndex !== d.beginReleaseIndex || env.earlyCutIndex !== d.earlyCutIndex) return false;
+  for (let i = 0; i < d.components.length; i++) {
+    const c = env.components[i], dc = d.components[i];
+    if (!c || c.duration !== dc.duration || c.startValue !== dc.startValue || c.endValue !== dc.endValue ||
+        (c.name || '') !== (dc.name || '')) return false;
+    const hasSeg = c.seg && typeof c.seg === 'object';
+    const defHasSeg = dc.seg && typeof dc.seg === 'object';
+    if (hasSeg !== defHasSeg) return false;
+    if (hasSeg && defHasSeg) {
+      const s1 = c.seg, s2 = dc.seg;
+      if ((s1.type || '') !== (s2.type || '') || +s1.stairs !== +s2.stairs ||
+          +s1.freq !== +s2.freq || +s1.depth !== +s2.depth) return false;
+    }
+  }
+  return true;
+}
+
+// Clear pill (Volume tab, plot top-left): resets the selected envelope — the
+// master ADSR, or the selected layer's mix curve — back to default.
+function volClearPill(p) {
+  const w = 64, h = 26;
+  return { x: p.left + 4, y: p.top + 8, w, h };
+}
+
+// Is there something to clear for the volume envelope being edited?
+function selectedVolClearable() {
+  return creatorVolSel ? !envelopeIsDefault(ENVELOPE) : layerHasCustomCurve(OSC_STACK.layers[selectedLayerIdx]);
 }
 
 /* ---- Envelope (component model) helpers ----
@@ -993,10 +1060,10 @@ function voiceChipRects(p) {
   const rects = [];
   const vs = selectedVoicesLayer() ? layerVoices(selectedVoicesLayer()) : [];
   for (let i = 0; i < vs.length; i++) {
-    rects.push({ x: p.left + i * 88, y: LIFE_ROW_CY - 13, w: 84, h: 26 });
+    rects.push({ x: p.left + i * 104, y: LIFE_ROW_CY - 14, w: 100, h: 34 });
   }
   if (vs.length < MAX_LAYER_VOICES) {
-    rects.push({ x: p.left + vs.length * 88 + 6, y: LIFE_ROW_CY - 13, w: 40, h: 26 });
+    rects.push({ x: p.left + vs.length * 104 + 6, y: LIFE_ROW_CY - 14, w: 50, h: 34 });
   }
   return rects;
 }
@@ -1335,7 +1402,7 @@ function hitTestCreator(x, y) {
     return { type: 'bar' };
   }
   const p = creatorPlot();
-  if (y >= 66 && y <= 90) {
+  if (y >= 64 && y <= 90) {
     const sw = (creatorSubmode === 'note' || creatorSubmode === 'pitch') ? 1 : 0;   // note pins Vol first; pitch pins Master
     // Auto-preview toggle + manual preview button (right of the swatches).
     const tp = creatorTopPills();
@@ -1355,14 +1422,13 @@ function hitTestCreator(x, y) {
     for (let i = 0; i < OSC_STACK.layers.length; i++) {
       const cx = p.left + sw * 76 + i * 76;
       // The 🔊/🔇 button (the swatch's icon) toggles the layer's mute.
-      if (x >= cx && x <= cx + 22 && y >= 67 && y <= 89) return { type: 'layermute', layerIdx: i };
-      if (x >= cx && x <= cx + 70) return { type: 'layer', layerIdx: i };
+      if (x >= cx && x <= cx + 24 && y >= 64 && y <= 90) return { type: 'layermute', layerIdx: i };
+      if (x >= cx && x <= cx + 72) return { type: 'layer', layerIdx: i };
     }
-    // Master swatch (pinned first in the Pitch tab), with its ✕ clear badge.
-    if (creatorSubmode === 'pitch' && MASTER_PITCH_ENV && Math.hypot(x - (p.left + 62), y - 72) < 15) return { type: 'delmaster' };
-    if (creatorSubmode === 'pitch' && x >= p.left && x <= p.left + 70) return { type: 'master' };
+    // Master swatch (pinned first in the Pitch tab).
+    if (creatorSubmode === 'pitch' && x >= p.left && x <= p.left + 72) return { type: 'master' };
     // Vol swatch (pinned first in the Volume-envelope tab).
-    if (creatorSubmode === 'note' && x >= p.left && x <= p.left + 70) return { type: 'vol' };
+    if (creatorSubmode === 'note' && x >= p.left && x <= p.left + 72) return { type: 'vol' };
     // Preview pitch selector (◀ name ▶)
     if (x >= W - 196 && x <= W - 108) {
       const dir = x < W - 196 + 29 ? -1 : (x < W - 196 + 59 ? 0 : 1);
@@ -1373,7 +1439,7 @@ function hitTestCreator(x, y) {
   }
   // Note-life row / voice-chips strip below the controls row.
   if (creatorSubmode === 'voices') {
-    if (y >= LIFE_ROW_CY - 16 && y <= LIFE_ROW_CY + 16) {
+    if (y >= LIFE_ROW_CY - 14 && y <= LIFE_ROW_CY + 20) {
       const l = selectedVoicesLayer();
       const nV = l ? layerVoices(l).length : 0;
       const rects = voiceChipRects(p);
@@ -1382,9 +1448,9 @@ function hitTestCreator(x, y) {
         if (x >= rc.x && x <= rc.x + rc.w && y >= rc.y && y <= rc.y + rc.h) {
           if (i >= nV) return { type: 'voiceaddchip' };
           // ✕ badge on the selected chip deletes that voice.
-          if (i === creatorVoiceSel && Math.hypot(x - (rc.x + rc.w - 12), y - LIFE_ROW_CY) < 12) return { type: 'voicedelchip', idx: i };
+          if (i === creatorVoiceSel && Math.hypot(x - (rc.x + rc.w - 15), y - LIFE_ROW_CY) < 13) return { type: 'voicedelchip', idx: i };
           // M badge (left) toggles that voice's mute.
-          if (Math.hypot(x - (rc.x + 12), y - LIFE_ROW_CY) < 16) return { type: 'voicemute', idx: i };
+          if (Math.hypot(x - (rc.x + 16), y - LIFE_ROW_CY) < 18) return { type: 'voicemute', idx: i };
           return { type: 'voicechip', idx: i };
         }
       }
@@ -1430,12 +1496,19 @@ function hitTestCreator(x, y) {
       const tb = drawToolbar(p);
       if (x >= tb.mode.x && x <= tb.mode.x + tb.mode.w && y >= tb.mode.y && y <= tb.mode.y + tb.mode.h) return { type: 'modetoggle' };
     }
-    // ±range stepper pill (Pitch tab, plot top-left).
+    // ±range stepper pill (Pitch tab, plot top-left) + the Clear pill beside it.
     if (creatorSubmode === 'pitch') {
       const rp = pitchRangePill(p);
       if (x >= rp.x && x <= rp.x + rp.w && y >= rp.y && y <= rp.y + rp.h) {
         return { type: 'pitchrange', dir: x < rp.x + rp.w * 0.35 ? -1 : (x > rp.x + rp.w * 0.65 ? 1 : 0) };
       }
+      const cp = pitchClearPill(p);
+      if (selectedPitchEnvExists() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'pitchclear' };
+    }
+    // Clear pill (Volume tab, plot top-left): reset the selected envelope.
+    if (creatorSubmode === 'note' && !creatorSegMode) {
+      const cp = volClearPill(p);
+      if (selectedVolClearable() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'volclear' };
     }
     // Voices tab: one slider per parameter with −/+ nudge buttons at both ends.
     if (creatorSubmode === 'voices') {
@@ -1630,19 +1703,34 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   if (hit.type === 'master') {
-    // Selecting the Master swatch materializes the master envelope: while it
-    // exists it drives every layer (flat = no bend anywhere).
+    // The Master swatch just picks the fallback envelope to edit; it is created
+    // lazily on the first draw/tap (like a layer's own envelope).
     creatorPitchSel = 'master';
-    if (!MASTER_PITCH_ENV) MASTER_PITCH_ENV = defaultPitchEnv();
     creatorPtr = null;
     clearSegSelection();
     maybeAutoPreview();
     saveSettings();
     return;
   }
-  if (hit.type === 'delmaster') {
-    // Non-destructive override off: per-layer envelopes take over again.
-    MASTER_PITCH_ENV = null;
+  if (hit.type === 'pitchclear') {
+    // Removes the envelope being edited: a layer's own reverts to inheriting
+    // the master; clearing the master removes the fallback entirely.
+    if (creatorPitchSel === 'master') MASTER_PITCH_ENV = null;
+    else OSC_STACK.layers[creatorPitchSel].pitchEnv = null;
+    creatorPtr = null;
+    clearSegSelection();
+    previewAndSave();
+    return;
+  }
+  if (hit.type === 'volclear') {
+    // Resets the volume envelope being edited to default: the master ADSR, or
+    // the selected layer's mix curve (it returns to following Vol).
+    if (creatorVolSel) {
+      ENVELOPE = clone(DEFAULT_ENVELOPE);
+      clampEnvelopeIndexes();
+    } else {
+      resetLayerCurve(selectedLayer());
+    }
     creatorPtr = null;
     clearSegSelection();
     previewAndSave();
@@ -2003,6 +2091,18 @@ function drawRoundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+// Background pill behind an oscillator tab (the Vol/Master swatch or one of the
+// Osc swatches). The selected tab is filled with a soft green and given a bold
+// outline so the active oscillator is obvious at a glance.
+function drawSwatchTab(x, selected) {
+  drawRoundRect(x, 64, 72, 26, 9);
+  ctx.fillStyle = selected ? '#dff0d3' : '#fff';
+  ctx.fill();
+  ctx.strokeStyle = selected ? '#2e5d34' : 'rgba(46,93,52,0.25)';
+  ctx.lineWidth = selected ? 2 : 1;
+  ctx.stroke();
+}
+
 function drawCreator(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, W, H);
@@ -2054,37 +2154,48 @@ function drawCreator(now) {
   // ---- Legend (Vol/Master + layer colors + add/remove + reset) ----
   const sw = (creatorSubmode === 'note' || creatorSubmode === 'pitch') ? 1 : 0;   // note pins Vol first; pitch pins Master
   if (creatorSubmode === 'note') {
+    drawSwatchTab(p.left, creatorVolSel);
     ctx.fillStyle = '#1b4523';
     ctx.beginPath();
-    ctx.arc(p.left + 7, 78, 6, 0, Math.PI * 2);
+    ctx.arc(p.left + 7, 76, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.font = (creatorVolSel ? '800 ' : '700 ') + '11px sans-serif';
     ctx.fillStyle = creatorVolSel ? '#1b4523' : '#6b8e5a';
     ctx.textAlign = 'left';
     ctx.fillText('Vol', p.left + 18, 82);
+    // Small 'all' pill: the Vol envelope shapes every oscillator.
+    const vx = p.left + 42;
+    drawRoundRect(vx, 71, 26, 13, 6);
+    ctx.fillStyle = '#e6f2dd';
+    ctx.fill();
+    ctx.strokeStyle = '#3c7a45';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#2e5d34';
+    ctx.font = '800 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('all', vx + 13, 80);
+    ctx.textAlign = 'left';
   }
   if (creatorSubmode === 'pitch') {
     const masterSel = creatorPitchSel === 'master';
+    const masterOn = !!(MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2);
+    drawSwatchTab(p.left, masterSel);
     ctx.fillStyle = '#1b4523';
     ctx.beginPath();
-    ctx.arc(p.left + 7, 78, 6, 0, Math.PI * 2);
+    ctx.arc(p.left + 7, 76, 6, 0, Math.PI * 2);
     ctx.fill();
-    ctx.font = (masterSel ? '800 ' : '700 ') + '11px sans-serif';
-    ctx.fillStyle = masterSel ? '#1b4523' : '#6b8e5a';
+    ctx.font = ((masterSel || masterOn) ? '800 ' : '700 ') + '11px sans-serif';
+    ctx.fillStyle = masterSel ? '#1b4523' : (masterOn ? '#3c7a45' : '#6b8e5a');
     ctx.textAlign = 'left';
     ctx.fillText('Master', p.left + 18, 82);
-    if (MASTER_PITCH_ENV) {
-      // ✕ clear-master badge: turns the override off so per-layer envelopes
-      // take over again (they are kept, not erased).
-      const bx = p.left + 62, by = 72;
+    if (masterOn) {
+      // Small green dot: the fallback envelope exists and is driving layers
+      // that have no envelope of their own.
       ctx.beginPath();
-      ctx.arc(bx, by, 8, 0, Math.PI * 2);
-      ctx.fillStyle = '#c0392b';
+      ctx.arc(p.left + 68, 73, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#3c7a45';
       ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = '800 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('✕', bx, by + 4);
     }
   }
   for (let i = 0; i < OSC_STACK.layers.length; i++) {
@@ -2092,9 +2203,10 @@ function drawCreator(now) {
     const sel = creatorSubmode === 'pitch' ? creatorPitchSel === i : i === selectedLayerIdx;
     const muted = !!(OSC_STACK.layers[i].muted);
     const color = OSC_COLORS[i % OSC_COLORS.length];
+    drawSwatchTab(cx, sel);
     // Mute button (the swatch's icon): 🔊 when the layer is live, 🔇 when
     // muted. A white chip with a layer-colored border (red border when muted).
-    drawRoundRect(cx + 1, 68, 20, 20, 6);
+    drawRoundRect(cx + 1, 65, 22, 22, 7);
     ctx.fillStyle = muted ? '#fdecea' : '#fff';
     ctx.fill();
     ctx.strokeStyle = muted ? '#c0392b' : color;
@@ -2103,12 +2215,50 @@ function drawCreator(now) {
     ctx.font = '13px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(muted ? '🔇' : '🔊', cx + 11, 78);
+    ctx.fillText(muted ? '🔇' : '🔊', cx + 12, 77);
     ctx.textBaseline = 'alphabetic';
     ctx.font = (sel ? '800 ' : '700 ') + '11px sans-serif';
     ctx.fillStyle = muted ? '#9db89c' : (sel ? '#1b4523' : '#6b8e5a');
     ctx.textAlign = 'left';
-    ctx.fillText('Osc ' + (i + 1), cx + 27, 82);
+    ctx.fillText('Osc ' + (i + 1), cx + 28, 82);
+    // Status badge (bottom-right of the swatch): which envelope this oscillator
+    // actually plays. Volume: 'own' = a customized mix curve, 'vol' = follows
+    // the master Vol ADSR. Pitch: 'own' = its own pitch envelope, 'M' = it
+    // inherits the master fallback because it has no envelope of its own.
+    if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
+      const l = OSC_STACK.layers[i];
+      let hasOwn, usesMaster;
+      if (creatorSubmode === 'pitch') {
+        hasOwn = !!(l && l.pitchEnv && l.pitchEnv.points && l.pitchEnv.points.length >= 2);
+        usesMaster = !hasOwn && !!(MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2);
+      } else {
+        hasOwn = layerHasCustomCurve(l);
+        usesMaster = !hasOwn;   // default curve → follows the master Vol envelope
+      }
+      if (hasOwn || usesMaster) {
+        const bx = cx + 45, by = 84, bw = 26, bh = 13;
+        drawRoundRect(bx, by, bw, bh, 7);
+        if (hasOwn) {
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = '800 8px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('own', bx + bw / 2, by + bh / 2 + 3);
+        } else {
+          ctx.fillStyle = '#e6f2dd';
+          ctx.fill();
+          ctx.strokeStyle = '#3c7a45';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = '#2e5d34';
+          ctx.font = '800 8px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(creatorSubmode === 'pitch' ? 'M' : 'vol', bx + bw / 2, by + bh / 2 + 3);
+        }
+        ctx.textAlign = 'left';
+      }
+    }
     // ✕ delete badge on the selected layer (layers only, hidden when it's the last one).
     if (sel && (creatorSubmode === 'pitch' || !creatorVolSel) && OSC_STACK.layers.length > 1) {
       const bx = cx + 62, by = 72;
@@ -2189,29 +2339,36 @@ function drawCreator(now) {
       const rc = rects[i], selChip = i === creatorVoiceSel;
       const v = l.voices[i];
       const vMuted = !!(v && v.muted);
-      drawRoundRect(rc.x, rc.y, rc.w, rc.h, 8);
+      drawRoundRect(rc.x, rc.y, rc.w, rc.h, 10);
       ctx.fillStyle = selChip ? (vMuted ? '#5c8a62' : '#2e5d34') : (vMuted ? '#e5eee1' : '#fff');
       ctx.fill();
-      ctx.strokeStyle = vMuted ? 'rgba(107,142,90,0.55)' : 'rgba(46,93,52,0.4)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = selChip ? '#1b4523' : (vMuted ? 'rgba(107,142,90,0.55)' : 'rgba(46,93,52,0.4)');
+      ctx.lineWidth = selChip ? 2 : 1;
       ctx.stroke();
       // Mute badge: the button at the left of each chip (tap it to mute/unmute).
-      const mbx = rc.x + 12, mby = LIFE_ROW_CY;
+      const mbx = rc.x + 16, mby = LIFE_ROW_CY;
       ctx.beginPath();
-      ctx.arc(mbx, mby, 8.5, 0, Math.PI * 2);
+      ctx.arc(mbx, mby, 10, 0, Math.PI * 2);
       ctx.fillStyle = vMuted ? '#c0392b' : '#eef5ea';
       ctx.fill();
       ctx.strokeStyle = vMuted ? '#c0392b' : 'rgba(46,93,52,0.5)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      ctx.font = '12px sans-serif';
+      ctx.font = '14px sans-serif';
       ctx.textBaseline = 'middle';
       ctx.fillText(vMuted ? '🔇' : '🔊', mbx, mby + 1);
       ctx.textBaseline = 'alphabetic';
-      const lbl = 'V' + (i + 1) + ' · ' + (Math.round((+v.st || 0) * 100) / 100) + ' st';
-      ctx.fillStyle = selChip ? '#fff' : (vMuted ? '#9db89c' : '#2e5d34');
+      // Two-part label: voice number on the left, semitone offset on the right,
+      // so the value never runs into the delete badge at the far end.
+      const lblColor = selChip ? '#fff' : (vMuted ? '#9db89c' : '#2e5d34');
+      ctx.fillStyle = lblColor;
       ctx.font = '700 10px sans-serif';
-      ctx.fillText(lbl, rc.x + rc.w / 2 + 8 - (selChip ? 6 : 0), rc.y + 17);
+      ctx.textAlign = 'left';
+      ctx.fillText('V' + (i + 1), rc.x + 31, rc.y + rc.h / 2 + 4);
+      ctx.textAlign = 'right';
+      const stLbl = (Math.round((+v.st || 0) * 100) / 100) + ' st';
+      ctx.fillText(stLbl, rc.x + rc.w - 20, rc.y + rc.h / 2 + 4);
+      ctx.textAlign = 'center';
       if (vMuted && !selChip) {
         ctx.strokeStyle = '#c0392b';
         ctx.lineWidth = 1.5;
@@ -2222,24 +2379,24 @@ function drawCreator(now) {
       if (selChip) {
         ctx.fillStyle = '#c0392b';
         ctx.beginPath();
-        ctx.arc(rc.x + rc.w - 12, LIFE_ROW_CY, 9, 0, Math.PI * 2);
+        ctx.arc(rc.x + rc.w - 15, LIFE_ROW_CY, 10, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#fff';
-        ctx.font = '800 9px sans-serif';
-        ctx.fillText('✕', rc.x + rc.w - 12, LIFE_ROW_CY + 3);
+        ctx.font = '800 10px sans-serif';
+        ctx.fillText('✕', rc.x + rc.w - 15, LIFE_ROW_CY + 3);
       }
     }
     if (nV < MAX_LAYER_VOICES) {
       const rc = rects[nV];
-      drawRoundRect(rc.x, rc.y, rc.w, rc.h, 8);
+      drawRoundRect(rc.x, rc.y, rc.w, rc.h, 10);
       ctx.fillStyle = '#eef5ea';
       ctx.fill();
       ctx.strokeStyle = 'rgba(46,93,52,0.4)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = '#2e5d34';
-      ctx.font = '800 11px sans-serif';
-      ctx.fillText('+', rc.x + rc.w / 2, rc.y + 17);
+      ctx.font = '800 13px sans-serif';
+      ctx.fillText('+', rc.x + rc.w / 2, rc.y + rc.h / 2 + 4);
     }
   }
 
@@ -2479,6 +2636,21 @@ function drawCreator(now) {
         ctx.stroke();
       }
     }
+    // Clear pill (top-left): resets the volume envelope being edited — the
+    // master ADSR, or the selected layer's mix curve (back to following Vol).
+    if (!creatorSegMode && selectedVolClearable()) {
+      const cp = volClearPill(p);
+      drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#c0392b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
+    }
   }
 
   // ---- Pitch envelope (pitch sub-mode) ----
@@ -2503,8 +2675,11 @@ function drawCreator(now) {
       ctx.fillStyle = '#9db89c';
       ctx.font = '700 11px sans-serif';
       ctx.textAlign = 'center';
+      const masterOn = !!(MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2);
       ctx.fillText(creatorPitchSel === 'master'
-        ? 'Master has no pitch envelope · tap or draw to create one'
+        ? 'Master has no pitch envelope yet · tap or draw to create one'
+        : masterOn
+        ? 'Osc ' + (creatorPitchSel + 1) + ' inherits the Master (no envelope of its own) · draw to give it its own'
         : 'Osc ' + (creatorPitchSel + 1) + ' has no pitch envelope · tap or draw to create one', W / 2, p.top + p.ph / 2 - 14);
     } else {
       const r = Math.max(1, env.range || 1);
@@ -2546,6 +2721,22 @@ function drawCreator(now) {
     ctx.font = '700 11px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('−  ±' + rr + ' st  +', rp.x + rp.w / 2, rp.y + rp.h / 2 + 4);
+    // Clear pill (beside the range pill): removes the envelope being edited —
+    // a layer's own envelope, or the master fallback. Only shown while the
+    // selected envelope actually exists.
+    if (selectedPitchEnvExists()) {
+      const cp = pitchClearPill(p);
+      drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#c0392b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
+    }
   }
 
   // ---- Voices sliders (voices sub-mode) ----
@@ -2740,15 +2931,15 @@ function drawCreator(now) {
     ctx.fillText(creatorEraseMode
       ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Mode to edit dots'
       : creatorSubmode === 'note'
-      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
+      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope (the note\u2019s attack/decay/release, applied to all oscillators)' : 'selected oscillator mix curve (this oscillator\u2019s own level over the note)') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
       : creatorSubmode === 'pitch'
-        ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (all oscillators)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
+        ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (fallback for oscillators without their own)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
         : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots', W / 2, H - 8);
   } else {
     ctx.fillText(creatorSubmode === 'note'
-      ? 'Pick Vol or an oscillator above · tap a swatch\u2019s 🔊 to mute it · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap a curve to add a point or split · double-tap a dot to delete · tap Mode to shape a segment\u2019s line type'
+      ? 'Vol shapes every oscillator\u2019s attack/decay/release · a swatch\u2019s badge shows own (customized curve) vs vol (follows Vol) · Clear (top-left) resets the selected curve · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap to add · double-tap a dot to delete · tap Mode to shape a segment\u2019s line type'
 : creatorSubmode === 'pitch'
-          ? 'Master bends every oscillator while it exists (✕ clears it, revealing per-layer envelopes) · drag dots · tap to add · set ±range top-left · tap Mode to shape a segment\u2019s line type'
+          ? 'Each oscillator uses its own envelope when it has one, otherwise it inherits the Master (fallback) · swatches show which (own / M) · Clear (top-left) removes the selected envelope · drag dots · tap to add · set ±range top-left · tap Mode to shape a segment\u2019s line type'
           : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
   }
 }

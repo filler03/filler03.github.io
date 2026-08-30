@@ -331,10 +331,10 @@ function rampLayerMixToEnd(ds, startT, ms) {
 }
 
 /* ---- Pitch envelopes ----
-   Each layer's oscillator frequency follows its active pitch envelope (the
-   master when set, else its own), sampled across the same body/release timeline
-   as the mix curves so drawn features line up with HOLD/CUT/REL. Layers
-   without an envelope stay at their base pitch. */
+   Each layer's oscillator frequency follows its active pitch envelope (its own
+   when it has one, else the master as a fallback), sampled across the same
+   body/release timeline as the mix curves so drawn features line up with
+   HOLD/CUT/REL. Layers without any envelope stay at their base pitch. */
 
 // One-shot path (wait mode, chimes, previews): sample each layer's pitch
 // envelope across t0..tEnd into a frequency value curve.

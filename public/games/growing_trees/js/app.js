@@ -401,8 +401,8 @@ function curveValue(layer, t) {
    [{ t, st }] (t = note progress 0..1, st = semitone offset from the note's
    base pitch) interpolated linearly, 0 = no shift. `range` is the editor's
    vertical scale in semitones — the drawn curve spans ±range. The master
-   envelope, when set, overrides every layer's own envelope NON-destructively:
-   clearing the master reveals the per-layer shapes again. */
+   envelope is a fallback: each layer uses its OWN envelope when it has one,
+   otherwise it inherits the master; layers with neither stay at base pitch. */
 const MAX_PITCH_ENV_RANGE = 24;
 function defaultPitchEnv() {
   return { range: 1, points: [{ t: 0, st: 0 }, { t: 1, st: 0 }] };
@@ -428,12 +428,13 @@ function pitchStAt(env, t) {
   return hi.st;
 }
 
-// The pitch envelope actually driving a layer: the master when present,
-// otherwise that layer's own.
+// The pitch envelope actually driving a layer: its own when present, otherwise
+// the master as a fallback (layers with neither stay at their base pitch).
 function activePitchEnv(layerIdx) {
-  if (MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2) return MASTER_PITCH_ENV;
   const l = OSC_STACK.layers[layerIdx];
-  return (l && l.pitchEnv && l.pitchEnv.points && l.pitchEnv.points.length >= 2) ? l.pitchEnv : null;
+  if (l && l.pitchEnv && l.pitchEnv.points && l.pitchEnv.points.length >= 2) return l.pitchEnv;
+  if (MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2) return MASTER_PITCH_ENV;
+  return null;
 }
 
 // A base frequency shifted by `st` semitones.
