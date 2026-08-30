@@ -109,9 +109,17 @@ creatorBtn.addEventListener('click', () => {
   });
 })();
 
-/* ---- Plot geometry ---- */
+/* ---- Plot geometry ----
+   The plot is the graph itself: nothing but the curve, its grid, its axis
+   labels, and its time markers render inside it. Every control — the mode
+   toolbar, the Clear pill, the ±range pill, and the segment editor — lives in
+   the dedicated widget band above the plot, so widgets never cover the graph.
+   The band sits between the marker lane (ends at MARKER_LANE_BOTTOM) and the
+   plot. */
+const WIDGET_BAND_TOP = 180, WIDGET_BAND_BOTTOM = 214;   // pill strip between the marker lane and the plot
+const WIDGET_PILL_Y = 184, WIDGET_PILL_H = 26;
 function creatorPlot() {
-  const top = 180, bottom = H - 38, left = 20, right = W - 14;
+  const top = 218, bottom = H - 38, left = 20, right = W - 14;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
 }
 const tToX = (t, p) => p.left + clamp01(t) * p.pw;
@@ -389,9 +397,9 @@ function removePitchPoint(env, idx) {
   pts.splice(idx, 1);
 }
 
-// Range pill: ±N stepper floating in the plot's top-left (Pitch tab only).
+// Range pill: ±N stepper in the widget band's left corner (Pitch tab only).
 function pitchRangePill(p) {
-  const y = p.top + 8, w = 96, h = 26;
+  const y = WIDGET_PILL_Y, w = 96, h = WIDGET_PILL_H;
   return { x: p.left + 4, y, w, h };
 }
 
@@ -400,7 +408,7 @@ function pitchRangePill(p) {
 // the Pitch tab and only when the selected envelope actually exists.
 function pitchClearPill(p) {
   const rp = pitchRangePill(p);
-  const w = 64, h = 26;
+  const w = 64, h = WIDGET_PILL_H;
   const x = rp.x + rp.w + 8, y = rp.y;
   return { x, y, w, h };
 }
@@ -449,11 +457,11 @@ function envelopeIsDefault(env) {
   return true;
 }
 
-// Clear pill (Volume tab, plot top-left): resets the selected envelope — the
+// Clear pill (Volume tab, widget band): resets the selected envelope — the
 // master ADSR, or the selected layer's mix curve — back to default.
 function volClearPill(p) {
-  const w = 64, h = 26;
-  return { x: p.left + 4, y: p.top + 8, w, h };
+  const w = 64, h = WIDGET_PILL_H;
+  return { x: p.left + 4, y: WIDGET_PILL_Y, w, h };
 }
 
 // Is there something to clear for the volume envelope being edited?
@@ -773,47 +781,73 @@ function clampSegSelection() {
   if (segFromIdx == null && segToIdx == null) segPanelOpen = false;
 }
 
-// Screen-space layout of the floating segment-editor panel (top-left of the
-// plot; below the ±range pill on the Pitch tab). Returns row rects used by
-// both the hit tester and the renderer.
-const SEG_PANEL_W_MAX = 330;
+// Screen-space layout of the floating segment-editor panel (the Line-mode
+// "modal"). It lives in the bands above the plot — never on the graph itself —
+// as a compact block: a readout row, one row of type pills, and a single row of
+// side-by-side parameter groups. The whole panel is only ~90px tall, so it fits
+// on any landscape phone without being cut off. Returns row rects used by both
+// the hit tester and the renderer.
+const SEG_PANEL_W_MAX = 520;
+const SEG_PANEL_TOP = 90;
 function segPanelRects(p) {
-  const w = Math.min(SEG_PANEL_W_MAX, Math.max(200, p.pw - 8));
+  const w = Math.min(SEG_PANEL_W_MAX, Math.max(320, p.pw * 0.65));
   const x = p.left + 4;
-  const y0 = creatorSubmode === 'pitch' ? p.top + 44 : p.top + 10;
-  const rowH = 24, gap = 6;
+  const y0 = SEG_PANEL_TOP;
+  const rowH = 26, gap = 4;
   const y = n => y0 + n * (rowH + gap);
   const cur = segCurrent();
   const type = cur ? segOf(cur).type : 'line';
   const params = SEGMENT_TYPE_PARAMS[type] || [];
-  const clear = { x: x + w - 22, y: y(0), w: 22, h: rowH };
-  const pillW = (w - 10) / SEGMENT_TYPE_ORDER.length;
-  const typePills = SEGMENT_TYPE_ORDER.map((t, i) => ({ t, x: x + i * (pillW + 2), y: y(1), w: pillW, h: rowH + 2 }));
-  const paramRows = params.map((key, i) => ({ key, cy: y(2) + 14 + i * (rowH + gap), btnW: 20, x1: x + 78, x2: x + w - 60 }));
-  const height = y(2) + params.length * (rowH + gap) + rowH;
-  return { x, y0, w, clear, typePills, paramRows, rowH, gap, height };
+  const clear = { x: x + w - 28, y: y(0), w: 22, h: rowH };
+  const pillW = (w - 16 - (SEGMENT_TYPE_ORDER.length - 1) * 2) / SEGMENT_TYPE_ORDER.length;
+  const typePills = SEGMENT_TYPE_ORDER.map((t, i) => ({ t, x: x + 8 + i * (pillW + 2), y: y(1), w: pillW, h: rowH }));
+  const paramGroups = segParamGroups(x, w, y(2) + rowH / 2, params);
+  const height = (params.length ? y(2) + rowH + gap : y(1) + rowH) - y0;
+  return { x, y0, w, clear, typePills, paramGroups, rowH, gap, height };
 }
 
-// Hit-test the segment-editor panel (null when closed / outside Line mode).
+// One parameter group per row slot: the label, a −/+ pair around a slider, and
+// the readout, all side by side. Two params (Spring/Pulse) share one row, so the
+// panel never needs to grow taller for them.
+function segParamGroups(x, w, cy, params) {
+  const n = params.length;
+  if (!n) return [];
+  const pad = 8, gap = 12;
+  const avail = w - pad * 2 - gap * (n - 1);
+  const gw = avail / n;
+  const btnW = 22, labelW = 42, valW = 48;
+  return params.map((pr, i) => {
+    const gx = x + pad + i * (gw + gap);
+    const bxMinus = gx + labelW + 2;
+    const valRight = gx + gw - 2;
+    const bxPlus = valRight - valW - btnW - 4;
+    return { key: pr.key, cy, btnW, labelW, gx, gw, bxMinus, bxPlus, x1: bxMinus + btnW + 4, x2: bxPlus - 4 };
+  });
+}
+
+// Hit-test the segment-editor panel. Taps outside the panel's rect fall through
+// (so a dot can still re-select a range); taps inside the rect but off a
+// control are swallowed ('bar'), keeping the panel modal.
 function hitTestSegPanel(x, y, p) {
   if (!segPanelOpen || !creatorSegMode || creatorDrawMode || creatorDeleteMode) return null;
   const R = segPanelRects(p);
+  if (x < R.x || x > R.x + R.w || y < R.y0 || y > R.y0 + R.height) return null;
   if (y >= R.clear.y && y <= R.clear.y + R.clear.h && x >= R.clear.x && x <= R.clear.x + R.clear.w) return { type: 'segclear' };
   if (y >= R.typePills[0].y && y <= R.typePills[0].y + R.typePills[0].h) {
     for (const pill of R.typePills) {
       if (x >= pill.x && x <= pill.x + pill.w) return { type: 'segtype', t: pill.t };
     }
-    return null;
+    return { type: 'bar' };
   }
-  for (const pr of R.paramRows) {
-    if (y >= pr.cy - 14 && y <= pr.cy + 14) {
-      if (x >= pr.x1 - pr.btnW - 8 && x <= pr.x1 - 8) return { type: 'segparam', key: pr.key, dir: -1 };
-      if (x >= pr.x2 + 8 && x <= pr.x2 + 8 + pr.btnW) return { type: 'segparam', key: pr.key, dir: 1 };
-      if (x >= pr.x1 - 8 && x <= pr.x2 + 8) return { type: 'segslider', key: pr.key };
-      return null;
+  for (const g of R.paramGroups) {
+    if (y >= g.cy - g.btnW - 4 && y <= g.cy + g.btnW + 4) {
+      if (x >= g.bxMinus && x <= g.bxMinus + g.btnW) return { type: 'segparam', key: g.key, dir: -1 };
+      if (x >= g.bxPlus && x <= g.bxPlus + g.btnW) return { type: 'segparam', key: g.key, dir: 1 };
+      if (x >= g.x1 - 6 && x <= g.x2 + 8) return { type: 'segslider', key: g.key };
+      return { type: 'bar' };
     }
   }
-  return null;
+  return { type: 'bar' };
 }
 
 // Stroke a curve through `pts` ([{x, y, v, el}]) using each segment's line
@@ -876,8 +910,8 @@ function drawSegPanel(p) {
   const cur = segCurrent();
   const type = cur ? segOf(cur).type : 'line';
   const r = segRange();
-  // Panel backdrop (semi-transparent so the curve underneath stays visible).
-  ctx.fillStyle = 'rgba(244,250,240,0.82)';
+  // Panel backdrop (semi-transparent so the bands underneath stay visible).
+  ctx.fillStyle = 'rgba(244,250,240,0.92)';
   ctx.strokeStyle = 'rgba(46,93,52,0.5)';
   ctx.lineWidth = 1.5;
   drawRoundRect(R.x, R.y0, R.w, R.height, 10);
@@ -887,10 +921,7 @@ function drawSegPanel(p) {
   ctx.fillStyle = '#2e5d34';
   ctx.font = '800 11px sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('Segment ' + (r ? r.lo : 0), R.x + 6, R.y0 + R.rowH / 2 + 4);
-  ctx.fillStyle = '#6b8e5a';
-  ctx.font = '700 9px sans-serif';
-  ctx.fillText('tap a dot to re-select', R.x + 6, R.y0 + R.rowH - 2);
+  ctx.fillText('Segment ' + (r ? r.lo : 0) + ' · tap a dot to re-select', R.x + 8, R.y0 + 17);
   // ✕ dismiss.
   ctx.fillStyle = '#eef5ea';
   ctx.beginPath();
@@ -913,57 +944,56 @@ function drawSegPanel(p) {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = active ? '#fff' : '#2e5d34';
-    ctx.font = '700 10px sans-serif';
+    ctx.font = '700 11px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(SEGMENT_TYPE_DEFS[pill.t].label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 3);
+    ctx.fillText(SEGMENT_TYPE_DEFS[pill.t].label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 4);
   }
-  // Param rows.
-  for (const pr of R.paramRows) {
-    const d = SEG_PARAM_DEFS[pr.key];
-    const val = segParamValue(pr.key);
-    // Label before the − button; readout after the + button.
+  // Param groups (one row, side by side so the panel stays short).
+  for (const g of R.paramGroups) {
+    const d = SEG_PARAM_DEFS[g.key];
+    const val = segParamValue(g.key);
     ctx.fillStyle = '#6b8e5a';
-    ctx.font = '700 10px sans-serif';
+    ctx.font = '700 11px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(d.label, pr.x1 - pr.btnW - 12, pr.cy + 3);
-    ctx.font = '700 13px sans-serif';
+    ctx.fillText(d.label, g.gx + g.labelW - 2, g.cy + 4);
+    ctx.font = '700 14px sans-serif';
     ctx.textAlign = 'center';
     for (const side of ['-', '+']) {
-      const bx = side === '-' ? pr.x1 - pr.btnW - 8 : pr.x2 + 8;
-      drawRoundRect(bx, pr.cy - pr.btnW / 2, pr.btnW, pr.btnW, 6);
+      const bx = side === '-' ? g.bxMinus : g.bxPlus;
+      drawRoundRect(bx, g.cy - g.btnW / 2, g.btnW, g.btnW, 6);
       ctx.fillStyle = '#eef5ea';
       ctx.fill();
       ctx.strokeStyle = 'rgba(46,93,52,0.4)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = '#2e5d34';
-      ctx.fillText(side === '-' ? '−' : '+', bx + pr.btnW / 2, pr.cy + 5);
+      ctx.fillText(side === '-' ? '−' : '+', bx + g.btnW / 2, g.cy + 5);
     }
     // Track + fill + thumb.
     ctx.lineCap = 'round';
     ctx.strokeStyle = 'rgba(46,93,52,0.22)';
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(pr.x1, pr.cy); ctx.lineTo(pr.x2, pr.cy);
+    ctx.moveTo(g.x1, g.cy); ctx.lineTo(g.x2, g.cy);
     ctx.stroke();
-    const tx = pr.x1 + (pr.x2 - pr.x1) * ((val - d.min) / (d.max - d.min));
+    const tx = g.x1 + (g.x2 - g.x1) * ((val - d.min) / (d.max - d.min));
     ctx.strokeStyle = '#2e5d34';
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(pr.x1, pr.cy); ctx.lineTo(tx, pr.cy);
+    ctx.moveTo(g.x1, g.cy); ctx.lineTo(tx, g.cy);
     ctx.stroke();
     ctx.lineCap = 'butt';
     ctx.beginPath();
-    ctx.arc(tx, pr.cy, 8, 0, Math.PI * 2);
+    ctx.arc(tx, g.cy, 8, 0, Math.PI * 2);
     ctx.fillStyle = '#fff';
     ctx.fill();
     ctx.strokeStyle = '#2e5d34';
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.fillStyle = '#2e5d34';
-    ctx.font = '700 10px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(d.fmt(val), pr.x2 + 8 + pr.btnW + 4, pr.cy + 3);
+    ctx.font = '700 11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(d.fmt(val), g.gx + g.gw - 2, g.cy + 4);
   }
 }
 
@@ -988,30 +1018,52 @@ function slotAtX(x, p) {
   return Math.max(0, Math.min(n - 1, Math.round((x - p.left) / (p.pw / (n - 1)))));
 }
 
-// Toolbar pills floating in the top-right corner of the plot (always visible in
-// both sub-modes, so the mode switch stays reachable without crowding the busy
-// bars). One mode button cycles Point -> Draw -> Erase -> Delete -> Line; the
-// points pill is the
-// visual under the native <select> dropdown.
+// Toolbar buttons in the widget band's right corner (always visible in every
+// sub-mode except Voices, so the mode switch stays reachable without crowding
+// the busy bars). Each editor mode — Point, Draw, Erase, Delete, Line — gets
+// its own button, lined up side by side; tapping one selects that mode directly
+// (no cycling). The points pill sits just right of them and is the visual under
+// the native <select> dropdown.
+const CREATOR_MODES = [
+  { mode: 'point', label: 'Point' },
+  { mode: 'draw',  label: 'Draw' },
+  { mode: 'erase', label: 'Erase' },
+  { mode: 'delete', label: 'Delete' },
+  { mode: 'line',  label: 'Line' },
+];
 function drawToolbar(p) {
-  const y = p.top + 8, w = 58, h = 26;
-  const modeX = p.right - 4 - w;
-  const densX = modeX - 8 - w;
-  return {
-    mode: { x: modeX, y, w, h },
-    dens: { x: densX, y, w, h },
-  };
+  const y = WIDGET_PILL_Y, h = WIDGET_PILL_H;
+  const btnW = 48, gap = 6, densW = 56;
+  const n = CREATOR_MODES.length;
+  const totalW = n * btnW + (n - 1) * gap + 6 + densW;
+  let x = p.right - 4 - totalW;
+  const modes = CREATOR_MODES.map(c => {
+    const r = { mode: c.mode, label: c.label, x, y, w: btnW, h };
+    x += btnW + gap;
+    return r;
+  });
+  return { modes, dens: { x, y, w: densW, h } };
 }
 
-// Current editor mode name for the mode pill: Point (grab/edit dots), Draw
-// (scribble with the finger's value), Erase (scribble along the erase line),
-// Delete (tap a dot to remove it), or Line (pick two dots to shape a segment).
-function creatorModeName() {
-  if (creatorSegMode) return 'Line';
-  if (creatorDeleteMode) return 'Delete';
-  if (creatorEraseMode) return 'Erase';
-  if (creatorDrawMode) return 'Draw';
-  return 'Point';
+// The fill color for a mode button: each mode keeps its own hue so the active
+// state is obvious at a glance. Point uses the shared green.
+function creatorModeColor(mode) {
+  if (mode === 'erase') return '#d9534f';
+  if (mode === 'delete') return '#c0392b';
+  if (mode === 'line') return '#3949ab';
+  if (mode === 'draw') return OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
+  return '#2e5d34';   // point
+}
+
+// Is a given mode the one currently selected? Erase implies Draw (its stroke
+// scribbles along the erase line), so the Draw button only lights up when Draw
+// alone is active.
+function creatorModeActive(mode) {
+  if (mode === 'erase') return creatorEraseMode;
+  if (mode === 'delete') return creatorDeleteMode;
+  if (mode === 'line') return creatorSegMode;
+  if (mode === 'draw') return creatorDrawMode && !creatorEraseMode;
+  return !creatorDrawMode && !creatorEraseMode && !creatorDeleteMode && !creatorSegMode;   // point
 }
 
 // Auto-preview toggle + manual preview button, anchored just left of the pitch
@@ -1437,6 +1489,13 @@ function hitTestCreator(x, y) {
     if (x >= W - 104 && x <= W - 14) return { type: 'reset' };
     return { type: 'bar' };
   }
+  // Segment-editor panel (the Line-mode modal, in the bands above the plot).
+  // Taps inside its rect are handled (or swallowed); taps outside fall through
+  // so a dot can still re-select a range.
+  if (segPanelOpen && creatorSegMode) {
+    const segHit = hitTestSegPanel(x, y, p);
+    if (segHit) return segHit;
+  }
   // Note-life row / voice-chips strip below the controls row.
   if (creatorSubmode === 'voices') {
     if (y >= LIFE_ROW_CY - 14 && y <= LIFE_ROW_CY + 20) {
@@ -1490,26 +1549,38 @@ function hitTestCreator(x, y) {
     }
     return { type: 'bar' };
   }
-  if (y >= p.top && y <= p.bottom) {
-    // Draw-mode toolbar (top-right of the plot; not in the Voices tab).
+  // Widget band (between the marker lane and the plot): the draw-mode toolbar
+  // (right) and the Clear/±range pills (left). This strip never overlaps the
+  // graph — it is reserved purely for controls.
+  if (y >= WIDGET_BAND_TOP && y <= WIDGET_BAND_BOTTOM) {
     if (creatorSubmode !== 'voices') {
       const tb = drawToolbar(p);
-      if (x >= tb.mode.x && x <= tb.mode.x + tb.mode.w && y >= tb.mode.y && y <= tb.mode.y + tb.mode.h) return { type: 'modetoggle' };
-    }
-    // ±range stepper pill (Pitch tab, plot top-left) + the Clear pill beside it.
-    if (creatorSubmode === 'pitch') {
-      const rp = pitchRangePill(p);
-      if (x >= rp.x && x <= rp.x + rp.w && y >= rp.y && y <= rp.y + rp.h) {
-        return { type: 'pitchrange', dir: x < rp.x + rp.w * 0.35 ? -1 : (x > rp.x + rp.w * 0.65 ? 1 : 0) };
+      for (const m of tb.modes) {
+        if (x >= m.x && x <= m.x + m.w && y >= m.y && y <= m.y + m.h) return { type: 'mode', mode: m.mode };
       }
-      const cp = pitchClearPill(p);
-      if (selectedPitchEnvExists() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'pitchclear' };
     }
-    // Clear pill (Volume tab, plot top-left): reset the selected envelope.
-    if (creatorSubmode === 'note' && !creatorSegMode) {
-      const cp = volClearPill(p);
-      if (selectedVolClearable() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'volclear' };
+    // While Line mode is waiting for its To point, the From→To banner takes the
+    // left corner, so the pills are hidden until the segment editor opens.
+    const waitingTo = creatorSegMode && segFromIdx != null && segToIdx == null && segModel();
+    if (!waitingTo) {
+      // ±range stepper pill + the Clear pill beside it (Pitch tab).
+      if (creatorSubmode === 'pitch') {
+        const rp = pitchRangePill(p);
+        if (x >= rp.x && x <= rp.x + rp.w && y >= rp.y && y <= rp.y + rp.h) {
+          return { type: 'pitchrange', dir: x < rp.x + rp.w * 0.35 ? -1 : (x > rp.x + rp.w * 0.65 ? 1 : 0) };
+        }
+        const cp = pitchClearPill(p);
+        if (selectedPitchEnvExists() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'pitchclear' };
+      }
+      // Clear pill (Volume tab): reset the selected envelope.
+      if (creatorSubmode === 'note' && !creatorSegMode) {
+        const cp = volClearPill(p);
+        if (selectedVolClearable() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'volclear' };
+      }
     }
+    return { type: 'bar' };
+  }
+  if (y >= p.top && y <= p.bottom) {
     // Voices tab: one slider per parameter with −/+ nudge buttons at both ends.
     if (creatorSubmode === 'voices') {
       const rows = voiceSliderRows(p);
@@ -1526,9 +1597,6 @@ function hitTestCreator(x, y) {
     }
     // Draw/Erase mode takes over the whole graph: any drag scribbles (or zeroes).
     if (creatorDrawMode) return { type: 'draw' };
-    // Segment-editor panel (floating top-left; Line mode only).
-    const segHit = hitTestSegPanel(x, y, p);
-    if (segHit) return segHit;
     if (creatorSubmode === 'harm') return hitTestHarm(x, y, p);
     // Pitch tab: the selected envelope's dots are grabbable; tapping anywhere
     // else adds a point there.
@@ -1837,32 +1905,13 @@ canvas.addEventListener('pointerdown', e => {
     previewAndSave();
     return;
   }
-  if (hit.type === 'modetoggle') {
-    // Single mode button cycles Point -> Draw -> Erase -> Delete -> Line -> Point.
+  if (hit.type === 'mode') {
+    // Each editor mode has its own button: select the tapped mode directly.
     clearSegSelection();            // From/To selection lives only in Line mode
-    if (creatorEraseMode) {          // Erase -> Delete
-      creatorDrawMode = false;
-      creatorEraseMode = false;
-      creatorDeleteMode = true;
-      creatorSegMode = false;
-    } else if (creatorDrawMode) {    // Draw -> Erase (Erase implies Draw)
-      creatorEraseMode = true;
-    } else if (creatorDeleteMode) {  // Delete -> Line
-      creatorDeleteMode = false;
-      creatorDrawMode = false;
-      creatorEraseMode = false;
-      creatorSegMode = true;
-    } else if (creatorSegMode) {     // Line -> Point
-      creatorSegMode = false;
-      creatorDrawMode = false;
-      creatorEraseMode = false;
-      creatorDeleteMode = false;
-    } else {                         // Point -> Draw
-      creatorDrawMode = true;
-      creatorEraseMode = false;
-      creatorDeleteMode = false;
-      creatorSegMode = false;
-    }
+    creatorDrawMode = hit.mode === 'draw' || hit.mode === 'erase';   // Erase implies Draw
+    creatorEraseMode = hit.mode === 'erase';
+    creatorDeleteMode = hit.mode === 'delete';
+    creatorSegMode = hit.mode === 'line';
     creatorPtr = null;
     return;
   }
@@ -1870,14 +1919,14 @@ canvas.addEventListener('pointerdown', e => {
   if (hit.type === 'segtype') { setSegType(hit.t); return; }
   if (hit.type === 'segparam') {
     const R = segPanelRects(p);
-    const pr = R.paramRows.find(r => r.key === hit.key);
+    const pr = R.paramGroups.find(r => r.key === hit.key);
     if (pr) setSegParam(hit.key, segParamValue(hit.key) + hit.dir * SEG_PARAM_DEFS[hit.key].step);
     creatorPtr = { mode: 'segparam', key: hit.key, x0: x, y0: y };
     return;
   }
   if (hit.type === 'segslider') {
     const R = segPanelRects(p);
-    const pr = R.paramRows.find(r => r.key === hit.key);
+    const pr = R.paramGroups.find(r => r.key === hit.key);
     if (pr) applySegParam(hit.key, segParamFromX(pr, x));
     creatorPtr = { mode: 'segparam', key: hit.key, x0: x, y0: y };
     scheduleCreatorPreview();
@@ -2047,7 +2096,7 @@ canvas.addEventListener('pointermove', e => {
     scheduleCreatorPreview();
   } else if (creatorPtr.mode === 'segparam') {
     const R = segPanelRects(p);
-    const pr = R.paramRows.find(r => r.key === creatorPtr.key);
+    const pr = R.paramGroups.find(r => r.key === creatorPtr.key);
     if (pr) {
       applySegParam(creatorPtr.key, segParamFromX(pr, x));
       scheduleCreatorPreview();
@@ -2541,7 +2590,7 @@ function drawCreator(now) {
   } else if (creatorSubmode === 'pitch') {
     const env = selectedPitchEnvOrNull();
     const r = env ? Math.max(1, env.range || 1) : 1;
-    ctx.fillText('+' + r + ' st', p.left + 2, p.top + 46);
+    ctx.fillText('+' + r + ' st', p.left + 2, p.top + 10);
     const y0 = ampToY(0, p);
     ctx.fillText('0', p.left + 2, y0 + 3);
     ctx.fillText('−' + r + ' st', p.left + 2, p.bottom - 4);
@@ -2636,21 +2685,8 @@ function drawCreator(now) {
         ctx.stroke();
       }
     }
-    // Clear pill (top-left): resets the volume envelope being edited — the
-    // master ADSR, or the selected layer's mix curve (back to following Vol).
-    if (!creatorSegMode && selectedVolClearable()) {
-      const cp = volClearPill(p);
-      drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-      ctx.strokeStyle = '#c0392b';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = '#c0392b';
-      ctx.font = '700 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
-    }
+    // The volume Clear pill lives in the widget band above the plot (drawn
+    // later, outside the graph), so it never covers the curve.
   }
 
   // ---- Pitch envelope (pitch sub-mode) ----
@@ -2708,35 +2744,8 @@ function drawCreator(now) {
         ctx.stroke();
       }
     }
-    // ±range stepper pill (plot top-left).
-    const rp = pitchRangePill(p);
-    const rr = env ? Math.max(1, env.range || 1) : 1;
-    drawRoundRect(rp.x, rp.y, rp.w, rp.h, 8);
-    ctx.fillStyle = '#fff';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = '#2e5d34';
-    ctx.font = '700 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('−  ±' + rr + ' st  +', rp.x + rp.w / 2, rp.y + rp.h / 2 + 4);
-    // Clear pill (beside the range pill): removes the envelope being edited —
-    // a layer's own envelope, or the master fallback. Only shown while the
-    // selected envelope actually exists.
-    if (selectedPitchEnvExists()) {
-      const cp = pitchClearPill(p);
-      drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-      ctx.strokeStyle = '#c0392b';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = '#c0392b';
-      ctx.font = '700 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
-    }
+    // The ±range and Clear pills live in the widget band above the plot (drawn
+    // later, outside the graph), so they never cover the envelope.
   }
 
   // ---- Voices sliders (voices sub-mode) ----
@@ -2865,29 +2874,35 @@ function drawCreator(now) {
     }
   }
 
-  // ---- Draw-mode toolbar (top-right of the plot; not in the Voices tab) ----
+  // ---- Widget band (between the marker lane and the plot) ----
+  // Editor-mode buttons + draw-points pill (right; not in the Voices tab).
   if (creatorSubmode !== 'voices') {
     const tb = drawToolbar(p);
-    const accent = OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
     ctx.textBaseline = 'middle';
     ctx.font = '700 10px sans-serif';
     ctx.textAlign = 'center';
+    // One button per editor mode, lined up side by side.
+    for (const m of tb.modes) {
+      const active = creatorModeActive(m.mode);
+      const color = creatorModeColor(m.mode);
+      drawRoundRect(m.x, m.y, m.w, m.h, 8);
+      ctx.fillStyle = active ? color : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = active ? color : 'rgba(46,93,52,0.4)';
+      ctx.lineWidth = active ? 2 : 1;
+      ctx.stroke();
+      ctx.fillStyle = active ? '#fff' : '#2e5d34';
+      ctx.fillText(m.label, m.x + m.w / 2, m.y + m.h / 2 + 1);
+    }
+    // The draw-points pill (a native <select> overlays it).
     drawRoundRect(tb.dens.x, tb.dens.y, tb.dens.w, tb.dens.h, 8);
-    ctx.fillStyle = creatorDrawMode ? 'rgba(255,255,255,0.92)' : '#fff';
+    ctx.fillStyle = '#fff';
     ctx.fill();
     ctx.strokeStyle = 'rgba(46,93,52,0.4)';
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = '#2e5d34';
     ctx.fillText(drawPointCount() + ' pts ▾', tb.dens.x + tb.dens.w / 2, tb.dens.y + tb.dens.h / 2 + 1);
-    drawRoundRect(tb.mode.x, tb.mode.y, tb.mode.w, tb.mode.h, 8);
-    ctx.fillStyle = creatorSegMode ? '#3949ab' : creatorDeleteMode ? '#c0392b' : creatorEraseMode ? '#d9534f' : creatorDrawMode ? accent : '#fff';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(46,93,52,0.4)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = (creatorDrawMode || creatorEraseMode || creatorDeleteMode || creatorSegMode) ? '#fff' : '#2e5d34';
-    ctx.fillText(creatorModeName(), tb.mode.x + tb.mode.w / 2, tb.mode.y + tb.mode.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
 
     // Position the native points <select> over the pill (creator-active only).
@@ -2901,20 +2916,74 @@ function drawCreator(now) {
     }
   }
 
+  // Clear/±range pills (left of the widget band). Hidden while Line mode is
+  // waiting for its To point — the From→To banner takes that corner instead.
+  const waitingTo = creatorSegMode && segFromIdx != null && segToIdx == null && segModel();
+  if (!waitingTo) {
+    if (creatorSubmode === 'pitch') {
+      const rp = pitchRangePill(p);
+      const env = selectedPitchEnvOrNull();
+      const rr = env ? Math.max(1, env.range || 1) : 1;
+      drawRoundRect(rp.x, rp.y, rp.w, rp.h, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(46,93,52,0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#2e5d34';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('−  ±' + rr + ' st  +', rp.x + rp.w / 2, rp.y + rp.h / 2 + 4);
+      // Clear pill (beside the range pill): removes the envelope being edited —
+      // a layer's own envelope, or the master fallback. Only shown while the
+      // selected envelope actually exists.
+      if (selectedPitchEnvExists()) {
+        const cp = pitchClearPill(p);
+        drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.strokeStyle = '#c0392b';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#c0392b';
+        ctx.font = '700 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
+      }
+    }
+    // Clear pill (Volume tab): resets the volume envelope being edited — the
+    // master ADSR, or the selected layer's mix curve (back to following Vol).
+    if (creatorSubmode === 'note' && !creatorSegMode && selectedVolClearable()) {
+      const cp = volClearPill(p);
+      drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#c0392b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
+    }
+  }
+
   // ---- Segment editor: waiting for the To point (Line mode only) ----
-  if (creatorSegMode && segFromIdx != null && segToIdx == null && !segPanelOpen && segModel()) {
-    const wx = p.left + 4, wy = creatorSubmode === 'pitch' ? p.top + 44 : p.top + 10;
+  if (waitingTo) {
+    const wx = p.left + 4, wy = WIDGET_PILL_Y;
+    // Keep the banner clear of the mode buttons at the band's right edge.
+    const bw = Math.min(250, Math.max(120, drawToolbar(p).modes[0].x - wx - 8));
     const txt = 'From ' + segFromIdx + ' set — tap the To point';
     ctx.fillStyle = 'rgba(46,93,52,0.92)';
-    drawRoundRect(wx, wy, Math.min(250, p.pw - 8), 24, 8);
+    drawRoundRect(wx, wy, bw, WIDGET_PILL_H, 8);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = '700 11px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(txt, wx + Math.min(250, p.pw - 8) / 2, wy + 16);
+    ctx.fillText(txt, wx + bw / 2, wy + WIDGET_PILL_H / 2 + 4);
   }
 
-  // ---- Segment editor panel (floating top-left; Line mode only) ----
+  // ---- Segment editor panel (compact modal above the plot; Line mode only) ----
   if (segPanelOpen && creatorSegMode && segModel()) drawSegPanel(p);
 
   // ---- Hint ----
@@ -2924,22 +2993,22 @@ function drawCreator(now) {
   if (creatorSubmode === 'voices') {
     ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · tap an interval chip (−8 b3 3 4 5 8) to jump Semitones · Snap makes Semitones land on whole tones · tap a chip\u2019s 🔊 to mute it · ✕ deletes it · Reset clears them all', W / 2, H - 8);
   } else if (creatorSegMode) {
-    ctx.fillText('Line-type mode · tap a dot for From, tap another for To (the points between are removed) and pick Line / Stairs / Spring / Pulse · Freq is the number of ups & downs across the segment · Depth is % of the full value scale · tap Mode to exit', W / 2, H - 8);
+    ctx.fillText('Line-type mode · tap a dot for From, tap another for To (the points between are removed) and pick Line / Stairs / Spring / Pulse · Freq is the number of ups & downs across the segment · Depth is % of the full value scale · tap another mode button above the graph to exit', W / 2, H - 8);
   } else if (creatorDeleteMode) {
-    ctx.fillText('Delete mode · tap a dot to remove it · tap Mode to cycle back to Point (double-tap a dot also deletes in Point mode)', W / 2, H - 8);
+    ctx.fillText('Delete mode · tap a dot to remove it · tap Point above the graph to return (double-tap a dot also deletes in Point mode)', W / 2, H - 8);
   } else if (creatorDrawMode) {
     ctx.fillText(creatorEraseMode
-      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Mode to edit dots'
+      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Point above the graph to edit dots'
       : creatorSubmode === 'note'
-      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope (the note\u2019s attack/decay/release, applied to all oscillators)' : 'selected oscillator mix curve (this oscillator\u2019s own level over the note)') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
+      ? 'Drawing the ' + (creatorVolSel ? 'volume envelope (the note\u2019s attack/decay/release, applied to all oscillators)' : 'selected oscillator mix curve (this oscillator\u2019s own level over the note)') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots'
       : creatorSubmode === 'pitch'
-        ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (fallback for oscillators without their own)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots'
-        : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Mode to edit dots', W / 2, H - 8);
+        ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (fallback for oscillators without their own)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots'
+        : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots', W / 2, H - 8);
   } else {
     ctx.fillText(creatorSubmode === 'note'
-      ? 'Vol shapes every oscillator\u2019s attack/decay/release · a swatch\u2019s badge shows own (customized curve) vs vol (follows Vol) · Clear (top-left) resets the selected curve · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap to add · double-tap a dot to delete · tap Mode to shape a segment\u2019s line type'
+      ? 'Vol shapes every oscillator\u2019s attack/decay/release · a swatch\u2019s badge shows own (customized curve) vs vol (follows Vol) · Clear (above the graph) resets the selected curve · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap to add · double-tap a dot to delete · tap Line above the graph to shape a segment\u2019s line type'
 : creatorSubmode === 'pitch'
-          ? 'Each oscillator uses its own envelope when it has one, otherwise it inherits the Master (fallback) · swatches show which (own / M) · Clear (top-left) removes the selected envelope · drag dots · tap to add · set ±range top-left · tap Mode to shape a segment\u2019s line type'
+          ? 'Each oscillator uses its own envelope when it has one, otherwise it inherits the Master (fallback) · swatches show which (own / M) · Clear (above the graph) removes the selected envelope · drag dots · tap to add · set ±range above · tap Line above the graph to shape a segment\u2019s line type'
           : 'Draw the spectrum of the selected oscillator · tap to add · drag to move · double-tap a dot to delete', W / 2, H - 8);
   }
 }
