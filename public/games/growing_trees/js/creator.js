@@ -16,6 +16,7 @@ let creatorPitchSel = 'master'; // Pitch tab selection: 'master' or a layer inde
 let creatorVoiceSel = 0;        // Voices tab: which duplicate voice of the selected layer is being edited
 let creatorPtr = null;        // { mode:'point'|'marker'|'draw', layerIdx, ptIdx|key, x0, y0, moved }
 let creatorLastTap = null;    // { t, x, y } for double-tap-to-delete
+let creatorSelMarker = null;  // selected marker key ('hold'|'cut'|'rel') awaiting a destination tap, or null
 let creatorPreviewTimer = null;
 // Freehand "Draw" mode: while on, any drag in the graph scribbles breakpoints
 // along the finger's path instead of grabbing/moving individual dots. The
@@ -71,6 +72,7 @@ function openSoundCreator(submode, layerIdx) {
 function closeSoundCreator() {
   creatorActive = false;
   creatorPtr = null;
+  creatorSelMarker = null;
   mode = 'plant';
   playbacks.length = 0;
   clearTimeout(creatorPreviewTimer);
@@ -144,6 +146,9 @@ const MARKER_DEFS = [
 const MARKER_LANE_TOP = 122, MARKER_LANE_BOTTOM = 176;
 const MARKER_TAB_W = 58, MARKER_TAB_H = 22;
 const MARKER_TAB_ROW = 128, MARKER_TAB_ROW2 = 154;
+// Row where a selected marker's valid destinations are lit as dots, just below
+// the two tab rows so they read as move targets without colliding with tabs.
+const MARKER_DEST_ROW = 168;
 function markerList() {
   const tl = designTimeline();
   return MARKER_DEFS.map(m => ({
@@ -1385,6 +1390,38 @@ function distToCurve(layerIdx, x, y, p) {
 
 // Distance from a point to the master envelope's drawn line (sampled).
 
+/* ---- Marker placement (edit the existing envelope indexes) ----
+   Markers move by select-then-place: tap a marker to select it, tap one of the
+   lit valid destinations (component boundaries it is allowed to sit on) to move
+   it. Each marker maps to an envelope index with a constrained range: HOLD
+   (holdStartIndex) must stay at or before the hold end; CUT (earlyCutIndex) must
+   stay inside the hold range; REL (holdEndIndex) may sit on any boundary. */
+// The normalized times (0..1) a marker may legally be placed on, derived from
+// the envelope's component boundaries and the index constraints above.
+function markerValidTimes(key) {
+  const env = ENVELOPE;
+  const n = env.components.length;
+  const total = designTimeline().total;
+  const bounds = [];
+  for (let i = 0; i <= n; i++) bounds.push(compsMs(env.components.slice(0, i)));
+  const tOf = ms => (total > 0 ? ms / total : 0);
+  const times = [];
+  if (key === 'hold') {
+    // holdStartIndex: any component start boundary at or before the hold end.
+    for (let i = 0; i <= Math.min(n - 1, env.holdEndIndex); i++) times.push(tOf(bounds[i]));
+  } else if (key === 'cut') {
+    // earlyCutIndex: any component end boundary at or before the hold end.
+    for (let i = 0; i <= env.holdEndIndex; i++) times.push(tOf(bounds[i + 1]));
+  } else { // 'rel'
+    // holdEndIndex: any component end boundary across the whole envelope.
+    for (let i = 0; i < n; i++) times.push(tOf(bounds[i + 1]));
+  }
+  // De-dupe (boundaries may coincide when a component is zero-length) and sort.
+  const seen = [];
+  for (const t of times) if (seen.indexOf(t) < 0) seen.push(t);
+  return seen.sort((a, b) => a - b);
+}
+
 /* ---- Marker dragging (edit the existing envelope indexes) ---- */
 // Map a normalized time to the nearest component boundary and apply it to the
 // requested envelope marker. All clamp through clampEnvelopeIndexes() so the
@@ -1563,6 +1600,16 @@ function hitTestCreator(x, y) {
   // Pitch tab the markers are display-only, so the lane isn't grabbable there.
   if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && (creatorSubmode === 'note' || creatorSubmode === 'pitch')) {
     if (creatorSubmode === 'note') {
+      // When a marker is selected, its lit valid destinations are tappable.
+      if (creatorSelMarker) {
+        const destY = MARKER_DEST_ROW;
+        if (Math.abs(y - destY) <= 12) {
+          for (const t of markerValidTimes(creatorSelMarker)) {
+            const dx = tToX(t, p);
+            if (Math.abs(x - dx) <= 10) return { type: 'markerdest', key: creatorSelMarker, t };
+          }
+        }
+      }
       for (const tab of markerTabs(p)) {
         if (x >= tab.x - 8 && x <= tab.x + tab.w + 8 && y >= tab.y - 5 && y <= tab.y + tab.h + 5) return { type: 'marker', key: tab.key };
       }
@@ -1701,10 +1748,12 @@ canvas.addEventListener('pointerdown', e => {
     }
     if (hit.type === 'line' || hit.type === 'empty' || hit.type === 'envline' || hit.type === 'emptypitch' || hit.type === 'harm') return;
   }
+  if (hit.type !== 'marker' && hit.type !== 'markerdest') creatorSelMarker = null;
   if (hit.type === 'back') { closeSoundCreator(); return; }
   if (hit.type === 'tab') {
     if (hit.enabled) {
       creatorSubmode = hit.submode;
+      creatorSelMarker = null;
       creatorVolSel = creatorSubmode === 'note';
       clearSegSelection();
       if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
@@ -2000,7 +2049,7 @@ canvas.addEventListener('pointerdown', e => {
     previewAndSave();
     return;
   }
-  if (hit.type === 'bar') { creatorPtr = null; return; }
+  if (hit.type === 'bar') { creatorPtr = null; creatorSelMarker = null; return; }
   if (hit.type === 'pitch') {
     if (hit.dir !== 0) {
       const positions = pitchPositions();
@@ -2011,7 +2060,21 @@ canvas.addEventListener('pointerdown', e => {
     }
     return;
   }
-  if (hit.type === 'marker') { maybeAutoPreview(); creatorPtr = { mode: 'marker', key: hit.key, x0: x, y0: y }; return; }
+  if (hit.type === 'markerdest') {
+    maybeAutoPreview();
+    dragCreatorMarker(hit.key, hit.t);
+    creatorSelMarker = null;
+    previewAndSave();
+    return;
+  }
+  if (hit.type === 'marker') {
+    maybeAutoPreview();
+    // Select-then-place: tap a marker to arm it (its valid destinations light
+    // up); tapping the same marker again deselects it.
+    creatorSelMarker = (creatorSelMarker === hit.key) ? null : hit.key;
+    creatorPtr = null;
+    return;
+  }
   if (hit.type === 'harmpoint') {
     maybeAutoPreview();
     const l = selectedLayer();
@@ -2106,9 +2169,6 @@ canvas.addEventListener('pointermove', e => {
       creatorPtr.ptIdx = l.curve.indexOf(pt);
       scheduleCreatorPreview();
     }
-  } else if (creatorPtr.mode === 'marker') {
-    dragCreatorMarker(creatorPtr.key, xToT(x, p));
-    scheduleCreatorPreview();
   } else if (creatorPtr.mode === 'envbound') {
     envDragBoundary(creatorPtr.idx, xToT(x, p), yToV(y, p) - envTrim(ENVELOPE));
     scheduleCreatorPreview();
@@ -2305,7 +2365,7 @@ function drawCreator(now) {
   }
   for (let i = 0; i < OSC_STACK.layers.length; i++) {
     const cx = p.left + sw * 76 + i * 76;
-    const sel = creatorSubmode === 'pitch' ? creatorPitchSel === i : i === selectedLayerIdx;
+    const sel = creatorSubmode === 'pitch' ? creatorPitchSel === i : (!creatorVolSel && i === selectedLayerIdx);
     const muted = !!(OSC_STACK.layers[i].muted);
     const color = OSC_COLORS[i % OSC_COLORS.length];
     drawSwatchTab(cx, sel);
@@ -2326,20 +2386,14 @@ function drawCreator(now) {
     ctx.fillStyle = muted ? '#9db89c' : (sel ? '#1b4523' : '#6b8e5a');
     ctx.textAlign = 'left';
     ctx.fillText('Osc ' + (i + 1), cx + 28, 82);
-    // Status badge (bottom-right of the swatch): which envelope this oscillator
-    // actually plays. Volume: 'own' = a customized mix curve, 'vol' = follows
-    // the master Vol ADSR. Pitch: 'own' = its own pitch envelope, 'M' = it
+    // Status badge (bottom-right of the swatch, pitch tab only): which envelope
+    // this oscillator actually plays. 'own' = its own pitch envelope, 'M' = it
     // inherits the master fallback because it has no envelope of its own.
-    if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
+    if (creatorSubmode === 'pitch') {
       const l = OSC_STACK.layers[i];
       let hasOwn, usesMaster;
-      if (creatorSubmode === 'pitch') {
-        hasOwn = !!(l && l.pitchEnv && l.pitchEnv.points && l.pitchEnv.points.length >= 2);
-        usesMaster = !hasOwn && !!(MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2);
-      } else {
-        hasOwn = layerHasCustomCurve(l);
-        usesMaster = !hasOwn;   // default curve → follows the master Vol envelope
-      }
+      hasOwn = !!(l && l.pitchEnv && l.pitchEnv.points && l.pitchEnv.points.length >= 2);
+      usesMaster = !hasOwn && !!(MASTER_PITCH_ENV && MASTER_PITCH_ENV.points && MASTER_PITCH_ENV.points.length >= 2);
       if (hasOwn || usesMaster) {
         const bx = cx + 45, by = 84, bw = 26, bh = 13;
         drawRoundRect(bx, by, bw, bh, 7);
@@ -2359,7 +2413,7 @@ function drawCreator(now) {
           ctx.fillStyle = '#2e5d34';
           ctx.font = '800 8px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText(creatorSubmode === 'pitch' ? 'M' : 'vol', bx + bw / 2, by + bh / 2 + 3);
+          ctx.fillText('M', bx + bw / 2, by + bh / 2 + 3);
         }
         ctx.textAlign = 'left';
       }
@@ -2545,6 +2599,7 @@ function drawCreator(now) {
   if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
     const dimmed = creatorSubmode === 'pitch';
     for (const tab of markerTabs(p)) {
+      const armed = creatorSubmode === 'note' && creatorSelMarker === tab.key;
       const lineColor = dimmed ? markerDim(tab.color, 25, 52) : tab.color;
       const fillColor = dimmed ? markerDim(tab.color, 30, 82) : tab.color;
       const labelColor = dimmed ? markerDim(tab.color, 32, 28) : '#fff';
@@ -2558,12 +2613,31 @@ function drawCreator(now) {
       ctx.stroke();
       ctx.globalAlpha = 1;
       drawRoundRect(tab.x, tab.y, tab.w, tab.h, 7);
-      ctx.fillStyle = fillColor;
+      ctx.fillStyle = armed ? '#fff7cc' : fillColor;
       ctx.fill();
-      ctx.fillStyle = labelColor;
+      ctx.strokeStyle = armed ? '#8a6d00' : 'rgba(0,0,0,0)';
+      ctx.lineWidth = armed ? 2 : 0;
+      ctx.stroke();
+      ctx.fillStyle = armed ? '#5a4600' : labelColor;
       ctx.font = '800 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(tab.label, tab.cx, tab.y + 15);
+    }
+    // When a marker is armed (note tab), light up its valid destinations as
+    // move targets on the destination row.
+    if (creatorSubmode === 'note' && creatorSelMarker) {
+      const def = MARKER_DEFS.find(d => d.key === creatorSelMarker);
+      const color = def ? def.color : '#2e5d34';
+      for (const t of markerValidTimes(creatorSelMarker)) {
+        const dx = tToX(t, p);
+        ctx.beginPath();
+        ctx.arc(dx, MARKER_DEST_ROW, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
   }
 
@@ -2699,7 +2773,7 @@ function drawCreator(now) {
       const muted = !!(l.muted);
       const trim = layerTrim(l);
       ctx.strokeStyle = OSC_COLORS[i % OSC_COLORS.length];
-      ctx.globalAlpha = muted ? 0.22 : (sel ? 1 : 0.8);
+      ctx.globalAlpha = muted ? 0.22 : (sel ? 1 : 0.2);
       ctx.lineWidth = sel ? 3 : 2;
       const curve = l.curve || [];
       if (!curve.length) { ctx.globalAlpha = 1; continue; }
@@ -2726,7 +2800,7 @@ function drawCreator(now) {
     }
     // Master envelope outline (bold when Vol is selected, faint otherwise). The
     // whole ADSR line is offset by the envelope's trim.
-    ctx.globalAlpha = creatorVolSel ? 1 : 0.45;
+    ctx.globalAlpha = creatorVolSel ? 1 : 0.2;
     ctx.strokeStyle = '#2e5d34';
     ctx.lineWidth = creatorVolSel ? 3 : 1.5;
     const envTrimT = envTrim(ENVELOPE);
