@@ -462,10 +462,9 @@ function previewNote(pitch) {
   g.setValueCurveAtTime(body, t0 + 0.002, bodyDur - 0.002);
   let tRel = t0 + 0.002 + (bodyDur - 0.002);
   if (relMs > 0) {
-    const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
     const seed = relValueBody(ENVELOPE, bodyMs, true);
     const tail = new Float32Array(64);
-    for (let k = 0; k < tail.length; k++) tail[k] = Math.max(0, base * relValueAtList(relComps, relMs * k / (tail.length - 1), seed));
+    for (let k = 0; k < tail.length; k++) tail[k] = Math.max(0, base * relValueRelease(ENVELOPE, relMs * k / (tail.length - 1), seed));
     g.setValueAtTime(tail[0], tRel);
     g.setValueCurveAtTime(tail, tRel + 0.002, relMs / 1000);
     tRel += 0.002 + relMs / 1000;
@@ -661,8 +660,7 @@ function schedulePathAudio(ds, totalMs, pb) {
   // continues from whatever the body ended at (a tap's body ends mid-attack),
   // not the release's design start, so the transition is a smooth continuation
   // with no jump. The seed is the body's end as a fraction of the end base.
-  const relComps = ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex);
-  const relMs = compsMs(relComps);
+  const relMs = compsMs(ENVELOPE.components.slice(ENVELOPE.beginReleaseIndex));
   if (relMs > 0) {
     const endBase = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
     const bodyEnd = body[body.length - 1];
@@ -670,7 +668,7 @@ function schedulePathAudio(ds, totalMs, pb) {
     const tail = new Float32Array(128);
     for (let k = 0; k < tail.length; k++) {
       const t = relMs * k / (tail.length - 1);
-      tail[k] = endBase * relValueAtList(relComps, t, relSeed);
+      tail[k] = endBase * relValueRelease(ENVELOPE, t, relSeed);
     }
     const relStart = curveEnd + 0.002;
     g.setValueAtTime(tail[0], curveEnd);
@@ -951,7 +949,7 @@ function scheduleReleaseTail(ds, startLevel, startT) {
     // of the screen position.
     const baseVol = ds.pts && ds.pts.length ? baseVolumeFromY(ds.pts[ds.pts.length - 1].y) : 0;
     const relSeed = baseVol > 0.0001 ? Math.max(0, Math.min(1, startLevel / baseVol)) : 0;
-    const rel = sampleComps(relComps, 96, relSeed);
+    const rel = sampleComps(relComps, 96, relSeed, ENVELOPE);
     const curve = rel.curve;
     if (baseVol > 0.0001) {
       for (let k = 0; k < curve.length; k++) curve[k] *= baseVol;

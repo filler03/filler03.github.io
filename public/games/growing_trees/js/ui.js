@@ -175,6 +175,7 @@ function loadSavedSettings() {
       if (d.envelope.holdStartIndex != null) env.holdStartIndex = +d.envelope.holdStartIndex;
       if (d.envelope.holdEndIndex != null) env.holdEndIndex = +d.envelope.holdEndIndex;
       if (d.envelope.earlyCutIndex != null) env.earlyCutIndex = +d.envelope.earlyCutIndex;
+      if (d.envelope.trim != null) env.trim = Math.max(-1, Math.min(1, +d.envelope.trim || 0));
     } else if (d.fixed) {
       // v6 → v7 migration: map the old fixed ADSR phases onto the envelope.
       const fx = d.fixed;
@@ -291,6 +292,7 @@ function loadSavedSettings() {
         id: (l && l.id) || 'osc-' + (i + 1),
         amplitudes,
         level: Math.max(0, Math.min(1, +((l && l.level) != null ? l.level : 1) || 1)),
+        trim: Math.max(-1, Math.min(1, +((l && l.trim) != null ? l.trim : 0) || 0)),
         curve: curveFromSaved(l),
         presetId: (l && l.presetId) || null,
         specPoints,

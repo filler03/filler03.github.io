@@ -25,10 +25,32 @@ var cam = { x: 0, y: 0, zoom: 1 };   // filled in below after resize
 let audioCtx = null;
 let masterGain = null;
 
-/* Stage coordinates match the viewport directly; landscape orientation is
-   enforced by the rotate prompt, so no swapping or rotation is needed. */
-function stageX(e) { return e.clientX; }
-function stageY(e) { return e.clientY; }
+/* Stage coordinates map pointer positions to canvas space. The canvas is
+   shrunk to the safe area (below), so stage coords subtract the safe-area
+   offsets to stay aligned with the drawing layout. */
+var SAFE = { top: 0, left: 0, right: 0, bottom: 0 };   // safe-area insets (px)
+function stageX(e) { return e.clientX - SAFE.left; }
+function stageY(e) { return e.clientY - SAFE.top; }
+
+// Measure the safe-area insets (notch/island/home indicator) with a probe
+// element pinned to the safe edges. env(safe-area-inset-*) resolves inside
+// fixed-position inset values, so the probe's rect reveals exactly how far the
+// visible area sits from each screen edge. Non-notched browsers resolve 0.
+function safeArea() {
+  const p = document.createElement('div');
+  p.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;'
+    + 'top:env(safe-area-inset-top,0px);left:env(safe-area-inset-left,0px);'
+    + 'bottom:env(safe-area-inset-bottom,0px);right:env(safe-area-inset-right,0px);';
+  document.body.appendChild(p);
+  const r = p.getBoundingClientRect();
+  p.remove();
+  return {
+    top: Math.max(0, Math.round(r.top)),
+    left: Math.max(0, Math.round(r.left)),
+    bottom: Math.max(0, Math.round(window.innerHeight - r.bottom)),
+    right: Math.max(0, Math.round(window.innerWidth - r.right)),
+  };
+}
 
 // iOS can fire resize with transient/degenerate sizes while a rotation or
 // toolbar change is settling. A wrong value can STICK — the final, correct
@@ -38,19 +60,29 @@ function stageY(e) { return e.clientY; }
 // viewport size a moment later, once things have settled, and re-applies it
 // if it drifted.
 let resizeVerifyTimer = null;
+var VIEW_W = 0, VIEW_H = 0;   // full viewport size (including the safe area)
 function scheduleSizeVerify() {
   clearTimeout(resizeVerifyTimer);
   resizeVerifyTimer = setTimeout(() => {
     const w = window.innerWidth, h = window.innerHeight;
-    if (w !== W || h !== H) resize();
+    if (w !== VIEW_W || h !== VIEW_H) resize();
   }, 400);
 }
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   if (!w || !h || !isFinite(w) || !isFinite(h)) return;
-  if (w === W && h === H) return;
-  W = canvas.width  = w;
-  H = canvas.height = h;
+  VIEW_W = w; VIEW_H = h;
+  SAFE = safeArea();
+  // Keep the canvas clear of the notch/island and the home indicator: shrink
+  // to the safe area and offset it, so the page background shows behind the
+  // hardware instead of interactive UI.
+  canvas.style.left = SAFE.left + 'px';
+  canvas.style.top = SAFE.top + 'px';
+  const w2 = Math.max(1, w - SAFE.left - SAFE.right);
+  const h2 = Math.max(1, h - SAFE.top - SAFE.bottom);
+  if (w2 === W && h2 === H) return;
+  W = canvas.width  = w2;
+  H = canvas.height = h2;
   HORIZON = H * 0.56;              // where ground meets sky (matches CSS)
   scheduleSizeVerify();
 }
@@ -160,8 +192,17 @@ const DEFAULT_ENVELOPE = {
   holdStartIndex: 1,
   holdEndIndex: 2,
   earlyCutIndex: 2,
+  trim: 0,   // whole-envelope vertical offset (relative 0..1 units), like a mixer
 };
 var ENVELOPE = clone(DEFAULT_ENVELOPE);
+
+// A master envelope's trim: a uniform offset added to its relative value (top of
+// the graph = +1, bottom = -1). 0 = the envelope as designed. Clamped so a line
+// can't be pushed past the plot's edges.
+function envTrim(env) { return Math.max(-1, Math.min(1, +((env && env.trim) || 0))); }
+
+// A layer's trim: the same whole-line vertical offset for a mix curve.
+function layerTrim(layer) { return Math.max(-1, Math.min(1, +((layer && layer.trim) || 0))); }
 
 // Chain start values: each component after the first starts where the previous
 // one ended, so only the first component holds an independent start value.
@@ -276,7 +317,9 @@ function holdEndTime(env) {
 // section the body is silent.
 function relValueBody(env, t, looped) {
   if (env.beginReleaseIndex <= 0) return 0;
+  const trim = envTrim(env);
   const hs = holdStartTime(env), he = holdEndTime(env);
+  let raw;
   if (looped && he > hs && t >= he) {
     const hold = env.components.slice(env.holdStartIndex, env.holdEndIndex + 1);
     const loopMs = he - hs;
@@ -284,26 +327,32 @@ function relValueBody(env, t, looped) {
       ? compValue(env.components[env.holdStartIndex - 1], env.components[env.holdStartIndex - 1].endValue)
       : compValue(env.components[0], env.components[0].startValue);
     const loopEnd = relValueAtList(hold, loopMs, seed0);
-    return relValueAtList(hold, (t - hs) % loopMs, loopEnd);
+    raw = relValueAtList(hold, (t - hs) % loopMs, loopEnd);
+  } else {
+    raw = relValueAtList(env.components.slice(0, env.beginReleaseIndex), t);
   }
-  return relValueAtList(env.components.slice(0, env.beginReleaseIndex), t);
+  return clamp01(raw + trim);
 }
 
 // Relative value through the release section (components at/after beginRelease),
 // as time measured from the release start. The first card starts from whatever
 // value is playing when the release begins — `seed`, the real-time value at the
-// body's end (never a static chained start) — and the rest chain onto it.
+// body's end (never a static chained start) — and the rest chain onto it. The
+// seed already includes the envelope trim (it came from relValueBody), so it is
+// untrimmed before sampling and the trim is re-added — the release tail shifts
+// with the rest of the line instead of being trimmed twice.
 function relValueRelease(env, t, seed) {
-  return relValueAtList(env.components.slice(env.beginReleaseIndex), t, seed);
+  const trim = envTrim(env);
+  return clamp01(relValueAtList(env.components.slice(env.beginReleaseIndex), t, seed - trim) + trim);
 }
 
 // Sample an ordered component list into N relative values.
-function sampleComps(comps, N, seed) {
+function sampleComps(comps, N, seed, env) {
   const total = compsMs(comps);
   const curve = new Float32Array(Math.max(2, N));
   for (let k = 0; k < curve.length; k++) {
     const t = total * k / (curve.length - 1);
-    curve[k] = relValueAtList(comps, t, seed);
+    curve[k] = env ? relValueRelease(env, t, seed) : relValueAtList(comps, t, seed);
   }
   return { curve, totalMs: total };
 }
@@ -343,7 +392,7 @@ function defaultVoice(id) {
 function defaultLayer(id) {
   const amplitudes = new Array(HARMONIC_COUNT).fill(0);
   amplitudes[0] = 1;
-  return { id: id || 'osc-1', amplitudes, level: 1, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null, voices: null, muted: false };
+  return { id: id || 'osc-1', amplitudes, level: 1, trim: 0, curve: [{ t: 0, v: 1 }, { t: 1, v: 1 }], presetId: null, specPoints: null, pitchEnv: null, voices: null, muted: false };
 }
 // A soothing chime as the out-of-the-box sound: a soft bell body that carries
 // the strike, plus a bright overtone layer that blooms into the tail. Layer
@@ -355,7 +404,7 @@ function ampFromSpec(spec) {
   return a;
 }
 function chimeLayer(id, spec, curve, level) {
-  return { id, amplitudes: ampFromSpec(spec), level, curve, presetId: null, specPoints: null, pitchEnv: null, voices: null, muted: false };
+  return { id, amplitudes: ampFromSpec(spec), level, trim: 0, curve, presetId: null, specPoints: null, pitchEnv: null, voices: null, muted: false };
 }
 const DEFAULT_OSC_STACK = {
   layers: [
@@ -372,9 +421,10 @@ var OSC_STACK = clone(DEFAULT_OSC_STACK);
 // A layer's raw mix weight at note progress `prog` (0..1): level × its curve.
 // A muted layer contributes nothing, so the shared mix normalization excludes it
 // and the other layers keep the loudness constant — muting "subtracts" the layer.
+// The layer's trim shifts its whole curve up/down before the level applies.
 function layerMixAt(layer, prog) {
   if (layer && layer.muted) return 0;
-  return (layer.level || 0) * curveValue(layer, prog);
+  return (layer.level || 0) * clamp01(curveValue(layer, prog) + layerTrim(layer));
 }
 
 // Interpolate a layer's drawn mix curve (linear between breakpoints, clamped).
