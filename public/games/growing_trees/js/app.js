@@ -12,6 +12,7 @@ const statHud = document.getElementById('statHud');
 
 var playbacks = [];      // { pts, cumTime, totalMs, startedAt, released }
 var gestureNotes = [];   // { osc, gain, cleanupTimer } running gesture-note audio
+var previewPlayhead = null;   // { t0, bodyMs, relMs, totalMs, endAt } drives the sound-creator playhead
 
 var mode = 'plant';      // 'plant' | 'nav' | 'creator' (full-screen sound editor)
 var creatorActive = false;   // sound-creator mode is open (declared early: main.js reads it)

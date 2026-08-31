@@ -1427,6 +1427,18 @@ function scheduleCreatorPreview() {
   }, 150);
 }
 
+// The playhead's normalized note time (0..1 across the graph) while a preview
+// note is playing, or -1 when nothing is sounding. Progress is measured against
+// the Web Audio clock so the marker stays in sync with the preview audio.
+function previewPlayheadT() {
+  const ph = previewPlayhead;
+  if (!ph || !audioCtx) return -1;
+  const at = audioCtx.currentTime;
+  if (at < ph.t0 || at >= ph.endAt) return -1;
+  const elapsed = (at - ph.t0) * 1000;
+  return mixProgForTimes(elapsed, ph.bodyMs, ph.relMs, ph.bodyMs);
+}
+
 /* ---- Hit testing ---- */
 function creatorTabs() {
   return [
@@ -3063,6 +3075,29 @@ function drawCreator(now) {
 
   // ---- Segment editor panel (compact modal above the plot; Line mode only) ----
   if (segPanelOpen && creatorSegMode && segModel()) drawSegPanel(p);
+
+  // ---- Preview playhead: animates across the graph while a note is previewed ----
+  if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
+    const phT = previewPlayheadT();
+    if (phT >= 0) {
+      const px = tToX(phT, p);
+      ctx.strokeStyle = 'rgba(20,20,20,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(px, p.top);
+      ctx.lineTo(px, p.bottom);
+      ctx.stroke();
+      // A small downward triangle at the top edge reads as a moving playhead
+      // rather than a grid line.
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.moveTo(px, p.top + 8);
+      ctx.lineTo(px - 5, p.top);
+      ctx.lineTo(px + 5, p.top);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 
   // ---- Hint ----
   ctx.fillStyle = '#6b8e5a';

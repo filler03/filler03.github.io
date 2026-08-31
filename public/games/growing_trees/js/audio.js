@@ -437,6 +437,7 @@ function stopPreviewVoices() {
     } catch (e) {}
   }
   previewVoices.length = 0;
+  previewPlayhead = null;
 }
 
 function previewNote(pitch) {
@@ -447,11 +448,14 @@ function previewNote(pitch) {
   stopPreviewVoices();
   const freq = noteToFreq(pitch);
   const t0 = audioCtx.currentTime + 0.02;
-  const bodyMs = earlyCutMs();
+  // The preview plays a held note: the body runs through the FULL design body
+  // (the hold end), never cutting short at the early-cut marker, so every
+  // component of the envelope is heard before the release.
+  const bodyMs = designBodyMs();
   const relMs = releaseMs();
   const base = Math.max(0.35, baseVolumeFromY(H * 0.55));
 
-  // Amplitude envelope: the body (through the early-cut marker) then the release.
+  // Amplitude envelope: the full body then the release.
   const gain = audioCtx.createGain();
   const g = gain.gain;
   g.setValueAtTime(0, t0);
@@ -480,6 +484,9 @@ function previewNote(pitch) {
 
   const voice = { oscs: stack.oscs, mixGains: stack.mixGains, gain, cleanupTimer: null };
   previewVoices.push(voice);
+  // Record the note's audio timing so the sound creator can animate a playhead
+  // across the graph in sync with the preview (times in seconds / milliseconds).
+  previewPlayhead = { t0, bodyMs, relMs, totalMs: bodyMs + relMs, endAt: tEnd };
   voice.cleanupTimer = setTimeout(() => {
     try {
       stack.oscs.forEach(o => o.disconnect());
