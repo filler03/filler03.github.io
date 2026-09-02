@@ -211,17 +211,18 @@ function layerWave(ctx, layer) {
 // normalized level. Parallel arrays describe each oscillator:
 //   oscLayer[i]  — index of the owning layer
 //   oscVoice[i]  — the voice spec (null = fundamental)
-//   oscOffset[i] — static pitch offset in semitones (voice st + cents)
-//   oscLvl[i]    — normalized gain multiplier for this voice
+//   oscGroup[i]  — the voice's index within the layer's playable group
+//   oscOffset[i] — pitch offset in semitones at note start (voice st + cents)
+//   oscLvl[i]    — normalized gain multiplier at note start for this voice
 function buildLayerStack(ctx, envGain) {
   const oscs = [], mixGains = [], mixParams = [];
-  const oscLayer = [], oscVoice = [], oscOffset = [], oscLvl = [];
+  const oscLayer = [], oscVoice = [], oscGroup = [], oscOffset = [], oscLvl = [];
   const g0 = layerGainsAt(0);
   for (let i = 0; i < OSC_STACK.layers.length; i++) {
     const layer = OSC_STACK.layers[i];
     if (layer && layer.muted) continue;   // muted layer: no oscillators at all
     const wave = layerWave(ctx, layer);
-    const lvls = normalizedVoiceLevels(layer);
+    const lvls = normalizedVoiceLevelsAt(layer, 0);
     const group = layerPlayableVoices(layer);   // fundamental + unmuted voices
     for (let j = 0; j < group.length; j++) {
       const v = group[j];
@@ -237,11 +238,12 @@ function buildLayerStack(ctx, envGain) {
       mixParams.push(g.gain);
       oscLayer.push(i);
       oscVoice.push(v);
-      oscOffset.push(v ? voiceStOffset(v) : 0);
+      oscGroup.push(j);
+      oscOffset.push(voiceStOffsetAt(v, 0));
       oscLvl.push(lvls[j]);
     }
   }
-  return { oscs, mixGains, mixParams, oscLayer, oscVoice, oscOffset, oscLvl };
+  return { oscs, mixGains, mixParams, oscLayer, oscVoice, oscGroup, oscOffset, oscLvl };
 }
 
 // Start every oscillator at t0 (and stop at stopAt, when provided — live notes
@@ -270,23 +272,30 @@ function designBodyMs() {
 // play it with a value curve (same pattern as the envelope body scheduling).
 // The curve is sampled against the note's body/release split (when given) so the
 // drawn features line up with the HOLD/CUT/REL markers; one-shots sample it
-// uniformly.
+// uniformly. Each oscillator's share also folds in its voice's normalized level
+// at every sample (the voice's vol envelope, when one is active), so per-voice
+// volume curves bake into the mix exactly like the layer curves.
 function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
   const dur = Math.max(0.004, tEnd - t0);
   const N = 256;
   const gains = [];
   const split = actualBodyMs != null && relMs != null && (actualBodyMs + relMs) > 0;
   const dBody = designBodyMs();
+  const progs = new Array(N);
+  const normGains = new Array(N);
   for (let k = 0; k < N; k++) {
     const audioMs = (k / (N - 1)) * dur * 1000;
-    const prog = split ? mixProgForTimes(audioMs, actualBodyMs, relMs, dBody) : k / (N - 1);
-    gains.push(layerGainsAt(prog));
+    progs[k] = split ? mixProgForTimes(audioMs, actualBodyMs, relMs, dBody) : k / (N - 1);
+    gains.push(layerGainsAt(progs[k]));
+    const byLayer = new Array(OSC_STACK.layers.length);
+    for (let li = 0; li < OSC_STACK.layers.length; li++) byLayer[li] = normalizedVoiceLevelsAt(OSC_STACK.layers[li], progs[k]);
+    normGains[k] = byLayer;
   }
   for (let i = 0; i < stack.mixParams.length; i++) {
     const p = stack.mixParams[i];
-    const layerIdx = stack.oscLayer[i], lvl = stack.oscLvl[i];
+    const layerIdx = stack.oscLayer[i], gi = stack.oscGroup ? stack.oscGroup[i] : 0;
     const curve = new Float32Array(N);
-    for (let k = 0; k < N; k++) curve[k] = gains[k][layerIdx] * lvl;
+    for (let k = 0; k < N; k++) curve[k] = gains[k][layerIdx] * normGains[k][layerIdx][gi];
     p.setValueAtTime(curve[0], t0);
     p.setValueCurveAtTime(curve, t0 + 0.002, dur - 0.002);
   }
@@ -296,21 +305,25 @@ function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
 // from note start to the release point (max of the drawn time and the early-cut
 // marker), then the release section, mapped onto the same curve axis. Pending
 // value-curve automation is cancelled first so the chase never overlaps it.
+// The voice's normalized level at the progress value (its vol envelope when
+// active) scales each oscillator's target.
 function updateLiveMixTargets(ds, at, tc) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
-  const gains = layerGainsAt(mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs()));
+  const prog = mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs());
   for (let i = 0; i < ds.mixParams.length; i++) {
     const p = ds.mixParams[i];
+    const layerIdx = ds.oscLayer[i], gi = ds.oscGroup ? ds.oscGroup[i] : 0;
     p.cancelScheduledValues(at);
     p.setValueAtTime(Math.max(1e-4, p.value), at);
-    p.setTargetAtTime(gains[ds.oscLayer[i]] * ds.oscLvl[i], at, tc);
+    p.setTargetAtTime(layerGainsAt(prog)[layerIdx] * normalizedVoiceLevelsAt(OSC_STACK.layers[layerIdx], prog)[gi], at, tc);
   }
 }
 
 // On release, each live layer's mix continues through the release section of its
 // drawn curve (from the release-begin fraction up to the note-end value), so the
-// morph completes through the tail exactly as it does in wait mode.
+// morph completes through the tail exactly as it does in wait mode. The voice's
+// normalized level follows its vol envelope through the same tail.
 function rampLayerMixToEnd(ds, startT, ms) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
@@ -318,11 +331,12 @@ function rampLayerMixToEnd(ds, startT, ms) {
   const N = 96;
   for (let i = 0; i < (ds.mixParams || []).length; i++) {
     const p = ds.mixParams[i];
-    const layerIdx = ds.oscLayer[i], lvl = ds.oscLvl[i];
+    const layerIdx = ds.oscLayer[i], gi = ds.oscGroup ? ds.oscGroup[i] : 0;
     const curve = new Float32Array(N);
     for (let k = 0; k < N; k++) {
       const relElapsed = relMs > 0 ? ms * k / (N - 1) : ms;
-      curve[k] = layerGainsAt(mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody))[layerIdx] * lvl;
+      const prog = mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody);
+      curve[k] = layerGainsAt(prog)[layerIdx] * normalizedVoiceLevelsAt(OSC_STACK.layers[layerIdx], prog)[gi];
     }
     p.cancelScheduledValues(startT);
     p.setValueAtTime(Math.max(1e-4, p.value), startT);
@@ -337,23 +351,30 @@ function rampLayerMixToEnd(ds, startT, ms) {
    HOLD/CUT/REL. Layers without any envelope stay at their base pitch. */
 
 // One-shot path (wait mode, chimes, previews): sample each layer's pitch
-// envelope across t0..tEnd into a frequency value curve.
+// envelope across t0..tEnd into a frequency value curve. Each voice's st/ct
+// envelopes (own or master, when active) add their time-varying offset on top
+// of the layer's pitch bend at every sample.
 function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
   const dur = Math.max(0.004, tEnd - t0);
   const N = 256;
   const split = bodyMs != null && relMs != null && (bodyMs + relMs) > 0;
   const dBody = designBodyMs();
+  const progs = new Array(N);
+  for (let k = 0; k < N; k++) {
+    const audioMs = (k / (N - 1)) * dur * 1000;
+    progs[k] = split ? mixProgForTimes(audioMs, bodyMs, relMs, dBody) : k / (N - 1);
+  }
   for (let i = 0; i < stack.oscs.length; i++) {
+    const voice = stack.oscVoice ? stack.oscVoice[i] : null;
     const env = activePitchEnv(stack.oscLayer[i]);
-    if (!env) continue;
+    // Schedule the frequency curve whenever the layer bends pitch OR the voice
+    // carries a st/ct envelope (a voice bend must play even without a layer env).
+    if (!env && !voiceHasPitchBend(voice)) continue;
     const p = stack.oscs[i].frequency;
     p.cancelScheduledValues(t0);
-    const off = stack.oscOffset[i];
     const curve = new Float32Array(N);
     for (let k = 0; k < N; k++) {
-      const audioMs = (k / (N - 1)) * dur * 1000;
-      const prog = split ? mixProgForTimes(audioMs, bodyMs, relMs, dBody) : k / (N - 1);
-      curve[k] = freqShifted(baseFreq, pitchStAt(env, prog) + off);
+      curve[k] = freqShifted(baseFreq, pitchStAt(env, progs[k]) + voiceStOffsetAt(voice, progs[k]));
     }
     p.setValueAtTime(curve[0], t0);
     p.setValueCurveAtTime(curve, t0 + 0.002, dur - 0.002);
@@ -361,26 +382,29 @@ function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
 }
 
 // Chase each live layer's frequency toward its active pitch envelope's current
-// value (same progress mapping as the mix targets). Pending value-curve
-// automation is cancelled first so the chase never overlaps it.
+// value (same progress mapping as the mix targets), plus the voice's st/ct
+// envelopes at that progress. Pending value-curve automation is cancelled first
+// so the chase never overlaps it.
 function updateLivePitchTargets(ds, at, tc) {
   if (!ds.oscs || !ds.baseFreq) return;
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
   const prog = mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs());
   for (let i = 0; i < ds.oscs.length; i++) {
+    const voice = ds.oscVoice ? ds.oscVoice[i] : null;
     const env = activePitchEnv(ds.oscLayer[i]);
-    if (!env) continue;
+    if (!env && !voiceHasPitchBend(voice)) continue;
     const p = ds.oscs[i].frequency;
     p.cancelScheduledValues(at);
     p.setValueAtTime(p.value, at);
-    p.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog) + ds.oscOffset[i]), at, tc);
+    p.setTargetAtTime(freqShifted(ds.baseFreq, pitchStAt(env, prog) + voiceStOffsetAt(voice, prog)), at, tc);
   }
 }
 
 // On release, each live layer's frequency continues through the release section
 // of its pitch envelope (from the release-begin fraction to the note end), so
-// the bend completes through the tail exactly as it does in wait mode.
+// the bend completes through the tail exactly as it does in wait mode. The
+// voice's st/ct envelopes ride along the same tail.
 function rampPitchToEnd(ds, startT, ms) {
   if (!ds.oscs) return;
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
@@ -388,14 +412,15 @@ function rampPitchToEnd(ds, startT, ms) {
   const dBody = designBodyMs();
   const N = 96;
   for (let i = 0; i < ds.oscs.length; i++) {
+    const voice = ds.oscVoice ? ds.oscVoice[i] : null;
     const env = activePitchEnv(ds.oscLayer[i]);
-    if (!env) continue;
+    if (!env && !voiceHasPitchBend(voice)) continue;
     const p = ds.oscs[i].frequency;
-    const off = ds.oscOffset[i];
     const curve = new Float32Array(N);
     for (let k = 0; k < N; k++) {
       const relElapsed = relMs > 0 ? ms * k / (N - 1) : ms;
-      curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody)) + off);
+      const prog = mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody);
+      curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, prog) + voiceStOffsetAt(voice, prog));
     }
     p.cancelScheduledValues(startT);
     p.setValueAtTime(p.value, startT);
@@ -734,7 +759,10 @@ function initLivePathAudio(ds) {
   const stack = buildLayerStack(audioCtx, gain);
   const freq = noteToFreq(ds.pitch);
   ds.baseFreq = freq;   // pitch envelopes shift relative to this
-  for (const osc of stack.oscs) { osc.frequency.value = freq; osc.start(ctx0); }
+  for (let i = 0; i < stack.oscs.length; i++) {
+    stack.oscs[i].frequency.value = freqShifted(freq, stack.oscOffset[i]);   // base + the voice's offset at note start
+    stack.oscs[i].start(ctx0);
+  }
   ds.startedAt = performance.now();
   ds.ctx0 = ctx0;
   ds.gain = g;          // the AudioParam (gain.gain) — scheduling/ramps go through this
@@ -743,6 +771,8 @@ function initLivePathAudio(ds) {
   ds.mixGains = stack.mixGains;
   ds.mixParams = stack.mixParams;
   ds.oscLayer = stack.oscLayer;
+  ds.oscVoice = stack.oscVoice;
+  ds.oscGroup = stack.oscGroup;
   ds.oscLvl = stack.oscLvl;
   ds.oscOffset = stack.oscOffset;
   ds.osc = stack.oscs[0];
@@ -782,24 +812,31 @@ function scheduleLiveCurves(ds, fromT, toT, baseVol) {
   ds.gainLevel = gainCurve[gainCurve.length - 1];
   // Layer mix gains (each oscillator's share of the mix at each sample).
   const gains = new Array(N);
-  for (let k = 0; k < N; k++) gains[k] = layerGainsAt(prog(atMs(k)));
+  const normGains = new Array(N);
+  for (let k = 0; k < N; k++) {
+    gains[k] = layerGainsAt(prog(atMs(k)));
+    const byLayer = new Array(OSC_STACK.layers.length);
+    for (let li = 0; li < OSC_STACK.layers.length; li++) byLayer[li] = normalizedVoiceLevelsAt(OSC_STACK.layers[li], prog(atMs(k)));
+    normGains[k] = byLayer;
+  }
   for (let i = 0; i < (ds.mixParams || []).length; i++) {
     const p = ds.mixParams[i];
-    const layerIdx = ds.oscLayer[i], lvl = ds.oscLvl[i];
+    const layerIdx = ds.oscLayer[i], gi = ds.oscGroup ? ds.oscGroup[i] : 0;
     const curve = new Float32Array(N);
-    for (let k = 0; k < N; k++) curve[k] = Math.max(0, gains[k][layerIdx] * lvl);
+    for (let k = 0; k < N; k++) curve[k] = Math.max(0, gains[k][layerIdx] * normGains[k][layerIdx][gi]);
     p.cancelScheduledValues(fromT);
     p.setValueAtTime(Math.max(1e-4, curve[0]), fromT);
     p.setValueCurveAtTime(curve, fromT + 0.001, dur - 0.001);
   }
-  // Pitch envelopes (each oscillator's frequency follows its active envelope).
+  // Pitch envelopes (each oscillator's frequency follows its active envelope,
+  // plus its voice's st/ct envelopes at each sample).
   for (let i = 0; i < (ds.oscs || []).length; i++) {
+    const voice = ds.oscVoice ? ds.oscVoice[i] : null;
     const env = activePitchEnv(ds.oscLayer[i]);
-    if (!env) continue;
+    if (!env && !voiceHasPitchBend(voice)) continue;
     const p = ds.oscs[i].frequency;
-    const off = ds.oscOffset[i];
     const curve = new Float32Array(N);
-    for (let k = 0; k < N; k++) curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, prog(atMs(k))) + off);
+    for (let k = 0; k < N; k++) curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, prog(atMs(k))) + voiceStOffsetAt(voice, prog(atMs(k))));
     p.cancelScheduledValues(fromT);
     p.setValueAtTime(curve[0], fromT);
     p.setValueCurveAtTime(curve, fromT + 0.001, dur - 0.001);
