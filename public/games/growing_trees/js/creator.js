@@ -14,6 +14,8 @@ let creatorSubmode = 'note';  // 'note' (merged volume envelope + mix), 'harm', 
 let creatorVolSel = true;     // true = master volume envelope selected; false = a layer's mix curve
 let creatorPitchSel = 'master'; // Pitch tab selection: 'master' or a layer index
 let creatorVoiceSel = 0;        // Voices tab: which duplicate voice of the selected layer is being edited
+let creatorVoiceEnvSel = null;  // Voices tab: 'st' | 'ct' | 'vol' = which slider parameter's envelope curve is being edited
+let creatorVoiceEnvMaster = false; // Voices tab: edit the Master fallback curve instead of the selected voice's own
 let creatorPtr = null;        // { mode:'point'|'marker'|'draw', layerIdx, ptIdx|key, x0, y0, moved }
 let creatorLastTap = null;    // { t, x, y } for double-tap-to-delete
 let creatorSelMarker = null;  // selected marker key ('hold'|'cut'|'rel') awaiting a destination tap, or null
@@ -44,9 +46,9 @@ var creatorDrawPoints = 8;   // 4..HARMONIC_COUNT (clamped)
 // the current design automatically. When off, only the ▶ Preview button (and
 // the settings panel's Play test) make a sound. Persisted; default off.
 var creatorAutoPreview = false;
-// Voice slider snapping (Voices tab): when on, the Semitones slider snaps to
-// whole semitones and the ± nudge buttons step by exactly 1 st. Cents keep
-// providing fine sub-semitone tuning. Persisted; default off.
+// Voice slider snapping (Voices tab): when on, the Semitones flat-line fader
+// snaps to whole semitones. Cents keep providing fine sub-semitone tuning.
+// Persisted; default off.
 var creatorVoiceSnap = false;
 // Hard cap on envelope components created by drawing (the other editors cap via
 // their own insert helpers, raised to HARMONIC_COUNT for drawing).
@@ -57,6 +59,8 @@ function openSoundCreator(submode, layerIdx) {
   creatorActive = true;
   creatorSubmode = (submode === 'env' || submode === 'mix') ? 'note' : (submode || 'note');
   creatorVolSel = creatorSubmode === 'note';
+  creatorVoiceEnvSel = creatorSubmode === 'voices' ? 'st' : null;
+  creatorVoiceEnvMaster = false;
   clearSegSelection();
   if (layerIdx != null && layerIdx >= 0 && layerIdx < OSC_STACK.layers.length) selectedLayerIdx = layerIdx;
   mode = 'creator';
@@ -498,6 +502,62 @@ function applyVolTrim(trim) {
   scheduleCreatorPreview();
 }
 
+/* ---- Voice slider trim (Voices tab, left of the graph) ----
+   Each voice parameter's flat-line value — the semitone/cents offset or the
+   volume — is set with a small vertical mixer fader beside the graph, exactly
+   like the Volume tab's Trim. The curve (if any) bends on top of this line. */
+function voiceTrimSlider(p) {
+  const x = 2, w = 16;
+  return { x, w, y0: p.top + 10, y1: p.bottom - 16 };
+}
+function voiceTrimValue() {
+  const param = creatorVoiceEnvSel;
+  if (!param) return 0;
+  // In Master mode the fader edits the Master's own flat line, independent of
+  // the selected voice's static value; otherwise it edits the voice's.
+  if (creatorVoiceEnvMaster) {
+    const range = VOICE_PARAM_RANGES[param] || 1;
+    const min = param === 'vol' ? 0 : -range;
+    const max = param === 'vol' ? range : range;
+    return Math.max(min, Math.min(max, +MASTER_VOICE_FLATS[param] || 0));
+  }
+  const v = selectedVoice();
+  const d = VOICE_PARAM_DEFS.find(d => d.key === param);
+  const def = v && d ? +v[d.key] || 0 : 0;
+  const range = VOICE_PARAM_RANGES[param] || 1;
+  const min = param === 'vol' ? 0 : -range;
+  const max = param === 'vol' ? range : range;
+  return Math.max(min, Math.min(max, def));
+}
+function voiceTrimFromY(sl, y) {
+  const param = creatorVoiceEnvSel;
+  const f = Math.max(0, Math.min(1, (y - sl.y0) / (sl.y1 - sl.y0)));
+  const range = VOICE_PARAM_RANGES[param] || 1;
+  if (param === 'vol') return range * (1 - f);          // top = max, bottom = 0
+  return (1 - 2 * f) * range;                          // top = +range, bottom = -range
+}
+function applyVoiceTrim(trim) {
+  const param = creatorVoiceEnvSel;
+  if (!param) return;
+  const range = VOICE_PARAM_RANGES[param] || 1;
+  const min = param === 'vol' ? 0 : -range;
+  const max = param === 'vol' ? range : range;
+  trim = Math.max(min, Math.min(max, trim));
+  if (param === 'st' && creatorVoiceSnap) trim = Math.round(trim);
+  if (param === 'vol') trim = Math.round(trim * 100) / 100;
+  // In Master mode the fader only affects the Master flat line, not the voice's
+  // own static value.
+  if (creatorVoiceEnvMaster) {
+    MASTER_VOICE_FLATS[param] = trim;
+    scheduleCreatorPreview();
+    return;
+  }
+  const v = selectedVoice();
+  if (!v) return;
+  v[param] = trim;
+  scheduleCreatorPreview();
+}
+
 // Is there something to clear for the volume envelope being edited?
 function selectedVolClearable() {
   return creatorVolSel ? !envelopeIsDefault(ENVELOPE) : layerHasCustomCurve(OSC_STACK.layers[selectedLayerIdx]);
@@ -668,6 +728,10 @@ function segModel() {
     const env = selectedPitchEnvOrNull();
     return { elems: env ? env.points : [], lastPoint: env ? env.points.length : 0 };
   }
+  if (creatorSubmode === 'voices' && creatorVoiceEnvSel) {
+    const env = selectedVoiceEnvOrNull();
+    return { elems: env ? env.points : [], lastPoint: env ? env.points.length : 0 };
+  }
   return null;
 }
 
@@ -744,6 +808,11 @@ function segStartX(i, p) {
   }
   if (creatorSubmode === 'pitch') {
     const env = selectedPitchEnvOrNull();
+    const pt = env && env.points[i];
+    return pt ? tToX(pt.t, p) : p.right;
+  }
+  if (creatorSubmode === 'voices' && creatorVoiceEnvSel) {
+    const env = selectedVoiceEnvOrNull();
     const pt = env && env.points[i];
     return pt ? tToX(pt.t, p) : p.right;
   }
@@ -900,6 +969,11 @@ function segRangeHighlight(p) {
     x1 = tToX(eb.tOf(eb.b[end]), p);
   } else if (creatorSubmode === 'pitch') {
     const env = selectedPitchEnvOrNull();
+    if (!env || !env.points[r.lo] || !env.points[end]) return null;
+    x0 = tToX(env.points[r.lo].t, p);
+    x1 = tToX(env.points[end].t, p);
+  } else if (creatorSubmode === 'voices' && creatorVoiceEnvSel) {
+    const env = selectedVoiceEnvOrNull();
     if (!env || !env.points[r.lo] || !env.points[end]) return null;
     x0 = tToX(env.points[r.lo].t, p);
     x1 = tToX(env.points[end].t, p);
@@ -1111,8 +1185,9 @@ function creatorTopPills() {
    parallel with per-voice pitch/volume offsets — chorus/unison thickening
    without extra tabs or swatches. The Voices tab has two levels of sub-tabs:
    the layer swatch row picks the oscillator, a chip row below picks which
-   voice to edit, and the graph area holds one draggable slider per parameter
-   (semitones, cents, volume) plus ± nudge buttons for fine steps. */
+   voice to edit, the chips above the graph pick which parameter (st/ct/vol)
+   curve to edit, and the graph holds that curve with a vertical fader at the
+   left that raises/lowers its flat line. */
 // The layer whose voices are being edited (always a concrete layer here).
 function selectedVoicesLayer() {
   return OSC_STACK.layers[selectedLayerIdx] || null;
@@ -1134,6 +1209,109 @@ function addVoiceToSelected() {
   l.voices.push(v);
   creatorVoiceSel = l.voices.length - 1;
   return v;
+}
+/* ---- Voice slider envelopes (the st / ct / vol curve editor) ----
+   The Voices tab's three sliders can each be replaced by a breakpoint curve
+   over the note's timeline. Editing either the selected voice's own envelope
+   or the Master fallback (which every voice without its own inherits) works
+   exactly like the Pitch tab: tap/drag points, draw/erase/delete/line modes,
+   and a Clear pill. The axis is fixed per parameter — st ±24, ct ±100, vol
+   0..2 — so there is no ±range pill. */
+function selectedVoiceEnvOrNull() {
+  const param = creatorVoiceEnvSel;
+  if (!param) return null;
+  if (creatorVoiceEnvMaster) {
+    const env = MASTER_VOICE_ENVS[param];
+    return env && env.points && env.points.length >= 2 ? env : null;
+  }
+  const v = selectedVoice();
+  const own = v && v.envs && v.envs[param];
+  return own && own.points && own.points.length >= 2 ? own : null;
+}
+function selectedVoiceEnvExists() {
+  return !!selectedVoiceEnvOrNull();
+}
+function ensureSelectedVoiceEnv() {
+  const existing = selectedVoiceEnvOrNull();
+  if (existing) return existing;
+  const param = creatorVoiceEnvSel;
+  if (!param) return null;
+  const env = defaultVoiceEnv(param);
+  if (creatorVoiceEnvMaster) MASTER_VOICE_ENVS[param] = env;
+  else {
+    const v = selectedVoice();
+    if (!v) return null;
+    if (!v.envs || typeof v.envs !== 'object') v.envs = { st: null, ct: null, vol: null };
+    v.envs[param] = env;
+  }
+  return env;
+}
+// Value ↔ screen Y for the selected parameter: st/ct are bipolar (0 centered,
+// top = +range), vol is unipolar 0..range (top = max).
+function voiceEnvValueFromY(param, y, p) {
+  const range = VOICE_PARAM_RANGES[param] || 1;
+  if (param === 'vol') return clamp01((p.bottom - y) / p.ph) * range;
+  return yToAmp(y, p) * range;
+}
+function voiceEnvYFromValue(param, v, p) {
+  const range = VOICE_PARAM_RANGES[param] || 1;
+  if (param === 'vol') return p.bottom - clamp01(v / range) * p.ph;
+  return ampToY(v / range, p);
+}
+function insertVoiceEnvPoint(env, param, t, v) {
+  const range = VOICE_PARAM_RANGES[param] || 1;
+  const min = param === 'vol' ? 0 : -range;
+  const max = param === 'vol' ? range : range;
+  t = clamp01(t);
+  v = Math.max(min, Math.min(max, v));
+  const pts = env.points;
+  for (let i = 0; i < pts.length; i++) {
+    if (Math.abs(pts[i].t - t) < 0.01) { pts[i].v = v; return i; }
+  }
+  if (pts.length >= 64) return -1;
+  pts.push({ t, v });
+  pts.sort((a, b) => a.t - b.t);
+  return pts.findIndex(pt => pt.t === t && pt.v === v);
+}
+function removeVoiceEnvPoint(env, idx) {
+  const pts = env.points;
+  const pt = pts[idx];
+  if (!pt) return;
+  if (pt.t === 0 || pt.t === 1) return;   // the far-left/right anchors are protected
+  if (pts.length <= 2) {
+    // Keep two points: collapse to a flat no-modulation line the user can draw up.
+    const neutral = voiceEnvNeutral(creatorVoiceEnvSel);
+    env.points = [{ t: 0, v: neutral }, { t: 1, v: neutral }];
+    return;
+  }
+  pts.splice(idx, 1);
+}
+// Mode chips in the strip above the plot (Voices tab): pick which parameter's
+// envelope curve to edit, plus the Master fallback toggle. They sit on the
+// strip's top row; the Snap pill + interval chips use the bottom row.
+function voiceEnvChips(p) {
+  const y = MARKER_LANE_TOP + 2, h = 20;
+  const labels = [['st', 'st'], ['ct', 'ct'], ['vol', 'vol'], ['master', 'Master']];
+  const gap = 6, w = 56;
+  const x0 = p.left + 4;
+  return labels.map((l, i) => ({ key: l[0], label: l[1], x: x0 + i * (w + gap), y, w, h }));
+}
+// Clear pill (Voices tab, env mode): removes the envelope being edited — a
+// voice's own reverts to inheriting the master; clearing the master removes the
+// fallback entirely.
+function voiceEnvClearPill(p) {
+  const w = 64, h = WIDGET_PILL_H;
+  return { x: p.left + 4, y: WIDGET_PILL_Y, w, h };
+}
+function clearSelectedVoiceEnv() {
+  if (creatorVoiceEnvMaster) MASTER_VOICE_ENVS[creatorVoiceEnvSel] = null;
+  else {
+    const v = selectedVoice();
+    if (v && v.envs) {
+      v.envs[creatorVoiceEnvSel] = null;
+      if (!v.envs.st && !v.envs.ct && !v.envs.vol) v.envs = null;
+    }
+  }
 }
 // Voice chips strip (replaces the note-life row in the Voices tab).
 function voiceChipRects(p) {
@@ -1169,7 +1347,7 @@ const VOICE_INTERVALS = [
 // other tabs, and which is free in Voices mode. Keeps the sliders in the plot
 // at their usual height.
 function voiceSnapPill(p) {
-  const y = MARKER_LANE_TOP + 22, w = 70, h = 26;
+  const y = MARKER_LANE_BOTTOM - 26, w = 70, h = 26;
   return { x: p.left + 4, y, w, h };
 }
 // Interval preset chips, filling the strip to the right of the Snap pill. Chips
@@ -1185,40 +1363,6 @@ function voiceIntervalButtons(p) {
   return VOICE_INTERVALS.map((it, i) => ({ ...it, x: x0 + i * (w + gap), y: sp.y, w, h: sp.h }));
 }
 
-function voiceSliderRows(p) {
-  // One row per parameter, everything aligned on the track's line: the label
-  // right-aligned just before the − button, the readout after the + button,
-  // and the track between them. Keeping the label and readout on the line
-  // (instead of a row above) shrinks each row's vertical footprint to the
-  // buttons (±13px), so rows stay comfortably apart even on short landscape
-  // plots instead of smushing together. Spacing grows up to 56px on roomy
-  // screens but never drops below 30px, and the last row always clears the
-  // bottom axis label.
-  const n = VOICE_PARAM_DEFS.length;
-  const topInset = 18;        // first row's buttons clear the plot top
-  const bottomReserve = 24;   // last row clears the bottom axis label
-  const span = Math.max(0, p.ph - topInset - bottomReserve);
-  const spacing = n > 1 ? Math.min(56, Math.max(30, span / (n - 1))) : 0;
-  return VOICE_PARAM_DEFS.map((d, i) => {
-    const cy = p.top + topInset + i * spacing;
-    return {
-      def: d,
-      cy,
-      btnW: 26,
-      x1: p.left + 130,   // inline label + − button
-      x2: p.right - 96,   // + button + inline readout
-    };
-  });
-}
-function voiceParamFromX(row, x) {
-  const f = Math.max(0, Math.min(1, (x - row.x1) / (row.x2 - row.x1)));
-  let v = row.def.min + f * (row.def.max - row.def.min);
-  if (row.def.key === 'ct') v = Math.round(v);
-  else if (row.def.key === 'st' && creatorVoiceSnap) v = Math.round(v);
-  else v = Math.round(v * 100) / 100;
-  return Math.max(row.def.min, Math.min(row.def.max, v));
-}
-
 // Place/update breakpoints for the slot range `fromS`..`s` (the finger's sweep
 // since the last event) at the pointer's value. Absorption and placement are
 // confined to the swept corridor: existing points between those slots (plus a
@@ -1227,6 +1371,27 @@ function voiceParamFromX(row, x) {
 function drawPlacePointAtSlot(s, y, p, fromS) {
   const loS = Math.min(s, fromS == null ? s : fromS), hiS = Math.max(s, fromS == null ? s : fromS);
   const loT = slotT(loS), hiT = slotT(hiS), eps = 0.008;
+  if (creatorSubmode === 'voices' && creatorVoiceEnvSel) {
+    const env = ensureSelectedVoiceEnv();
+    if (!env) return -1;
+    const param = creatorVoiceEnvSel;
+    const neutral = voiceEnvNeutral(param);
+    const base = voiceTrimValue();
+    // Raw curve value whose effective value (base + curve − neutral) sits at
+    // the pointer's Y, so drawn dots land where the finger points.
+    const rawFromY = eff => voiceEnvValueFromY(param, eff, p) - (base - neutral);
+    if (env.points.length > 2) {
+      const kept = env.points.filter(pt => pt.t === 0 || pt.t === 1 || pt.t < loT - eps || pt.t > hiT + eps);
+      if (kept.length >= 2) env.points = kept;
+    }
+    let idx = -1;
+    for (let k = loS; k <= hiS; k++) {
+      // Erase snaps the swept curve to the neutral line (no modulation); flat
+      // neutral runs stay sparse instead of gaining dots.
+      if (!creatorEraseMode || Math.abs(envValueAt(env, slotT(k)) - neutral) > 1e-9) idx = insertVoiceEnvPoint(env, param, slotT(k), creatorEraseMode ? neutral : rawFromY(y));
+    }
+    return idx;
+  }
   if (creatorSubmode === 'pitch') {
     const env = ensureSelectedPitchEnv();
     const r = Math.max(1, env.range || 1);
@@ -1623,8 +1788,16 @@ function hitTestCreator(x, y) {
     }
     return { type: 'bar' };
   }
+  // Mode chips (Voices tab, strip): pick which parameter's envelope curve to
+  // edit, plus the Master fallback toggle.
+  if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode === 'voices') {
+    for (const c of voiceEnvChips(p)) {
+      if (x >= c.x - 4 && x <= c.x + c.w + 4 && y >= c.y - 4 && y <= c.y + c.h + 4) return { type: 'voiceenvchip', key: c.key };
+    }
+  }
   // Snap-to-semitone toggle pill + interval preset chips (the same strip,
-  // Voices tab only).
+  // Voices tab only, bottom row). Tapping an interval jumps the selected
+  // voice's Semitones flat line to that interval.
   if (y > MARKER_LANE_TOP && y <= MARKER_LANE_BOTTOM && creatorSubmode === 'voices') {
     const sp = voiceSnapPill(p);
     if (x >= sp.x - 6 && x <= sp.x + sp.w + 6 && y >= sp.y - 4 && y <= sp.y + sp.h + 4) return { type: 'voicesnap' };
@@ -1653,6 +1826,11 @@ function hitTestCreator(x, y) {
       const cp = pitchClearPill(p);
       if (selectedPitchEnvExists() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'pitchclear' };
     }
+    // Clear pill (Voices tab): reset the selected envelope.
+    if (creatorSubmode === 'voices' && !creatorSegMode) {
+      const cp = voiceEnvClearPill(p);
+      if (selectedVoiceEnvExists() && x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) return { type: 'voiceenvclear' };
+    }
     // Clear pill (Volume tab): reset the selected envelope.
     if (creatorSubmode === 'note' && !creatorSegMode) {
       const cp = volClearPill(p);
@@ -1667,20 +1845,30 @@ function hitTestCreator(x, y) {
     const sl = volTrimSlider(p);
     if (x >= sl.x - 4 && x <= sl.x + sl.w + 4 && y >= sl.y0 - 10 && y <= sl.y1 + 6) return { type: 'voltrim' };
   }
+  // Vertical flat-line fader (Voices tab, left edge of the graph): raises or
+  // lowers the selected parameter's straight line — the slider value the curve
+  // rides on top of.
+  if (creatorSubmode === 'voices' && selectedVoice()) {
+    const sl = voiceTrimSlider(p);
+    if (x >= sl.x - 4 && x <= sl.x + sl.w + 4 && y >= sl.y0 - 10 && y <= sl.y1 + 6) return { type: 'voicetrim' };
+  }
   if (y >= p.top && y <= p.bottom) {
-    // Voices tab: one slider per parameter with −/+ nudge buttons at both ends.
+    // Voices tab: the envelope editor for the selected parameter's curve.
     if (creatorSubmode === 'voices') {
-      const rows = voiceSliderRows(p);
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        if (y >= r.cy - 16 && y <= r.cy + 16) {
-          if (x >= r.x1 - r.btnW - 8 && x <= r.x1 - 8) return { type: 'vparam', keyIdx: i, dir: -1 };
-          if (x >= r.x2 + 8 && x <= r.x2 + 8 + r.btnW) return { type: 'vparam', keyIdx: i, dir: 1 };
-          if (x >= r.x1 - 8 && x <= r.x2 + 8) return { type: 'voiceslider', keyIdx: i };
-          return { type: 'bar' };
+      // Line mode: the whole graph is a segment picker.
+      if (creatorSegMode && segModel()) return { type: 'segselect' };
+      if (creatorDrawMode) return { type: 'draw' };
+      const env = selectedVoiceEnvOrNull();
+      if (env) {
+        const param = creatorVoiceEnvSel;
+        const neutral = voiceEnvNeutral(param);
+        const base = voiceTrimValue();
+        for (let j = 0; j < env.points.length; j++) {
+          const px = tToX(env.points[j].t, p), py = voiceEnvYFromValue(param, base + (env.points[j].v - neutral), p);
+          if (Math.hypot(x - px, y - py) < 18) return { type: 'voiceenvpoint', idx: j };
         }
       }
-      return { type: 'bar' };
+      return { type: 'emptyvoiceenv' };
     }
     // Line mode: the whole graph is a segment picker — drag across it to select
     // the segment whose start point is horizontally closest to the finger.
@@ -1736,17 +1924,18 @@ canvas.addEventListener('pointerdown', e => {
   // Delete mode: a single tap on a point removes it; taps that would otherwise
   // add or split points are ignored so the mode is strictly destructive.
   if (creatorDeleteMode) {
-    if (hit.type === 'point' || hit.type === 'envbound' || hit.type === 'pitchpoint' || hit.type === 'harmpoint') {
+    if (hit.type === 'point' || hit.type === 'envbound' || hit.type === 'pitchpoint' || hit.type === 'harmpoint' || hit.type === 'voiceenvpoint') {
       maybeAutoPreview();
       if (hit.type === 'envbound') envDeleteAt(Math.max(0, hit.idx - 1));
       else if (hit.type === 'pitchpoint') removePitchPoint(ensureSelectedPitchEnv(), hit.idx);
       else if (hit.type === 'harmpoint') removeSpecPoint(selectedLayer(), hit.idx);
+      else if (hit.type === 'voiceenvpoint') removeVoiceEnvPoint(ensureSelectedVoiceEnv(), hit.idx);
       else removeCurvePoint(OSC_STACK.layers[hit.layerIdx], hit.ptIdx);
       clearSegSelection();
       previewAndSave();
       return;
     }
-    if (hit.type === 'line' || hit.type === 'empty' || hit.type === 'envline' || hit.type === 'emptypitch' || hit.type === 'harm') return;
+    if (hit.type === 'line' || hit.type === 'empty' || hit.type === 'envline' || hit.type === 'emptypitch' || hit.type === 'harm' || hit.type === 'emptyvoiceenv') return;
   }
   if (hit.type !== 'marker' && hit.type !== 'markerdest') creatorSelMarker = null;
   if (hit.type === 'back') { closeSoundCreator(); return; }
@@ -1755,6 +1944,8 @@ canvas.addEventListener('pointerdown', e => {
       creatorSubmode = hit.submode;
       creatorSelMarker = null;
       creatorVolSel = creatorSubmode === 'note';
+      creatorVoiceEnvSel = creatorSubmode === 'voices' ? 'st' : null;
+      creatorVoiceEnvMaster = false;
       clearSegSelection();
       if (creatorSubmode === 'harm') initLayerSpecPoints(selectedLayer());
       if (creatorSubmode === 'voices') clampVoiceSel();
@@ -1772,6 +1963,7 @@ canvas.addEventListener('pointerdown', e => {
   }
   if (hit.type === 'voicechip') {
     creatorVoiceSel = hit.idx;
+    creatorVoiceEnvMaster = false;   // picking a voice edits its own envelope
     creatorPtr = null;
     maybeAutoPreview();
     return;
@@ -1817,40 +2009,26 @@ canvas.addEventListener('pointerdown', e => {
     saveSettings();
     return;
   }
+  if (hit.type === 'voiceenvchip') {
+    // Mode chips: pick a parameter's curve to edit, or toggle between the
+    // selected voice's own curve and the Master fallback.
+    if (hit.key === 'master') {
+      if (!creatorVoiceEnvSel) creatorVoiceEnvSel = 'st';
+      creatorVoiceEnvMaster = !creatorVoiceEnvMaster;
+    } else {
+      creatorVoiceEnvSel = hit.key;
+    }
+    creatorPtr = null;
+    clearSegSelection();
+    maybeAutoPreview();
+    return;
+  }
   if (hit.type === 'voiceint') {
-    // Jump the selected voice's semitone offset to the tapped interval.
+    // Jump the selected voice's semitone flat line to the tapped interval.
     const v = selectedVoice();
     if (v) {
       v.st = Math.max(VOICE_PARAM_DEFS[0].min, Math.min(VOICE_PARAM_DEFS[0].max, hit.st));
       creatorPtr = null;
-      previewAndSave();
-    }
-    return;
-  }
-  if (hit.type === 'vparam') {
-    // −/+ nudge buttons: fine steps on the selected voice's parameter. When
-    // snapping is on, the Semitones row moves by whole semitones instead.
-    const v = selectedVoice();
-    const d = VOICE_PARAM_DEFS[hit.keyIdx];
-    if (v && d) {
-      if (d.key === 'st' && creatorVoiceSnap) {
-        v.st = Math.max(d.min, Math.min(d.max, Math.round(+v.st || 0) + hit.dir));
-      } else {
-        const cur = +v[d.key] || 0;
-        v[d.key] = Math.max(d.min, Math.min(d.max, Math.round(cur / d.step) * d.step + hit.dir * d.step));
-      }
-      if (d.key === 'vol') v.vol = Math.round((v.vol || 0) * 100) / 100;
-      previewAndSave();
-    }
-    return;
-  }
-  if (hit.type === 'voiceslider') {
-    // Grab a slider: continuous fine control while dragging.
-    const v = selectedVoice();
-    const row = voiceSliderRows(creatorPlot())[hit.keyIdx];
-    if (v && row) {
-      v[row.def.key] = voiceParamFromX(row, x);
-      creatorPtr = { mode: 'voiceparam', keyIdx: hit.keyIdx, x0: x, y0: y };
       previewAndSave();
     }
     return;
@@ -1902,6 +2080,12 @@ canvas.addEventListener('pointerdown', e => {
     creatorPtr = { mode: 'voltrim', x0: x, y0: y };
     return;
   }
+  if (hit.type === 'voicetrim') {
+    // Flat-line fader: drag to raise/lower the voice parameter's straight line.
+    applyVoiceTrim(voiceTrimFromY(voiceTrimSlider(p), y));
+    creatorPtr = { mode: 'voicetrim', x0: x, y0: y };
+    return;
+  }
   if (hit.type === 'layer') {
     selectedLayerIdx = hit.layerIdx;
     creatorVolSel = false;
@@ -1945,6 +2129,43 @@ canvas.addEventListener('pointerdown', e => {
     previewAndSave();
     return;
   }
+  if (hit.type === 'voiceenvpoint') {
+    maybeAutoPreview();
+    const env = ensureSelectedVoiceEnv();
+    if (creatorLastTap && performance.now() - creatorLastTap.t < 400 && Math.hypot(x - creatorLastTap.x, y - creatorLastTap.y) < 26) {
+      removeVoiceEnvPoint(env, hit.idx);
+      creatorLastTap = null;
+      clampSegSelection();
+      previewAndSave();
+      return;
+    }
+    creatorLastTap = { t: performance.now(), x, y };
+    creatorPtr = { mode: 'voiceenvpoint', idx: hit.idx, x0: x, y0: y };
+    return;
+  }
+  if (hit.type === 'emptyvoiceenv') {
+    // Tapping anywhere on the graph adds a breakpoint there.
+    const env = ensureSelectedVoiceEnv();
+    if (env) {
+      const param = creatorVoiceEnvSel;
+      const base = voiceTrimValue();
+      const raw = voiceEnvValueFromY(param, y, p) - (base - voiceEnvNeutral(param));
+      const idx = insertVoiceEnvPoint(env, param, xToT(x, p), raw);
+      if (idx >= 0) creatorPtr = { mode: 'voiceenvpoint', idx, x0: x, y0: y };
+    }
+    clearSegSelection();
+    previewAndSave();
+    return;
+  }
+  if (hit.type === 'voiceenvclear') {
+    // Removes the envelope being edited: a voice's own reverts to inheriting
+    // the master; clearing the master removes the fallback entirely.
+    clearSelectedVoiceEnv();
+    creatorPtr = null;
+    clearSegSelection();
+    previewAndSave();
+    return;
+  }
   if (hit.type === 'addlayer') {
     if (OSC_STACK.layers.length >= 8) return;
     OSC_STACK.layers.push(defaultLayer('osc-' + (OSC_STACK.layers.length + 1)));
@@ -1982,11 +2203,9 @@ canvas.addEventListener('pointerdown', e => {
       const env = ensureSelectedPitchEnv();
       env.points = [{ t: 0, st: 0 }, { t: 1, st: 0 }];   // flat: no bend (range kept)
     } else if (creatorSubmode === 'voices') {
-      const l = selectedVoicesLayer();
-      if (l) {
-        l.voices = null;      // clear all duplicates → back to a plain single osc
-        creatorVoiceSel = 0;
-      }
+      // Reset the envelope being edited to a flat neutral line (no modulation).
+      const env = ensureSelectedVoiceEnv();
+      if (env) env.points = [{ t: 0, v: voiceEnvNeutral(creatorVoiceEnvSel) }, { t: 1, v: voiceEnvNeutral(creatorVoiceEnvSel) }];
     } else if (creatorVolSel) {
       ENVELOPE = clone(DEFAULT_ENVELOPE);
       clampEnvelopeIndexes();
@@ -2177,14 +2396,8 @@ canvas.addEventListener('pointermove', e => {
     scheduleCreatorPreview();
   } else if (creatorPtr.mode === 'voltrim') {
     applyVolTrim(volTrimFromY(volTrimSlider(p), y));
-  } else if (creatorPtr.mode === 'voiceparam') {
-    const v = selectedVoice();
-    const row = voiceSliderRows(p)[creatorPtr.keyIdx];
-    if (v && row) {
-      v[row.def.key] = voiceParamFromX(row, x);
-      if (row.def.key === 'vol') v.vol = Math.round((v.vol || 0) * 100) / 100;
-      scheduleCreatorPreview();
-    }
+  } else if (creatorPtr.mode === 'voicetrim') {
+    applyVoiceTrim(voiceTrimFromY(voiceTrimSlider(p), y));
   } else if (creatorPtr.mode === 'pitchpoint') {
     const env = ensureSelectedPitchEnv();
     const r = Math.max(1, env.range || 1);
@@ -2195,6 +2408,19 @@ canvas.addEventListener('pointermove', e => {
       env.points.sort((a, b) => a.t - b.t);
       creatorPtr.idx = env.points.indexOf(pt);
       scheduleCreatorPreview();
+    }
+  } else if (creatorPtr.mode === 'voiceenvpoint') {
+    const env = ensureSelectedVoiceEnv();
+    if (env) {
+      const param = creatorVoiceEnvSel;
+      const pt = env.points[creatorPtr.idx];
+      if (pt) {
+        pt.t = clamp01(xToT(x, p));
+        pt.v = voiceEnvValueFromY(param, y, p) - (voiceTrimValue() - voiceEnvNeutral(param));
+        env.points.sort((a, b) => a.t - b.t);
+        creatorPtr.idx = env.points.indexOf(pt);
+        scheduleCreatorPreview();
+      }
     }
   } else if (creatorPtr.mode === 'harmpoint') {
     const l = OSC_STACK.layers[creatorPtr.layerIdx];
@@ -2486,7 +2712,7 @@ function drawCreator(now) {
   ctx.fillStyle = '#2e5d34';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(creatorVolSel ? '↺ Reset vol' : creatorSubmode === 'pitch' ? '↺ Reset pitch' : creatorSubmode === 'voices' ? '↺ Clear all' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
+  ctx.fillText(creatorVolSel ? '↺ Reset vol' : creatorSubmode === 'pitch' ? '↺ Reset pitch' : creatorSubmode === 'voices' ? '↺ Reset curve' : creatorSubmode === 'harm' ? '↺ Reset spec' : '↺ Reset curve', W - 59, 83);
 
   // Voice chips strip (Voices tab): pick which duplicate to edit, or add one.
   if (creatorSubmode === 'voices') {
@@ -2494,10 +2720,12 @@ function drawCreator(now) {
     const nV = l ? layerVoices(l).length : 0;
     const rects = voiceChipRects(p);
     ctx.textAlign = 'center';
+    const chipAlpha = creatorVoiceEnvMaster ? 0.55 : 1;
     for (let i = 0; i < nV; i++) {
       const rc = rects[i], selChip = i === creatorVoiceSel;
       const v = l.voices[i];
       const vMuted = !!(v && v.muted);
+      ctx.globalAlpha = chipAlpha;
       drawRoundRect(rc.x, rc.y, rc.w, rc.h, 10);
       ctx.fillStyle = selChip ? (vMuted ? '#5c8a62' : '#2e5d34') : (vMuted ? '#e5eee1' : '#fff');
       ctx.fill();
@@ -2545,6 +2773,7 @@ function drawCreator(now) {
         ctx.fillText('✕', rc.x + rc.w - 15, LIFE_ROW_CY + 3);
       }
     }
+    ctx.globalAlpha = 1;
     if (nV < MAX_LAYER_VOICES) {
       const rc = rects[nV];
       drawRoundRect(rc.x, rc.y, rc.w, rc.h, 10);
@@ -2657,7 +2886,49 @@ function drawCreator(now) {
     }
   }
 
-  // ---- Snap-to-semitone toggle pill (Voices tab only, above the plot) ----
+  // ---- Mode chips (Voices tab only, above the plot): which parameter's
+  // envelope to edit, plus the Master fallback toggle. A small dot marks a
+  // parameter where the selected voice has its OWN envelope; the Master chip
+  // lights up only when the master actually provides a curve for a parameter
+  // this voice doesn't override (so the fallback is genuinely in effect). ----
+  if (creatorSubmode === 'voices') {
+    const v = selectedVoice();
+    const ownEnv = param => {
+      if (!v || !v.envs) return false;
+      const e = v.envs[param];
+      return !!(e && e.points && e.points.length >= 2);
+    };
+    const relevantMasterEnv = () => {
+      for (const param of ['st', 'ct', 'vol']) {
+        const m = MASTER_VOICE_ENVS[param];
+        if (m && m.points && m.points.length >= 2 && !ownEnv(param)) return true;
+      }
+      return false;
+    };
+    for (const c of voiceEnvChips(p)) {
+      const active = c.key === 'master' ? creatorVoiceEnvMaster : creatorVoiceEnvSel === c.key;
+      const hasEnv = c.key === 'master' ? relevantMasterEnv() : ownEnv(c.key);
+      drawRoundRect(c.x, c.y, c.w, c.h, 8);
+      ctx.fillStyle = active ? '#2e5d34' : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = active ? '#2e5d34' : 'rgba(46,93,52,0.4)';
+      ctx.lineWidth = active ? 2 : 1;
+      ctx.stroke();
+      ctx.fillStyle = active ? '#fff' : '#2e5d34';
+      ctx.font = '700 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(c.label, c.x + c.w / 2, c.y + c.h / 2 + 3);
+      if (hasEnv) {
+        // Envelope-defined dot (top-right corner), contrasting on the active chip.
+        ctx.fillStyle = active ? '#ffd86b' : '#e0862d';
+        ctx.beginPath();
+        ctx.arc(c.x + c.w - 7, c.y + 6, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // ---- Snap-to-semitone toggle pill (Voices tab, flat-line fader for Semitones) ----
   if (creatorSubmode === 'voices') {
     const sp = voiceSnapPill(p);
     drawRoundRect(sp.x, sp.y, sp.w, sp.h, 8);
@@ -2672,7 +2943,7 @@ function drawCreator(now) {
     ctx.fillText(creatorVoiceSnap ? 'Snap on' : 'Snap', sp.x + sp.w / 2, sp.y + sp.h / 2 + 3);
   }
 
-  // ---- Interval preset chips (Voices tab only, right of the Snap pill) ----
+  // ---- Interval preset chips (Voices tab, right of the Snap pill) ----
   if (creatorSubmode === 'voices') {
     const v = selectedVoice();
     const active = v ? Math.round(+v.st || 0) : NaN;
@@ -2727,7 +2998,21 @@ function drawCreator(now) {
     ctx.textAlign = 'right';
     ctx.fillText('note life →', p.right, p.bottom - 6);
   } else if (creatorSubmode === 'voices') {
-    // No axis labels; the sliders carry their own labels/readouts below.
+    const param = creatorVoiceEnvSel;
+    const range = VOICE_PARAM_RANGES[param] || 1;
+    const unit = param === 'st' ? ' st' : (param === 'ct' ? ' ¢' : '×');
+    if (param === 'vol') {
+      ctx.fillText('+' + range + '×', p.left + 2, p.top + 10);
+      ctx.fillText('1', p.left + 2, voiceEnvYFromValue(param, 1, p) + 3);
+      ctx.fillText('0', p.left + 2, p.bottom - 4);
+    } else {
+      ctx.fillText('+' + range + unit, p.left + 2, p.top + 10);
+      ctx.fillText('0', p.left + 2, ampToY(0, p) + 3);
+      ctx.fillText('−' + range + unit, p.left + 2, p.bottom - 4);
+    }
+    ctx.textAlign = 'right';
+    ctx.fillText('note life →', p.right, p.bottom - 6);
+    ctx.textAlign = 'left';
   } else {
     ctx.fillText('0%', p.left + 2, p.bottom - 6);
     ctx.textAlign = 'right';
@@ -2882,75 +3167,66 @@ function drawCreator(now) {
     // later, outside the graph), so they never cover the envelope.
   }
 
-  // ---- Voices sliders (voices sub-mode) ----
+  // ---- Voice slider envelope (voices sub-mode, curve editor) ----
   if (creatorSubmode === 'voices') {
-    const v = selectedVoice();
-    const rows = voiceSliderRows(p);
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i], d = r.def;
-      // Label before the − button, current value after the + button — both on
-      // the track's line, so a row's footprint is just its buttons.
-      ctx.fillStyle = '#6b8e5a';
-      ctx.font = '700 10px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(d.label, r.x1 - r.btnW - 12, r.cy + 3);
-      ctx.fillText(v ? d.fmt(+v[d.key] || 0) : '—', p.right - 6, r.cy + 3);
-      // −/+ nudge buttons.
-      ctx.font = '700 13px sans-serif';
-      ctx.textAlign = 'center';
-      for (const side of ['-', '+']) {
-        const bx = side === '-' ? r.x1 - r.btnW - 8 : r.x2 + 8;
-        drawRoundRect(bx, r.cy - r.btnW / 2, r.btnW, r.btnW, 6);
-        ctx.fillStyle = '#eef5ea';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(46,93,52,0.4)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = '#2e5d34';
-        ctx.fillText(side === '-' ? '−' : '+', bx + r.btnW / 2, r.cy + 5);
-      }
-      // Track.
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = 'rgba(46,93,52,0.22)';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(r.x1, r.cy); ctx.lineTo(r.x2, r.cy);
-      ctx.stroke();
-      // Bipolar center marker for semitones/cents; volume starts at zero.
-      const midX = r.x1 + (r.x2 - r.x1) * ((0 - d.min) / (d.max - d.min));
-      ctx.strokeStyle = 'rgba(46,93,52,0.45)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(midX, r.cy - 9); ctx.lineTo(midX, r.cy + 9);
-      ctx.stroke();
-      // Snap grid: tick marks at each whole semitone along the track (visible
-      // only while snapping is on, so the snap positions are obvious).
-      if (d.key === 'st' && creatorVoiceSnap) {
-        ctx.strokeStyle = 'rgba(46,93,52,0.30)';
-        ctx.lineWidth = 1;
+    const param = creatorVoiceEnvSel;
+    const range = VOICE_PARAM_RANGES[param] || 1;
+    const neutral = voiceEnvNeutral(param);
+    const env = selectedVoiceEnvOrNull();
+    const paramLabel = param === 'st' ? 'semitones' : (param === 'ct' ? 'cents' : 'volume');
+    const base = voiceTrimValue();          // flat-line value (the fader)
+    const yBase = voiceEnvYFromValue(param, base, p);
+    if (!env) {
+      // No curve on this selection. The Master always keeps a solid line at the
+      // flat-line position even before any curve exists; a voice without its own
+      // curve shows nothing (clearing it empties the graph).
+      if (creatorVoiceEnvMaster) {
+        ctx.strokeStyle = 'rgba(46,93,52,0.35)';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        for (let s = Math.ceil(d.min); s <= Math.floor(d.max); s++) {
-          const gx = r.x1 + (r.x2 - r.x1) * ((s - d.min) / (d.max - d.min));
-          ctx.moveTo(gx, r.cy - 6); ctx.lineTo(gx, r.cy + 6);
-        }
+        ctx.moveTo(p.left, yBase); ctx.lineTo(p.right, yBase);
         ctx.stroke();
       }
-      ctx.lineCap = 'butt';
-      // Fill + thumb for the current value.
-      const cur = v ? Math.max(d.min, Math.min(d.max, +v[d.key] || 0)) : d.min;
-      const tx = r.x1 + (r.x2 - r.x1) * ((cur - d.min) / (d.max - d.min));
-      ctx.strokeStyle = '#2e5d34';
-      ctx.lineWidth = 4;
+      ctx.fillStyle = '#9db89c';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      const masterOn = !!(MASTER_VOICE_ENVS[param] && MASTER_VOICE_ENVS[param].points && MASTER_VOICE_ENVS[param].points.length >= 2);
+      ctx.fillText(creatorVoiceEnvMaster
+        ? 'The Master ' + paramLabel + ' curve has no curve yet · tap or draw to create one'
+        : masterOn
+        ? 'This voice inherits the Master ' + paramLabel + ' curve (no curve of its own) · draw to give it its own'
+        : 'This voice has no ' + paramLabel + ' curve · tap or draw to bend it · the fader at left sets the flat line', W / 2, p.top + p.ph / 2 - 14);
+    } else {
+      // Neutral line: the flat-line position the fader raises and lowers.
+      ctx.strokeStyle = 'rgba(46,93,52,0.28)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(r.x1, r.cy); ctx.lineTo(tx, r.cy);
+      ctx.moveTo(p.left, yBase); ctx.lineTo(p.right, yBase);
       ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(tx, r.cy, 10, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-      ctx.strokeStyle = '#2e5d34';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      const color = creatorVoiceEnvMaster ? '#2e5d34' : OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
+      // Selected-range highlight behind the envelope.
+      const hl = segRangeHighlight(p);
+      if (hl) {
+        ctx.fillStyle = 'rgba(46,93,52,0.09)';
+        ctx.fillRect(hl.x0, p.top, hl.x1 - hl.x0, p.ph);
+      }
+      const pts = env.points;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      const yOf = v => voiceEnvYFromValue(param, base + (v - neutral), p);
+      const path = [{ x: tToX(0, p), y: yOf(envValueAt(env, 0)), v: envValueAt(env, 0), el: null }];
+      for (let j = 0; j < pts.length; j++) path.push({ x: tToX(pts[j].t, p), y: yOf(pts[j].v), v: pts[j].v, el: pts[j] });
+      path.push({ x: tToX(1, p), y: yOf(envValueAt(env, 1)), v: envValueAt(env, 1), el: null });
+      strokeSegPath(path, Math.max(1, range), yOf);
+      for (const pt of pts) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(tToX(pt.t, p), yOf(pt.v), 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
   }
 
@@ -3009,7 +3285,7 @@ function drawCreator(now) {
   }
 
   // ---- Widget band (between the marker lane and the plot) ----
-  // Editor-mode buttons + draw-points pill (right; not in the Voices tab).
+  // Editor-mode buttons + draw-points pill (right).
   if (creatorSubmode !== 'voices') {
     const tb = drawToolbar(p);
     ctx.textBaseline = 'middle';
@@ -3048,6 +3324,11 @@ function drawCreator(now) {
       ptsSel.style.height = tb.dens.h + 'px';
       ptsSel.style.display = creatorActive ? 'block' : 'none';
     }
+  } else {
+    // The toolbar (and its points <select>) is hidden in the Voices tab — make
+    // sure the select isn't left floating over the graph after switching tabs.
+    const ptsSel = document.getElementById('creatorPoints');
+    if (ptsSel) ptsSel.style.display = 'none';
   }
 
   // Clear/±range pills (left of the widget band).
@@ -3082,6 +3363,22 @@ function drawCreator(now) {
         ctx.textAlign = 'center';
         ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
       }
+    }
+    // Clear pill (Voices tab): removes the envelope being edited — a voice's own
+    // reverts to inheriting the master; clearing the master removes the
+    // fallback entirely.
+    if (creatorSubmode === 'voices' && !creatorSegMode && selectedVoiceEnvExists()) {
+      const cp = voiceEnvClearPill(p);
+      drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#c0392b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      ctx.font = '700 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
     }
     // Clear pill (Volume tab): resets the volume envelope being edited — the
     // master ADSR, or the selected layer's mix curve (back to following Vol).
@@ -3130,6 +3427,45 @@ function drawCreator(now) {
       ctx.textAlign = 'center';
       ctx.fillText('Trim', cx, sl.y0 - 6);
     }
+    // Flat-line fader (Voices tab, left edge of the graph): raises/lowers the
+    // selected parameter's straight line — the static slider value the curve
+    // rides on top of.
+    if (creatorSubmode === 'voices' && selectedVoice()) {
+      const sl = voiceTrimSlider(p);
+      const cx = sl.x + sl.w / 2;
+      const param = creatorVoiceEnvSel;
+      const range = VOICE_PARAM_RANGES[param] || 1;
+      const val = voiceTrimValue();
+      ctx.strokeStyle = 'rgba(46,93,52,0.5)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx, sl.y0); ctx.lineTo(cx, sl.y1);
+      ctx.stroke();
+      // Neutral notch (st/ct 0, vol 1).
+      const notchVal = param === 'vol' ? 1 : 0;
+      const ny = sl.y1 - (notchVal - (param === 'vol' ? 0 : -range)) / (param === 'vol' ? range : 2 * range) * (sl.y1 - sl.y0);
+      ctx.strokeStyle = 'rgba(46,93,52,0.85)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sl.x, ny); ctx.lineTo(sl.x + sl.w, ny);
+      ctx.stroke();
+      // Thumb (top = max for vol, +range for st/ct).
+      const tf = param === 'vol' ? 1 - val / range : (range - val) / (2 * range);
+      const cy = sl.y0 + tf * (sl.y1 - sl.y0);
+      drawRoundRect(sl.x, cy - 7, sl.w, 14, 7);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = creatorVoiceEnvMaster ? '#2e5d34' : OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Tiny label + readout.
+      ctx.fillStyle = '#6b8e5a';
+      ctx.font = '700 8px sans-serif';
+      ctx.textAlign = 'center';
+      const unit = param === 'st' ? ' st' : (param === 'ct' ? ' ¢' : '×');
+      ctx.fillText(param === 'vol' ? 'Vol' : (param === 'st' ? 'St' : 'Ct'), cx, sl.y0 - 6);
+      ctx.fillText((Math.round(val * 100) / 100) + unit, cx, sl.y1 + 10);
+    }
     // Line-mode hint (Volume tab): a gentle reminder of the drag-to-select
     // gesture while no segment is picked yet. Skipped if the toolbar leaves no
     // room for it (very narrow screens).
@@ -3151,7 +3487,7 @@ function drawCreator(now) {
   if (segPanelOpen && creatorSegMode && segModel()) drawSegPanel(p);
 
   // ---- Preview playhead: animates across the graph while a note is previewed ----
-  if (creatorSubmode === 'note' || creatorSubmode === 'pitch') {
+  if (creatorSubmode === 'note' || creatorSubmode === 'pitch' || (creatorSubmode === 'voices' && creatorVoiceEnvSel)) {
     const phT = previewPlayheadT();
     if (phT >= 0) {
       const px = tToX(phT, p);
@@ -3178,19 +3514,25 @@ function drawCreator(now) {
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
   if (creatorSubmode === 'voices') {
-    ctx.fillText('Pick an oscillator above and a voice chip to edit · drag the sliders or nudge with −/+ · tap an interval chip (−8 b3 3 4 5 8) to jump Semitones · Snap makes Semitones land on whole tones · tap a chip\u2019s 🔊 to mute it · ✕ deletes it · Reset clears them all', W / 2, H - 8);
+    ctx.fillText('Editing the ' + (creatorVoiceEnvSel === 'st' ? 'semitones' : creatorVoiceEnvSel === 'ct' ? 'cents' : 'volume') + ' curve' + (creatorVoiceEnvMaster ? ' (Master — the fallback every voice without its own inherits)' : ' of the selected voice') + ' · the fader at the left raises/lowers the flat line (drag it, or tap an interval chip to jump Semitones) · tap or draw to bend the curve · drag a dot · double-tap a dot to delete · Clear (above the graph) removes the curve', W / 2, H - 8);
   } else if (creatorSegMode) {
     ctx.fillText('Line-type mode · drag across the graph to select a segment (the one whose start point is closest) and pick Line / Stairs / Spring / Pulse · Freq is the number of ups & downs across the segment · Depth is % of the full value scale · tap another mode button above the graph to exit', W / 2, H - 8);
   } else if (creatorDeleteMode) {
     ctx.fillText('Delete mode · tap a dot to remove it · tap Point above the graph to return (double-tap a dot also deletes in Point mode)', W / 2, H - 8);
   } else if (creatorDrawMode) {
+    const voiceEnvTarget = () => {
+      const param = creatorVoiceEnvSel === 'st' ? 'semitones' : creatorVoiceEnvSel === 'ct' ? 'cents' : 'volume';
+      return 'the ' + param + ' curve' + (creatorVoiceEnvMaster ? ' (Master)' : ' of the selected voice');
+    };
     ctx.fillText(creatorEraseMode
-      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Point above the graph to edit dots'
+      ? 'Erasing the ' + (creatorSubmode === 'note' ? (creatorVolSel ? 'volume envelope' : 'selected oscillator mix') : creatorSubmode === 'pitch' ? (creatorPitchSel === 'master' ? 'master pitch envelope' : 'selected oscillator pitch envelope') : (creatorSubmode === 'voices') ? voiceEnvTarget() : 'selected oscillator spectrum') + ' · drag across a region to snap it to the erase line · tap Point above the graph to edit dots'
       : creatorSubmode === 'note'
       ? 'Drawing the ' + (creatorVolSel ? 'volume envelope (the note\u2019s attack/decay/release, applied to all oscillators)' : 'selected oscillator mix curve (this oscillator\u2019s own level over the note)') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots'
       : creatorSubmode === 'pitch'
         ? 'Drawing the ' + (creatorPitchSel === 'master' ? 'master pitch envelope (fallback for oscillators without their own)' : 'selected oscillator pitch envelope') + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots'
-        : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots', W / 2, H - 8);
+        : creatorSubmode === 'voices'
+          ? 'Drawing ' + voiceEnvTarget() + ' · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots'
+          : 'Drawing the selected oscillator spectrum · drag to scribble (' + drawPointCount() + ' pts) · tap Point above the graph to edit dots', W / 2, H - 8);
   } else {
     ctx.fillText(creatorSubmode === 'note'
       ? 'Vol shapes every oscillator\u2019s attack/decay/release · a swatch\u2019s badge shows own (customized curve) vs vol (follows Vol) · Clear (above the graph) resets the selected curve · the Trim fader (left of the graph) raises/lowers the whole line · drag HOLD/CUT/REL markers and set note life on the right · drag dots · tap to add · double-tap a dot to delete · tap Line above the graph to shape a segment\u2019s line type'

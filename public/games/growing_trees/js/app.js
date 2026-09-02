@@ -388,7 +388,7 @@ const clampSign = v => Math.max(-1, Math.min(1, v));
    chorus/unison thickening. */
 const MAX_LAYER_VOICES = 5;
 function defaultVoice(id) {
-  return { id: id || 'voice-' + Date.now().toString(36), st: 0, ct: 7, vol: 1, muted: false };
+  return { id: id || 'voice-' + Date.now().toString(36), st: 0, ct: 7, vol: 1, muted: false, envs: null };
 }
 function defaultLayer(id) {
   const amplitudes = new Array(HARMONIC_COUNT).fill(0);
@@ -460,23 +460,36 @@ function defaultPitchEnv() {
 }
 var MASTER_PITCH_ENV = null;
 
-// Interpolate a pitch envelope's semitones at note progress t (ends clamp).
-function pitchStAt(env, t) {
+// The value stored on an envelope breakpoint: pitch envelopes carry it as .st,
+// voice-slider envelopes as .v. Returns 0 when absent.
+function envPointVal(pt) {
+  return pt && pt.v != null ? pt.v : (pt && pt.st != null ? pt.st : 0);
+}
+
+// Interpolate an envelope curve's value at note progress t (0..1), endpoints
+// clamp. Works for pitch envelopes ({t, st}) and voice-slider envelopes
+// ({t, v}) alike, applying each segment's line type.
+function envValueAt(env, t) {
   const pts = env && env.points;
   if (!pts || !pts.length) return 0;
-  if (pts.length === 1) return clampSign(pts[0].st);
+  if (pts.length === 1) return envPointVal(pts[0]);
   const lo = pts[0], hi = pts[pts.length - 1];
-  if (t <= lo.t) return lo.st;
-  if (t >= hi.t) return hi.st;
+  if (t <= lo.t) return envPointVal(lo);
+  if (t >= hi.t) return envPointVal(hi);
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
     if (t >= a.t && t <= b.t) {
       const span = b.t - a.t;
       const f = span > 0 ? (t - a.t) / span : 0;
-      return segValueAt(a, a.st, b.st, f, Math.max(1, env.range || 1));
+      return segValueAt(a, envPointVal(a), envPointVal(b), f, Math.max(1, env.range || 1));
     }
   }
-  return hi.st;
+  return envPointVal(hi);
+}
+
+// Interpolate a pitch envelope's semitones at note progress t (ends clamp).
+function pitchStAt(env, t) {
+  return envValueAt(env, t);
 }
 
 // The pitch envelope actually driving a layer: its own when present, otherwise
@@ -493,6 +506,98 @@ function freqShifted(baseFreq, st) {
   return Math.max(20, baseFreq * Math.pow(2, st / 12));
 }
 
+/* ---------- Voice slider envelopes ----------
+   Each duplicate voice's sliders — semitones, cents, volume — can be bent by a
+   breakpoint curve over the note's timeline on top of its static flat-line
+   value: the value heard = flat line + curve (relative to neutral), so a curve
+   never disables the slider, it just modulates it. The master fallback per
+   parameter applies to every voice that has no envelope of its own; the
+   fundamental (the layer's own oscillator) never carries an envelope.
+   Ranges mirror the Voices-tab flat-line faders: st ±24 st, ct ±100 ¢,
+   vol 0..2. */
+const VOICE_PARAM_RANGES = { st: 24, ct: 100, vol: 2 };
+var MASTER_VOICE_ENVS = { st: null, ct: null, vol: null };
+// Flat-line values for the Master graphs, independent of each voice's own
+// static slider values. A voice inheriting the master uses this as its base
+// (plus the master curve), so the Master fader only affects the Master graph.
+var MASTER_VOICE_FLATS = { st: 0, ct: 0, vol: 1 };
+
+// A fresh flat voice envelope: no modulation (the neutral value holds).
+function defaultVoiceEnv(param) {
+  const neutral = param === 'vol' ? 1 : 0;
+  return { range: VOICE_PARAM_RANGES[param] || 1, points: [{ t: 0, v: neutral }, { t: 1, v: neutral }] };
+}
+
+// The neutral (no-modulation) value of a voice envelope parameter.
+function voiceEnvNeutral(param) {
+  return param === 'vol' ? 1 : 0;
+}
+
+// The envelope actually driving a voice's slider parameter: its own when it has
+// one, otherwise the master as a fallback. The fundamental (null) never has an
+// envelope. Mirrors activePitchEnv.
+function activeVoiceEnv(v, param) {
+  if (!v) return null;
+  const own = v.envs && v.envs[param];
+  if (own && own.points && own.points.length >= 2) return own;
+  const master = MASTER_VOICE_ENVS[param];
+  if (master && master.points && master.points.length >= 2) return master;
+  return null;
+}
+
+// Which envelope actually drives a voice's parameter — 'own', 'master', or
+// null — so the matching flat-line base can be used with it.
+function voiceEnvSource(v, param) {
+  if (!v) return null;
+  const own = v.envs && v.envs[param];
+  if (own && own.points && own.points.length >= 2) return 'own';
+  const master = MASTER_VOICE_ENVS[param];
+  if (master && master.points && master.points.length >= 2) return 'master';
+  return null;
+}
+
+// A voice's flat-line base value for a parameter: its own static slider, unless
+// the active envelope is the Master — then the Master's flat-line is used.
+function voiceFlatAt(v, param) {
+  if (voiceEnvSource(v, param) === 'master') return +MASTER_VOICE_FLATS[param] || 0;
+  return +(v && v[param]) || 0;
+}
+
+// Time-varying total pitch offset of a voice in semitones at note progress t:
+// the flat-line base (own static, or Master's when inheriting) with the active
+// st/ct envelope (own or master) bending on top of it, so the value =
+// base + curve. Voices with no active envelope just sit at their flat line; the
+// fundamental (null) stays at zero.
+function voiceStOffsetAt(v, t) {
+  if (!v) return 0;
+  const stEnv = activeVoiceEnv(v, 'st');
+  const ctEnv = activeVoiceEnv(v, 'ct');
+  const st = voiceFlatAt(v, 'st') + (stEnv ? envValueAt(stEnv, t) : 0);
+  const ct = voiceFlatAt(v, 'ct') + (ctEnv ? envValueAt(ctEnv, t) : 0);
+  return st + ct / 100;
+}
+
+// Does a voice carry any time-varying pitch (an active st or ct envelope)?
+// Used by the audio schedulers to keep scheduling a voice's frequency curve
+// even when its layer has no pitch envelope of its own.
+function voiceHasPitchBend(v) {
+  return !!activeVoiceEnv(v, 'st') || !!activeVoiceEnv(v, 'ct');
+}
+
+// A voice's volume at note progress t: the flat-line base (own static, or
+// Master's when inheriting) with the active vol envelope bending on top of it
+// (relative to its neutral of 1.0), so the value = base + curve, clamped to the
+// editor range. The fundamental (null) is always 1.
+function voiceVolAt(v, t) {
+  if (!v) return 1;
+  const src = voiceEnvSource(v, 'vol');
+  const env = src ? activeVoiceEnv(v, 'vol') : null;
+  let base = +v.vol || 1;
+  if (src === 'master') base = MASTER_VOICE_FLATS.vol != null ? +MASTER_VOICE_FLATS.vol : 1;
+  const mod = env ? envValueAt(env, t) - 1 : 0;
+  return Math.max(0, Math.min(2, base + mod));
+}
+
 /* ---- Layer voices (coupled duplicates) ---- */
 // A layer's voices: the validated list, or [] when none.
 function layerVoices(layer) {
@@ -506,19 +611,13 @@ function layerPlayableVoices(layer) {
   for (const v of layerVoices(layer)) if (!v || !v.muted) out.push(v);
   return out;
 }
-// Total static pitch offset of a voice in semitones (cents fold in at /100).
-function voiceStOffset(v) {
-  return (+v.st || 0) + (+v.ct || 0) / 100;
-}
-// Normalized per-oscillator gains for a layer's [fundamental, ...voices]:
-// each level divided by the sum so duplicating thickens via beating/chorus
-// without changing loudness. Muted voices drop out of the sum, so unmuting
-// never needs re-tuning and muting thickens the rest (like the layer mute).
-// An all-silent stack stays silent (no divide blowup).
-function normalizedVoiceLevels(layer) {
+// The time-varying version of the per-voice levels: each voice's level comes
+// from its active vol envelope (own or master) at note progress t when one
+// exists, else its static slider. Normalized per sample so the loudness
+// invariant holds as the envelopes move.
+function normalizedVoiceLevelsAt(layer, t) {
   const group = layerPlayableVoices(layer);
-  const raw = [1];
-  for (let j = 1; j < group.length; j++) raw.push(Math.max(0, Math.min(2, +group[j].vol || 0)));
+  const raw = group.map(v => voiceVolAt(v, t));
   const sum = raw.reduce((s, v) => s + v, 0);
   if (sum <= 0.001) return raw.map(() => 0);
   return raw.map(v => v / sum);

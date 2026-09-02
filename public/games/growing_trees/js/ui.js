@@ -74,7 +74,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 function saveSettings() {
   if (storageWiped) return false;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview, voiceSnap: creatorVoiceSnap }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, masterVoiceEnvs: MASTER_VOICE_ENVS, masterVoiceFlats: MASTER_VOICE_FLATS, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview, voiceSnap: creatorVoiceSnap }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -260,17 +260,45 @@ function loadSavedSettings() {
       points.sort((a, b) => a.t - b.t);
       return { range, points };
     }
+    // Voice-slider envelope (a voice's own or a master fallback): null/invalid =
+    // none (the static slider applies). Values clamp to the parameter's range.
+    function voiceEnvFromSaved(ve, param) {
+      if (!ve || !Array.isArray(ve.points) || ve.points.length < 2) return null;
+      const range = VOICE_PARAM_RANGES[param] || 1;
+      const min = param === 'vol' ? 0 : -range;
+      const max = param === 'vol' ? range : range;
+      const neutral = voiceEnvNeutral(param);
+      const points = ve.points.map((p, k) => {
+        const pt = {
+          t: Math.max(0, Math.min(1, +((p && p.t) != null ? p.t : k / (ve.points.length - 1)) || 0)),
+          v: Math.max(min, Math.min(max, +((p && p.v) != null ? p.v : neutral) || 0)),
+        };
+        if (p && p.seg) pt.seg = segFromSaved(p.seg);
+        return pt;
+      });
+      points.sort((a, b) => a.t - b.t);
+      return { range, points };
+    }
     // Duplicate voices of a layer (coupled unison offsets): null = none.
     // Each voice clamps st/cents/vol to the editor's ranges; extras are dropped.
+    // A voice may also carry its own slider envelopes (envs: {st, ct, vol}).
     function voicesFromSaved(vs) {
       if (!Array.isArray(vs) || !vs.length) return null;
-      const out = vs.slice(0, MAX_LAYER_VOICES).map((v, k) => ({
-        id: (v && v.id) || 'voice-' + k + '-' + Date.now().toString(36),
-        st: Math.max(-24, Math.min(24, +((v && v.st) != null ? v.st : 0) || 0)),
-        ct: Math.max(-100, Math.min(100, +((v && v.ct) != null ? v.ct : 0) || 0)),
-        vol: Math.max(0, Math.min(2, +((v && v.vol) != null ? v.vol : 1) || 0)),
-        muted: !!(v && v.muted),
-      }));
+      const out = vs.slice(0, MAX_LAYER_VOICES).map((v, k) => {
+        const envs = { st: null, ct: null, vol: null };
+        if (v && v.envs && typeof v.envs === 'object') {
+          for (const param of ['st', 'ct', 'vol']) envs[param] = voiceEnvFromSaved(v.envs[param], param);
+        }
+        const hasAny = envs.st || envs.ct || envs.vol;
+        return {
+          id: (v && v.id) || 'voice-' + k + '-' + Date.now().toString(36),
+          st: Math.max(-24, Math.min(24, +((v && v.st) != null ? v.st : 0) || 0)),
+          ct: Math.max(-100, Math.min(100, +((v && v.ct) != null ? v.ct : 0) || 0)),
+          vol: Math.max(0, Math.min(2, +((v && v.vol) != null ? v.vol : 1) || 0)),
+          muted: !!(v && v.muted),
+          envs: hasAny ? envs : null,
+        };
+      });
       return out.length ? out : null;
     }
     function layerFromSaved(l, i) {
@@ -309,6 +337,20 @@ function loadSavedSettings() {
     }
     OSC_STACK = stack;
     MASTER_PITCH_ENV = pitchEnvFromSaved(d.masterPitchEnv);
+    // Master fallback curves for the voice sliders (st/ct/vol): each parameter
+    // drives every voice that has no envelope of its own.
+    const mve = { st: null, ct: null, vol: null };
+    if (d.masterVoiceEnvs && typeof d.masterVoiceEnvs === 'object') {
+      for (const param of ['st', 'ct', 'vol']) mve[param] = voiceEnvFromSaved(d.masterVoiceEnvs[param], param);
+    }
+    MASTER_VOICE_ENVS = mve;
+    // Master flat-line bases (the Master graphs' fader values), kept separate
+    // from each voice's own static sliders.
+    MASTER_VOICE_FLATS = {
+      st: Math.max(-24, Math.min(24, +((d.masterVoiceFlats && d.masterVoiceFlats.st) != null ? d.masterVoiceFlats.st : 0) || 0)),
+      ct: Math.max(-100, Math.min(100, +((d.masterVoiceFlats && d.masterVoiceFlats.ct) != null ? d.masterVoiceFlats.ct : 0) || 0)),
+      vol: Math.max(0, Math.min(2, +((d.masterVoiceFlats && d.masterVoiceFlats.vol) != null ? d.masterVoiceFlats.vol : 1) || 0)),
+    };
     if (migrated) {
       // A legacy save was just loaded: persist it under the current key now so
       // later edits land in the right place (and the legacy copy can age out).
@@ -329,6 +371,8 @@ function resetToDefaults() {
   VOLUME = clone(DEFAULT_VOLUME);
   OSC_STACK = clone(DEFAULT_OSC_STACK);
   MASTER_PITCH_ENV = null;
+  MASTER_VOICE_ENVS = { st: null, ct: null, vol: null };
+  MASTER_VOICE_FLATS = { st: 0, ct: 0, vol: 1 };
   PREVIEW_PITCH = 0;
   creatorDrawPoints = 8;
   creatorAutoPreview = false;
