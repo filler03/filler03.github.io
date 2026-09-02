@@ -517,6 +517,10 @@ function freqShifted(baseFreq, st) {
    vol 0..2. */
 const VOICE_PARAM_RANGES = { st: 24, ct: 100, vol: 2 };
 var MASTER_VOICE_ENVS = { st: null, ct: null, vol: null };
+// Flat-line values for the Master graphs, independent of each voice's own
+// static slider values. A voice inheriting the master uses this as its base
+// (plus the master curve), so the Master fader only affects the Master graph.
+var MASTER_VOICE_FLATS = { st: 0, ct: 0, vol: 1 };
 
 // A fresh flat voice envelope: no modulation (the neutral value holds).
 function defaultVoiceEnv(param) {
@@ -541,17 +545,35 @@ function activeVoiceEnv(v, param) {
   return null;
 }
 
+// Which envelope actually drives a voice's parameter — 'own', 'master', or
+// null — so the matching flat-line base can be used with it.
+function voiceEnvSource(v, param) {
+  if (!v) return null;
+  const own = v.envs && v.envs[param];
+  if (own && own.points && own.points.length >= 2) return 'own';
+  const master = MASTER_VOICE_ENVS[param];
+  if (master && master.points && master.points.length >= 2) return 'master';
+  return null;
+}
+
+// A voice's flat-line base value for a parameter: its own static slider, unless
+// the active envelope is the Master — then the Master's flat-line is used.
+function voiceFlatAt(v, param) {
+  if (voiceEnvSource(v, param) === 'master') return +MASTER_VOICE_FLATS[param] || 0;
+  return +(v && v[param]) || 0;
+}
+
 // Time-varying total pitch offset of a voice in semitones at note progress t:
-// the static offset is the flat line, and the active st/ct envelope (own or
-// master) bends on top of it, so the value = base + curve. Voices with no
-// active envelope just sit at their static offset; the fundamental (null)
-// stays at zero.
+// the flat-line base (own static, or Master's when inheriting) with the active
+// st/ct envelope (own or master) bending on top of it, so the value =
+// base + curve. Voices with no active envelope just sit at their flat line; the
+// fundamental (null) stays at zero.
 function voiceStOffsetAt(v, t) {
   if (!v) return 0;
   const stEnv = activeVoiceEnv(v, 'st');
   const ctEnv = activeVoiceEnv(v, 'ct');
-  const st = (+v.st || 0) + (stEnv ? envValueAt(stEnv, t) : 0);
-  const ct = (+v.ct || 0) + (ctEnv ? envValueAt(ctEnv, t) : 0);
+  const st = voiceFlatAt(v, 'st') + (stEnv ? envValueAt(stEnv, t) : 0);
+  const ct = voiceFlatAt(v, 'ct') + (ctEnv ? envValueAt(ctEnv, t) : 0);
   return st + ct / 100;
 }
 
@@ -562,14 +584,16 @@ function voiceHasPitchBend(v) {
   return !!activeVoiceEnv(v, 'st') || !!activeVoiceEnv(v, 'ct');
 }
 
-// A voice's volume at note progress t: the static volume is the flat line, and
-// the active vol envelope (own or master) bends on top of it (relative to its
-// neutral of 1.0), so the value = base + curve, clamped to the editor range.
-// The fundamental (null) is always 1.
+// A voice's volume at note progress t: the flat-line base (own static, or
+// Master's when inheriting) with the active vol envelope bending on top of it
+// (relative to its neutral of 1.0), so the value = base + curve, clamped to the
+// editor range. The fundamental (null) is always 1.
 function voiceVolAt(v, t) {
   if (!v) return 1;
-  const env = activeVoiceEnv(v, 'vol');
-  const base = +v.vol || 1;
+  const src = voiceEnvSource(v, 'vol');
+  const env = src ? activeVoiceEnv(v, 'vol') : null;
+  let base = +v.vol || 1;
+  if (src === 'master') base = MASTER_VOICE_FLATS.vol != null ? +MASTER_VOICE_FLATS.vol : 1;
   const mod = env ? envValueAt(env, t) - 1 : 0;
   return Math.max(0, Math.min(2, base + mod));
 }

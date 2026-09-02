@@ -513,6 +513,14 @@ function voiceTrimSlider(p) {
 function voiceTrimValue() {
   const param = creatorVoiceEnvSel;
   if (!param) return 0;
+  // In Master mode the fader edits the Master's own flat line, independent of
+  // the selected voice's static value; otherwise it edits the voice's.
+  if (creatorVoiceEnvMaster) {
+    const range = VOICE_PARAM_RANGES[param] || 1;
+    const min = param === 'vol' ? 0 : -range;
+    const max = param === 'vol' ? range : range;
+    return Math.max(min, Math.min(max, +MASTER_VOICE_FLATS[param] || 0));
+  }
   const v = selectedVoice();
   const d = VOICE_PARAM_DEFS.find(d => d.key === param);
   const def = v && d ? +v[d.key] || 0 : 0;
@@ -530,14 +538,22 @@ function voiceTrimFromY(sl, y) {
 }
 function applyVoiceTrim(trim) {
   const param = creatorVoiceEnvSel;
-  const v = selectedVoice();
-  if (!param || !v) return;
+  if (!param) return;
   const range = VOICE_PARAM_RANGES[param] || 1;
   const min = param === 'vol' ? 0 : -range;
   const max = param === 'vol' ? range : range;
   trim = Math.max(min, Math.min(max, trim));
   if (param === 'st' && creatorVoiceSnap) trim = Math.round(trim);
   if (param === 'vol') trim = Math.round(trim * 100) / 100;
+  // In Master mode the fader only affects the Master flat line, not the voice's
+  // own static value.
+  if (creatorVoiceEnvMaster) {
+    MASTER_VOICE_FLATS[param] = trim;
+    scheduleCreatorPreview();
+    return;
+  }
+  const v = selectedVoice();
+  if (!v) return;
   v[param] = trim;
   scheduleCreatorPreview();
 }
@@ -2872,14 +2888,26 @@ function drawCreator(now) {
 
   // ---- Mode chips (Voices tab only, above the plot): which parameter's
   // envelope to edit, plus the Master fallback toggle. A small dot marks a
-  // parameter that has an envelope defined (own or Master) for the selected
-  // voice. ----
+  // parameter where the selected voice has its OWN envelope; the Master chip
+  // lights up only when the master actually provides a curve for a parameter
+  // this voice doesn't override (so the fallback is genuinely in effect). ----
   if (creatorSubmode === 'voices') {
     const v = selectedVoice();
-    const hasAnyMaster = ['st', 'ct', 'vol'].some(k => MASTER_VOICE_ENVS[k] && MASTER_VOICE_ENVS[k].points && MASTER_VOICE_ENVS[k].points.length >= 2);
+    const ownEnv = param => {
+      if (!v || !v.envs) return false;
+      const e = v.envs[param];
+      return !!(e && e.points && e.points.length >= 2);
+    };
+    const relevantMasterEnv = () => {
+      for (const param of ['st', 'ct', 'vol']) {
+        const m = MASTER_VOICE_ENVS[param];
+        if (m && m.points && m.points.length >= 2 && !ownEnv(param)) return true;
+      }
+      return false;
+    };
     for (const c of voiceEnvChips(p)) {
       const active = c.key === 'master' ? creatorVoiceEnvMaster : creatorVoiceEnvSel === c.key;
-      const hasEnv = c.key === 'master' ? hasAnyMaster : (v ? !!activeVoiceEnv(v, c.key) : false);
+      const hasEnv = c.key === 'master' ? relevantMasterEnv() : ownEnv(c.key);
       drawRoundRect(c.x, c.y, c.w, c.h, 8);
       ctx.fillStyle = active ? '#2e5d34' : '#fff';
       ctx.fill();
@@ -3148,22 +3176,17 @@ function drawCreator(now) {
     const paramLabel = param === 'st' ? 'semitones' : (param === 'ct' ? 'cents' : 'volume');
     const base = voiceTrimValue();          // flat-line value (the fader)
     const yBase = voiceEnvYFromValue(param, base, p);
-    // Neutral line: the flat-line position the fader raises and lowers.
-    ctx.strokeStyle = 'rgba(46,93,52,0.28)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(p.left, yBase); ctx.lineTo(p.right, yBase);
-    ctx.stroke();
     if (!env) {
-      // No curve on this selection yet: dashed guide at the flat line until the
-      // first edit.
-      ctx.setLineDash([5, 4]);
-      ctx.strokeStyle = 'rgba(46,93,52,0.35)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(p.left, yBase); ctx.lineTo(p.right, yBase);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      // No curve on this selection. The Master always keeps a solid line at the
+      // flat-line position even before any curve exists; a voice without its own
+      // curve shows nothing (clearing it empties the graph).
+      if (creatorVoiceEnvMaster) {
+        ctx.strokeStyle = 'rgba(46,93,52,0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(p.left, yBase); ctx.lineTo(p.right, yBase);
+        ctx.stroke();
+      }
       ctx.fillStyle = '#9db89c';
       ctx.font = '700 11px sans-serif';
       ctx.textAlign = 'center';
@@ -3174,6 +3197,12 @@ function drawCreator(now) {
         ? 'This voice inherits the Master ' + paramLabel + ' curve (no curve of its own) · draw to give it its own'
         : 'This voice has no ' + paramLabel + ' curve · tap or draw to bend it · the fader at left sets the flat line', W / 2, p.top + p.ph / 2 - 14);
     } else {
+      // Neutral line: the flat-line position the fader raises and lowers.
+      ctx.strokeStyle = 'rgba(46,93,52,0.28)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.left, yBase); ctx.lineTo(p.right, yBase);
+      ctx.stroke();
       const color = creatorVoiceEnvMaster ? '#2e5d34' : OSC_COLORS[selectedLayerIdx % OSC_COLORS.length];
       // Selected-range highlight behind the envelope.
       const hl = segRangeHighlight(p);

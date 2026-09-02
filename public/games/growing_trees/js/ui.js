@@ -74,7 +74,7 @@ const LEGACY_STORAGE_KEYS = ['growingTrees.settings.v8', 'growingTrees.settings.
 function saveSettings() {
   if (storageWiped) return false;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, masterVoiceEnvs: MASTER_VOICE_ENVS, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview, voiceSnap: creatorVoiceSnap }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ chime: CHIME_SETTINGS, gesture: GESTURE, envelope: ENVELOPE, pitchZones: PITCH_ZONES, volume: VOLUME, oscStack: OSC_STACK, masterPitchEnv: MASTER_PITCH_ENV, masterVoiceEnvs: MASTER_VOICE_ENVS, masterVoiceFlats: MASTER_VOICE_FLATS, previewPitch: PREVIEW_PITCH, drawPoints: creatorDrawPoints, autoPreview: creatorAutoPreview, voiceSnap: creatorVoiceSnap }));
     return true;
   } catch (e) {
     noteStorageError();
@@ -344,6 +344,13 @@ function loadSavedSettings() {
       for (const param of ['st', 'ct', 'vol']) mve[param] = voiceEnvFromSaved(d.masterVoiceEnvs[param], param);
     }
     MASTER_VOICE_ENVS = mve;
+    // Master flat-line bases (the Master graphs' fader values), kept separate
+    // from each voice's own static sliders.
+    MASTER_VOICE_FLATS = {
+      st: Math.max(-24, Math.min(24, +((d.masterVoiceFlats && d.masterVoiceFlats.st) != null ? d.masterVoiceFlats.st : 0) || 0)),
+      ct: Math.max(-100, Math.min(100, +((d.masterVoiceFlats && d.masterVoiceFlats.ct) != null ? d.masterVoiceFlats.ct : 0) || 0)),
+      vol: Math.max(0, Math.min(2, +((d.masterVoiceFlats && d.masterVoiceFlats.vol) != null ? d.masterVoiceFlats.vol : 1) || 0)),
+    };
     if (migrated) {
       // A legacy save was just loaded: persist it under the current key now so
       // later edits land in the right place (and the legacy copy can age out).
@@ -365,6 +372,7 @@ function resetToDefaults() {
   OSC_STACK = clone(DEFAULT_OSC_STACK);
   MASTER_PITCH_ENV = null;
   MASTER_VOICE_ENVS = { st: null, ct: null, vol: null };
+  MASTER_VOICE_FLATS = { st: 0, ct: 0, vol: 1 };
   PREVIEW_PITCH = 0;
   creatorDrawPoints = 8;
   creatorAutoPreview = false;
