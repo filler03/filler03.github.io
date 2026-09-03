@@ -209,12 +209,38 @@
     display: none;
   }
   #creatorBtn.on { background: #2e5d34; color: #fff; }
+  #flowBtn {
+    position: fixed;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    width: 48px;
+    height: 48px;
+    background: rgba(255,255,255,0.85);
+    border: none;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 40;
+  }
+  #flowBtn:hover { background: #fff; }
   body.creator #waitBtn,
   body.creator #settingsBtn,
   body.creator #creatorBtn,
+  body.creator #flowBtn,
   body.creator #statHud,
   body.creator #version,
   body.creator #soundOverlay { display: none; }
+  body.flow #waitBtn,
+  body.flow #settingsBtn,
+  body.flow #creatorBtn,
+  body.flow #flowBtn,
+  body.flow #statHud,
+  body.flow #version,
+  body.flow #soundOverlay { display: none; }
   #settingsPanel {
     position: fixed;
     top: 0; right: 0; bottom: 0; left: 0;
@@ -358,7 +384,7 @@
   #version {
     position: fixed;
     right: calc(16px + env(safe-area-inset-right));
-    bottom: calc(16px + env(safe-area-inset-bottom));
+    bottom: calc(72px + env(safe-area-inset-bottom));
     color: rgba(46,93,52,0.75);
     font-size: 12px;
     font-weight: 600;
@@ -422,6 +448,7 @@
 <div id="statHud"></div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
 <button id="creatorBtn" title="Sound creator — draw your mix curves">🎛️</button>
+<button id="flowBtn" title="Sound flow editor — arrange sound nodes on a grid">🧩</button>
 <div id="settingsPanel" class="hidden">
   <div class="panel-head">
     <span>Sound settings</span>
@@ -528,7 +555,7 @@
 <canvas id="scene"></canvas>
 <select id="creatorPoints" aria-label="Draw point count"></select>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.17.1</div>
+<div id="version">v1.18.5</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
@@ -542,6 +569,7 @@
     document.write('<script src="js/ui.js?t=' + t + '"></' + 'script>');
     document.write('<script src="js/main.js?t=' + t + '"></' + 'script>');
     document.write('<script src="js/creator.js?t=' + t + '"></' + 'script>');
+    document.write('<script src="js/flow.js?t=' + t + '"></' + 'script>');
   })();
 </script>
 </body>
