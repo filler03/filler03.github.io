@@ -29,7 +29,6 @@ const FLOW_CHIP_GAP = 8;        // gap between bottom-bar chips
 const FLOW_BAR_EDGE = 16;       // left padding inside the bottom bar
 const FLOW_DOUBLE_TAP_MS = 400; // window for a double-tap on a chip
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
-const FLOW_HOLD_BAR = 1150;     // ms of a still hold before the node is removed from (or re-added to) the bar
 const FLOW_UNDO_W = 78;         // undo button width (bottom bar, left of the back button)
 const FLOW_UNDO_H = 40;         // undo button height
 const FLOW_HISTORY_MAX = 50;    // undo stack depth
@@ -237,12 +236,11 @@ function handleChipTap(node) {
   saveFlow();
 }
 
-/* ---- Long-press: move mode & bar presence ----
+/* ---- Long-press: move mode ----
    Holding a node (on the bar or on the grid) still for FLOW_HOLD_MOVE ms puts
    it into move mode — it flashes slowly. The next tap on an empty grid cell
-   moves the node there. Holding longer (FLOW_HOLD_BAR) removes the node's chip
-   from the bar (or re-adds it) instead. Deleting a node is only available in
-   the right-side attribute drawer. */
+   moves the node there. Deleting a node is only available in the right-side
+   attribute drawer; removing a chip from the bar uses its ✕ badge. */
 function deleteFlowNode(id) {
   flowPushHistory();
   flowNodes = flowNodes.filter(n => n.id !== id);
@@ -259,28 +257,30 @@ function moveFlowNodeTo(id, gx, gy) {
   flowMoveId = null;
   saveFlow();
 }
-// Slowly-pulsing alpha for the node currently in move mode. `fast` (the armed
-// remove-from-bar stage) pulses quicker and in amber so the stages differ.
-function flowFlashAlpha(fast) {
-  const p = 0.5 + 0.5 * Math.sin(performance.now() / (fast ? 140 : 300));
+// Slowly-pulsing alpha for the node currently in move mode.
+function flowFlashAlpha() {
+  const p = 0.5 + 0.5 * Math.sin(performance.now() / 300);
   return 0.35 + 0.65 * p;
 }
-// The long-press stage a node is showing, if any: 0 = none, 1 = move mode,
-// 2 = armed to remove from the bar (or re-add it). After the finger lifts the
-// hold is gone, so a flashing node reads as stage 1.
-function flowHoldStageFor(id) {
-  if (flowMoveId !== id) return 0;
-  return (flowHold && flowHold.id === id) ? flowHold.stage : 1;
-}
-// Toggle whether a node has a chip in the bottom bar (the node itself always
-// stays on the grid). Hold a chip medium-long to hide it; hold a grid node
-// medium-long to bring its chip back.
-function toggleFlowBarPresence(id) {
+// Remove a node's chip from the bottom bar (the node itself stays on the grid;
+// double-tap it there to bring the chip back). Undoable.
+function removeNodeFromBar(id) {
   const n = flowNodeById(id);
-  if (!n) return;
+  if (!n || n.inBar === false) return;
   flowPushHistory();
-  n.inBar = !n.inBar;
+  n.inBar = false;
   saveFlow();
+}
+// The ✕ badge underneath a bottom-bar chip (hit test).
+function chipCloseRect(c) {
+  return { cx: c.x + c.w - 12, cy: c.y + c.h + 6, r: 10 };
+}
+function hitChipClose(x, y) {
+  for (const c of flowBarChips()) {
+    const r = chipCloseRect(c);
+    if (Math.hypot(x - r.cx, y - r.cy) <= r.r) return c.node;
+  }
+  return null;
 }
 
 /* ---- Persistence ---- */
@@ -390,11 +390,10 @@ function drawFlow(now) {
     const p = flowCellScreen(n.gx, n.gy);
     const cx = p.x + FLOW_CELL / 2, cy = p.y + FLOW_CELL / 2;
     const sel = n.id === flowSelId;
-    const moveStage = flowHoldStageFor(n.id);
-    if (moveStage) {
-      const fast = moveStage >= 2;
-      ctx.globalAlpha = flowFlashAlpha(fast);
-      ctx.strokeStyle = fast ? '#ffd86b' : '#ffffff';
+    const move = n.id === flowMoveId;
+    if (move) {
+      ctx.globalAlpha = flowFlashAlpha();
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2.5;
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
@@ -531,14 +530,13 @@ function drawFlow(now) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(flowNodes.length
-      ? 'All nodes hidden from the bar · hold one on the grid to bring it back'
+      ? 'All nodes hidden from the bar · double-tap one on the grid to bring it back'
       : 'No nodes yet · tap a cell on the grid to add one', 16, H - FLOW_BAR_H / 2);
     ctx.textBaseline = 'alphabetic';
   } else {
     for (const c of chips) {
       const sel = c.node.id === flowSelId;
-      const moveStage = flowHoldStageFor(c.node.id);
-      if (moveStage) ctx.globalAlpha = flowFlashAlpha(moveStage >= 2);
+      if (c.node.id === flowMoveId) ctx.globalAlpha = flowFlashAlpha();
       drawRoundRect(c.x, c.y, c.w, c.h, 10);
       ctx.fillStyle = sel ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.06)';
       ctx.fill();
@@ -554,6 +552,21 @@ function drawFlow(now) {
       ctx.fillText(c.node.gx + ',' + c.node.gy, c.x + c.w / 2, c.y + c.h - 11);
       ctx.textBaseline = 'alphabetic';
       ctx.globalAlpha = 1;
+      // ✕ badge underneath: removes this chip from the bar (node stays on grid).
+      const cl = chipCloseRect(c);
+      ctx.beginPath();
+      ctx.arc(cl.cx, cl.cy, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#c0392b';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✕', cl.cx, cl.cy + 1);
+      ctx.textBaseline = 'alphabetic';
     }
   }
   ctx.restore();
@@ -637,6 +650,12 @@ canvas.addEventListener('pointerdown', e => {
   // Bottom bar: a tap on a chip (toggle/double-tap), a long-press (move/delete),
   // or a drag scrolls the strip.
   if (y >= H - FLOW_BAR_H) {
+    // ✕ badge underneath a chip: remove that node from the bar (undoable).
+    const closeNode = hitChipClose(x, y);
+    if (closeNode) {
+      removeNodeFromBar(closeNode.id);
+      return;
+    }
     const chip = hitBarChip(x, y);
     flowAddMenu = null;
     flowPanAnim = null;
@@ -764,7 +783,7 @@ canvas.addEventListener('pointercancel', () => {
 
 function flowLoop(now) {
   if (flowActive) {
-    // Long-press hold: move mode at FLOW_HOLD_MOVE, bar presence at FLOW_HOLD_BAR.
+    // Long-press hold: move mode at FLOW_HOLD_MOVE.
     if (flowHold) {
       const el = performance.now() - flowHold.t0;
       if (flowHold.stage === 0 && el >= FLOW_HOLD_MOVE) {
@@ -772,9 +791,6 @@ function flowLoop(now) {
         flowMoveId = flowHold.id;   // start flashing (move mode)
         flowSelId = flowHold.id;
         flowAddMenu = null;
-      } else if (flowHold.stage === 1 && el >= FLOW_HOLD_BAR) {
-        flowHold.stage = 2;         // remove from the bar (or re-add), node stays on the grid
-        toggleFlowBarPresence(flowHold.id);
       }
     }
     // Animated pan to a double-tapped node's cell (ease-out cubic).
