@@ -17,24 +17,22 @@
    from a source to the consumer's port. A selected node opens a small
    semi-transparent property modal beside it, and editing a volume/wave/unison/
    env node opens a larger anchored transparent editor. A note's ▶ Play compiles
-   the graph into the legacy audio globals and previews the sound.
+   the graph into the legacy audio globals and previews the sound. The ☰
+   top-right button opens a read-only node-list side bar (tap a row to pan to
+   that node); all editing happens on the field.
    ============================================================ */
 
 const flowBtn = document.getElementById('flowBtn');
-const FLOW_BAR_H = 88;          // height of the bottom node-palette bar
 const FLOW_CELL = 88;           // grid square size (px)
-const FLOW_BACK_R = 22;         // back-button radius
+const FLOW_BACK_R = 22;         // top-right round button radius (sidebar / undo / back)
+const FLOW_TOP_BTN_GAP = 14;    // gap between the top-right buttons
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
 const FLOW_MODAL_W = 280;       // in-place property modal width (floats near the node)
 const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
-const FLOW_CHIP_W = 78;         // bottom-bar node chip width
-const FLOW_CHIP_H = 46;         // bottom-bar node chip height
-const FLOW_CHIP_GAP = 8;        // gap between bottom-bar chips
-const FLOW_BAR_EDGE = 16;       // left padding inside the bottom bar
-const FLOW_DOUBLE_TAP_MS = 400; // window for a double-tap on a chip
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
-const FLOW_UNDO_W = 78;         // undo button width (bottom bar, left of the back button)
-const FLOW_UNDO_H = 40;         // undo button height
+const FLOW_SIDE_W = 250;        // node-list side bar width (left edge)
+const FLOW_SIDE_HDR = 44;       // side bar header height
+const FLOW_SIDE_ROW_H = 44;     // side bar row height
 const FLOW_HISTORY_MAX = 50;    // undo stack depth
 const FLOW_WAVE_ACCENT = '#4fc3f7';      // wave-editor plot accent (cyan)
 const FLOW_UNISON_ACCENT = '#d98cff';    // unison-editor accent (violet)
@@ -76,9 +74,8 @@ const FLOW_FLICK_STOP = 0.001;  // px/ms at which inertia settles and stops
 var flowNodes = [];             // [{ id, gx, gy, type, noteLife }] placed sound nodes
 var flowSelId = null;           // id of the selected node (attribute panel shown for it)
 var flowAddMenu = null;         // { gx, gy } open add-node menu anchor, or null
-var flowBarScrollX = 0;         // horizontal scroll offset of the bottom-bar chip strip
-var flowLastChipTap = null;     // { id, t } last bottom-bar chip tap (double-tap detection)
-var flowLastGridTap = null;     // { id, t } last grid-node tap (double-tap detection)
+var flowSideOpen = false;       // node-list side bar open?
+var flowSideScrollY = 0;        // vertical scroll offset of the side-bar list
 var flowPanAnim = null;         // { x0, y0, x1, y1, t0 } animated pan to a node's cell
 var flowHold = null;            // { id, kind, t0, stage } active long-press hold, or null
 var flowMoveId = null;          // id of the node in move mode (slowly flashing), or null
@@ -87,16 +84,30 @@ var flowHistory = [];           // undo stack: [{ nodes }] snapshots taken befor
 
 const FLOW_SAVE_KEY = 'growingTrees.flow.v1';
 
-// The grid area: everything above the bottom bar.
+// The grid area: the full screen (no bottom bar).
 function flowGridArea() {
-  return { top: 0, bottom: H - FLOW_BAR_H, left: 0, right: W };
+  return { top: 0, bottom: H, left: 0, right: W };
 }
-// Back button rect (bottom-right, inside the bar).
-function flowBackRect() {
+// The top-right control row: sidebar toggle, undo, and back (rightmost), as
+// three round buttons.
+function flowTopButtonRects() {
   const d = FLOW_BACK_R * 2;
-  const x = W - 16 - d;
-  const y = H - FLOW_BAR_H + (FLOW_BAR_H - d) / 2;
-  return { x, y, d };
+  const backX = W - 16 - d;
+  const undoX = backX - d - FLOW_TOP_BTN_GAP;
+  const sideX = undoX - d - FLOW_TOP_BTN_GAP;
+  return {
+    side: { x: sideX, y: 16, d },
+    undo: { x: undoX, y: 16, d },
+    back: { x: backX, y: 16, d },
+  };
+}
+function flowTopHit(x, y) {
+  const r = flowTopButtonRects();
+  for (const k of ['side', 'undo', 'back']) {
+    const b = r[k];
+    if (Math.hypot(x - (b.x + b.d / 2), y - (b.y + b.d / 2)) <= FLOW_BACK_R + 6) return k;
+  }
+  return null;
 }
 // The integer grid-cell range that intersects the visible grid area.
 function flowCellRange() {
@@ -119,8 +130,8 @@ function flowNodeAt(gx, gy) {
 }
 // The in-place property modal: floats beside the selected node's cell (right by
 // default, flips left when it would leave the screen), clamped into the grid
-// area so it never covers the node itself or the bottom bar. Semi-transparent,
-// so the grid shows through behind it.
+// area so it never covers the node itself. Semi-transparent, so the grid shows
+// through behind it.
 function flowModalRect(node) {
   const h = flowModalHeight(node);
   const p = flowCellScreen(node.gx, node.gy);
@@ -130,7 +141,7 @@ function flowModalRect(node) {
   if (x + FLOW_MODAL_W > W - 8) x = nc - FLOW_CELL / 2 - 14 - FLOW_MODAL_W;
   x = Math.max(8, Math.min(W - 8 - FLOW_MODAL_W, x));
   let y = ny - h / 2;
-  y = Math.max(8, Math.min(H - FLOW_BAR_H - 8 - h, y));
+  y = Math.max(8, Math.min(H - 8 - h, y));
   return { x, y, w: FLOW_MODAL_W, h };
 }
 function flowModalHeight(node) {
@@ -164,8 +175,8 @@ function flowAddMenuOptions() {
   const keys = Object.keys(FLOW_NODE_TYPES);
   const gap = 14;
   const totalW = keys.length * 56 + (keys.length - 1) * gap;
-  const cx0 = Math.max(56, Math.min(W - 56, p.x + FLOW_CELL / 2));
-  const cy = Math.max(34, Math.min(H - FLOW_BAR_H - 34, p.y - 44));
+  const cx0 = Math.max(flowSideOpen ? FLOW_SIDE_W + 40 : 56, Math.min(W - 56, p.x + FLOW_CELL / 2));
+  const cy = Math.max(34, Math.min(H - 34, p.y - 44));
   return keys.map((type, i) => {
     const x = cx0 - totalW / 2 + i * (56 + gap) + 28;
     return { type, cx: x, cy, r: 28, emoji: FLOW_NODE_TYPES[type].emoji, label: FLOW_NODE_TYPES[type].label };
@@ -339,7 +350,7 @@ function addFlowNode(type) {
   if (!flowAddMenu || !FLOW_NODE_TYPES[type]) return;
   flowPushHistory();
   const id = 'node-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
-  const n = { id, gx: flowAddMenu.gx, gy: flowAddMenu.gy, type, inBar: true };
+  const n = { id, gx: flowAddMenu.gx, gy: flowAddMenu.gy, type };
   if (type === 'note') n.noteLife = 2500;
   else if (type === 'volumeEnv') n.envelope = clone(DEFAULT_ENVELOPE);
   else if (type === 'env') n.env = defaultEnvCurve();
@@ -356,16 +367,6 @@ function addFlowNode(type) {
    Snapshot-based: every mutating action pushes the state BEFORE it onto the
    stack; Undo pops the most recent snapshot and restores it. Future node
    actions just need to call flowPushHistory() before they mutate flowNodes. */
-function flowUndoRect() {
-  const bx = W - 16 - FLOW_BACK_R;                     // back-button center
-  const x = bx - FLOW_BACK_R - 10 - FLOW_UNDO_W;       // just left of the back button
-  const y = H - FLOW_BAR_H + (FLOW_BAR_H - FLOW_UNDO_H) / 2;
-  return { x, y, w: FLOW_UNDO_W, h: FLOW_UNDO_H };
-}
-// Where the bottom-bar chip strip ends (clear of the undo + back buttons).
-function flowBarRightLimit() {
-  return flowUndoRect().x - 8;
-}
 function flowPushHistory(base) {
   const state = base || clone(flowNodes);
   const top = flowHistory[flowHistory.length - 1];
@@ -390,72 +391,131 @@ function undoFlow() {
   saveFlow();
 }
 
-/* ---- Bottom-bar node tray ----
-   Every placed node gets a chip in the bottom bar (emoji + its x,y position).
-   The selected node's chip is highlighted, like its cell on the grid. The chip
-   strip scrolls horizontally when it overflows. */
-function flowBarChips() {
-  const list = flowNodes.filter(n => n.inBar !== false);
-  const n = list.length;
-  const y = H - FLOW_BAR_H + (FLOW_BAR_H - FLOW_CHIP_H) / 2;
-  const arr = [];
-  for (let i = 0; i < n; i++) {
-    arr.push({ node: list[i], x: FLOW_BAR_EDGE - flowBarScrollX + i * (FLOW_CHIP_W + FLOW_CHIP_GAP), y, w: FLOW_CHIP_W, h: FLOW_CHIP_H });
+/* ---- Side bar (node list) ----
+   A read-only list of every placed node (emoji + type + position), opened and
+   closed by the ☰ top-right button or the header ✕. Tapping a row just pans
+   the camera to that node — selection, editing, moving and deleting all stay
+   on the field. The list scrolls vertically when it overflows. */
+function flowSideRect() {
+  return { x: 0, y: 0, w: FLOW_SIDE_W, h: H };
+}
+function flowSideCloseRect() {
+  const s = flowSideRect();
+  return { x: s.x + s.w - 34, y: 7, w: 26, h: 26 };
+}
+function flowSideRows() {
+  const s = flowSideRect();
+  const top = s.y + FLOW_SIDE_HDR;
+  return flowNodes.map((node, i) => ({
+    node, x: s.x, y: top - flowSideScrollY + i * FLOW_SIDE_ROW_H, w: s.w, h: FLOW_SIDE_ROW_H,
+  }));
+}
+function flowSideMaxScroll() {
+  const s = flowSideRect();
+  return Math.max(0, flowNodes.length * FLOW_SIDE_ROW_H - (s.h - FLOW_SIDE_HDR));
+}
+// The node under (x,y), or null — only inside the panel's visible row area.
+function flowSideRowAt(x, y) {
+  if (!flowSideOpen) return null;
+  const s = flowSideRect();
+  if (x < s.x || x > s.x + s.w || y < s.y + FLOW_SIDE_HDR || y > s.y + s.h) return null;
+  const max = flowSideMaxScroll();
+  if (flowSideScrollY > max) flowSideScrollY = max;
+  const idx = Math.floor((y - (s.y + FLOW_SIDE_HDR) + flowSideScrollY) / FLOW_SIDE_ROW_H);
+  if (idx < 0 || idx >= flowNodes.length) return null;
+  return flowNodes[idx];
+}
+function drawFlowSide() {
+  const s = flowSideRect();
+  drawRoundRect(s.x, s.y, s.w, s.h, 0);
+  ctx.fillStyle = 'rgba(14,14,16,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Header.
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 15px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('Nodes', s.x + 14, s.y + 28);
+  const close = flowSideCloseRect();
+  ctx.beginPath();
+  ctx.arc(close.x + close.w / 2, close.y + close.h / 2, 10, 0, Math.PI * 2);
+  ctx.fillStyle = '#333333';
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('✕', close.x + close.w / 2, close.y + close.h / 2 + 4);
+  ctx.textAlign = 'left';
+  // Rows.
+  const top = s.y + FLOW_SIDE_HDR;
+  if (!flowNodes.length) {
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 12px sans-serif';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('No nodes yet · tap a cell on the grid to add one', s.x + 14, top + 24);
+    return;
   }
-  return arr;
-}
-function flowBarMaxScroll() {
-  const n = flowNodes.filter(x => x.inBar !== false).length;
-  if (!n) return 0;
-  const stripW = FLOW_BAR_EDGE + n * (FLOW_CHIP_W + FLOW_CHIP_GAP) - FLOW_CHIP_GAP;
-  return Math.max(0, stripW - (flowBarRightLimit() - FLOW_BAR_EDGE));
-}
-function hitBarChip(x, y) {
-  if (y < H - FLOW_BAR_H || x >= flowBarRightLimit()) return null;
-  const yc = H - FLOW_BAR_H + (FLOW_BAR_H - FLOW_CHIP_H) / 2;
-  if (y < yc || y > yc + FLOW_CHIP_H) return null;
-  for (const c of flowBarChips()) {
-    if (x >= c.x && x <= c.x + c.w) return c;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(s.x, top, s.w, s.h - top);
+  ctx.clip();
+  const maxScroll = flowSideMaxScroll();
+  if (flowSideScrollY > maxScroll) flowSideScrollY = maxScroll;
+  for (const r of flowSideRows()) {
+    const sel = r.node.id === flowSelId;
+    drawRoundRect(r.x + 6, r.y + 4, r.w - 12, r.h - 8, 8);
+    ctx.fillStyle = sel ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.05)';
+    ctx.fill();
+    if (sel) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.textBaseline = 'middle';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(FLOW_NODE_TYPES[r.node.type].emoji, r.x + 24, r.y + r.h / 2);
+    ctx.font = '800 13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.85)';
+    ctx.fillText(FLOW_NODE_TYPES[r.node.type].label, r.x + 44, r.y + r.h / 2);
+    ctx.font = '700 11px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText(r.node.gx + ',' + r.node.gy, r.x + r.w - 14, r.y + r.h / 2);
+    ctx.textBaseline = 'alphabetic';
   }
-  return null;
+  ctx.restore();
+  // Scrollbar.
+  const max = flowSideMaxScroll();
+  if (max > 0) {
+    const avail = s.h - top;
+    const thumbH = Math.max(24, avail * avail / (flowNodes.length * FLOW_SIDE_ROW_H));
+    const ty = top + (flowSideScrollY / max) * (avail - thumbH);
+    drawRoundRect(s.x + s.w - 7, ty, 3, thumbH, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fill();
+  }
 }
+
 // Center the camera on a node's cell with a short eased pan.
 function panToNode(node) {
   flowInertia = null;
   flowPanAnim = {
     x0: flowCam.x, y0: flowCam.y,
     x1: node.gx * FLOW_CELL - W / 2 + FLOW_CELL / 2,
-    y1: node.gy * FLOW_CELL - (H - FLOW_BAR_H) / 2 + FLOW_CELL / 2,
+    y1: node.gy * FLOW_CELL - H / 2 + FLOW_CELL / 2,
     t0: performance.now(),
   };
 }
-// A tap on a bottom-bar chip: single tap toggles selection (opens/closes the
-// in-place property modal); a double-tap recenters the grid on that node instead.
-function handleChipTap(node) {
-  const now = performance.now();
-  if (flowLastChipTap && flowLastChipTap.id === node.id && now - flowLastChipTap.t < FLOW_DOUBLE_TAP_MS) {
-    flowLastChipTap = null;
-    flowSelId = node.id;
-    flowAddMenu = null;
-    panToNode(node);
-    saveFlow();
-    return;
-  }
-  flowLastChipTap = { id: node.id, t: now };
-  if (flowSelId === node.id) {
-    flowSelId = null;   // deselect: closes the property modal
-  } else {
-    flowSelId = node.id;
-    flowAddMenu = null;
-  }
-  saveFlow();
-}
 
 /* ---- Long-press: move mode ----
-   Holding a node (on the bar or on the grid) still for FLOW_HOLD_MOVE ms puts
-   it into move mode — it flashes slowly. The next tap on an empty grid cell
-   moves the node there. Deleting a node is available in its in-place property
-   modal; removing a chip from the bar uses its ✕ badge. */
+   Holding a node on the grid still for FLOW_HOLD_MOVE ms puts it into move
+   mode — it flashes slowly. The next tap on an empty grid cell moves the node
+   there. Deleting a node is available in its in-place property modal. */
 function deleteFlowNode(id) {
   flowPushHistory();
   flowDetachNode(id);          // clear every slot pointing at this node
@@ -478,26 +538,6 @@ function moveFlowNodeTo(id, gx, gy) {
 function flowFlashAlpha() {
   const p = 0.5 + 0.5 * Math.sin(performance.now() / 300);
   return 0.35 + 0.65 * p;
-}
-// Remove a node's chip from the bottom bar (the node itself stays on the grid;
-// double-tap it there to bring the chip back). Undoable.
-function removeNodeFromBar(id) {
-  const n = flowNodeById(id);
-  if (!n || n.inBar === false) return;
-  flowPushHistory();
-  n.inBar = false;
-  saveFlow();
-}
-// The ✕ badge underneath a bottom-bar chip (hit test).
-function chipCloseRect(c) {
-  return { cx: c.x + c.w - 12, cy: c.y + c.h + 6, r: 10 };
-}
-function hitChipClose(x, y) {
-  for (const c of flowBarChips()) {
-    const r = chipCloseRect(c);
-    if (Math.hypot(x - r.cx, y - r.cy) <= r.r) return c.node;
-  }
-  return null;
 }
 
 /* ---- Persistence ---- */
@@ -608,7 +648,6 @@ function loadFlow() {
         gx: Math.round(n.gx), gy: Math.round(n.gy),
         type: FLOW_NODE_TYPES[type] ? type : 'note',
         noteLife: Math.max(FLOW_NOTE_LIFE_MIN, Math.min(FLOW_NOTE_LIFE_MAX, Math.round(+n.noteLife) || 2500)),
-        inBar: n.inBar !== false,
       };
       if (node.type === 'volumeEnv') {
         node.envelope = (n.envelope && Array.isArray(n.envelope.components) && n.envelope.components.length)
@@ -647,10 +686,10 @@ function closeSoundFlow() {
   flowAddMenu = null;
   flowConnArm = null;
   flowPanAnim = null;
-  flowLastChipTap = null;
-  flowLastGridTap = null;
   flowHold = null;
   flowMoveId = null;
+  flowSideOpen = false;
+  flowSideScrollY = 0;
   playbacks.length = 0;
   stopGestureNote();
   stopPreviewVoices();
@@ -882,12 +921,10 @@ function flowPortClearPos(pt) {
   if (pt.edge === 'top') return { cx: pt.cx, cy: pt.cy - o };
   return { cx: pt.cx, cy: pt.cy + o };
 }
-// Screen-space port hit test. Ports live in the grid area only (never in the
-// bottom bar). On a filled port the ✕ badge (radius 8) takes precedence and the
-// dot itself is a narrower target, so the rim between them does nothing rather
-// than accidentally clearing.
+// Screen-space port hit test. On a filled port the ✕ badge (radius 8) takes
+// precedence and the dot itself is a narrower target, so the rim between them
+// does nothing rather than accidentally clearing.
 function hitFlowPort(x, y) {
-  if (y >= H - FLOW_BAR_H) return null;
   for (const n of flowNodes) {
     for (const pt of flowPorts(n)) {
       const dDot = Math.hypot(x - pt.cx, y - pt.cy);
@@ -1258,9 +1295,14 @@ function drawFlow(now) {
   // ---- On-node connection ports (drawn on top of the modal) ----
   drawFlowPorts();
 
+  // ---- Node-list side bar (on top of the grid, before the banner/buttons) ----
+  if (flowSideOpen) drawFlowSide();
+
   // ---- Connecting banner (a slot is armed, awaiting a grid tap) ----
   if (flowConnArm) {
-    drawRoundRect(16, 16, 332, 34, 10);
+    const bx = flowSideOpen ? FLOW_SIDE_W + 16 : 16;   // clear of the side bar
+    const bw = Math.max(200, Math.min(332, W - 176 - bx));   // clear of the top buttons
+    drawRoundRect(bx, 16, bw, 34, 10);
     ctx.fillStyle = 'rgba(22,26,34,0.95)';
     ctx.fill();
     ctx.strokeStyle = FLOW_UNISON_ACCENT;
@@ -1270,116 +1312,36 @@ function drawFlow(now) {
     ctx.font = '800 13px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Connecting… tap a node to connect · tap the port to cancel', 30, 34);
+    ctx.fillText('Connecting… tap a node to connect · tap the port to cancel', bx + 14, 34);
     ctx.textBaseline = 'alphabetic';
   }
 
-  // ---- Bottom node tray ----
-  ctx.fillStyle = '#141414';
-  ctx.fillRect(g.left, g.bottom, g.right - g.left, H - g.bottom);
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(g.left, g.bottom); ctx.lineTo(g.right, g.bottom);
-  ctx.stroke();
-  // Node chips (one per placed node: emoji + its x,y position), clipped to the
-  // bar clear of the back button. The selected node's chip is highlighted,
-  // matching its highlight on the grid.
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, g.bottom, flowBarRightLimit(), H - g.bottom);
-  ctx.clip();
-  const chips = flowBarChips();
-  if (flowBarScrollX > flowBarMaxScroll()) flowBarScrollX = flowBarMaxScroll();
-  if (!chips.length) {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '700 12px sans-serif';
-    ctx.textAlign = 'left';
+  // ---- Top-right control row (sidebar / undo / back) ----
+  const tbs = flowTopButtonRects();
+  const tbIcons = [['side', flowSideOpen ? '✕' : '☰'], ['undo', '↺'], ['back', '‹']];
+  for (const [k, glyph] of tbIcons) {
+    const b = tbs[k];
+    const can = k !== 'undo' || flowHistory.length > 0;
+    ctx.beginPath();
+    ctx.arc(b.x + b.d / 2, b.y + b.d / 2, FLOW_BACK_R, 0, Math.PI * 2);
+    ctx.fillStyle = can ? '#2b2b2b' : '#1a1a1a';
+    ctx.fill();
+    ctx.strokeStyle = can ? '#ffffff' : 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = can ? '#ffffff' : 'rgba(255,255,255,0.4)';
+    ctx.font = '800 18px sans-serif';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(flowNodes.length
-      ? 'All nodes hidden from the bar · double-tap one on the grid to bring it back'
-      : 'No nodes yet · tap a cell on the grid to add one', 16, H - FLOW_BAR_H / 2);
+    ctx.fillText(glyph, b.x + b.d / 2, b.y + b.d / 2 + 1);
     ctx.textBaseline = 'alphabetic';
-  } else {
-    for (const c of chips) {
-      const sel = c.node.id === flowSelId;
-      if (c.node.id === flowMoveId) ctx.globalAlpha = flowFlashAlpha();
-      drawRoundRect(c.x, c.y, c.w, c.h, 10);
-      ctx.fillStyle = sel ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.06)';
-      ctx.fill();
-      ctx.strokeStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = sel ? 2 : 1;
-      ctx.stroke();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '22px sans-serif';
-      ctx.fillText(FLOW_NODE_TYPES[c.node.type].emoji, c.x + c.w / 2, c.y + 16);
-      ctx.font = '700 11px monospace';
-      ctx.fillStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.8)';
-      ctx.fillText(c.node.gx + ',' + c.node.gy, c.x + c.w / 2, c.y + c.h - 11);
-      ctx.textBaseline = 'alphabetic';
-      ctx.globalAlpha = 1;
-      // ✕ badge underneath: removes this chip from the bar (node stays on grid).
-      const cl = chipCloseRect(c);
-      ctx.beginPath();
-      ctx.arc(cl.cx, cl.cy, 8, 0, Math.PI * 2);
-      ctx.fillStyle = '#c0392b';
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('✕', cl.cx, cl.cy + 1);
-      ctx.textBaseline = 'alphabetic';
-    }
   }
-  ctx.restore();
-
-  // ---- Back button (bottom-right, inside the bar) ----
-  const b = flowBackRect();
-  ctx.beginPath();
-  ctx.arc(b.x + b.d / 2, b.y + b.d / 2, FLOW_BACK_R, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.fillStyle = '#000000';
-  ctx.font = '800 20px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('‹', b.x + b.d / 2, b.y + b.d / 2 + 1);
-  ctx.textBaseline = 'alphabetic';
-
-  // ---- Undo button (left of the back button; disabled when nothing to undo) ----
-  const u = flowUndoRect();
-  const canUndo = flowHistory.length > 0;
-  drawRoundRect(u.x, u.y, u.w, u.h, 10);
-  ctx.fillStyle = canUndo ? '#2b2b2b' : '#1a1a1a';
-  ctx.fill();
-  ctx.strokeStyle = canUndo ? '#ffffff' : 'rgba(255,255,255,0.3)';
-  ctx.lineWidth = canUndo ? 1.5 : 1;
-  ctx.stroke();
-  ctx.fillStyle = canUndo ? '#ffffff' : 'rgba(255,255,255,0.4)';
-  ctx.font = '700 13px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('↺ Undo', u.x + u.w / 2, u.y + u.h / 2 + 1);
-  ctx.textBaseline = 'alphabetic';
 
   // ---- Envelope editor overlay (on top of everything else) ----
   if (flowEnvEdit) drawFlowEnvEditor();
   else if (flowWaveEdit) drawFlowWaveEditor();
   else if (flowUnisonEdit) drawFlowUnisonEditor();
   else if (flowCurveEdit) drawFlowCurveEditor();
-}
-
-/* ---- Hit testing ---- */
-function hitTestFlow(x, y) {
-  const b = flowBackRect();
-  if (Math.hypot(x - (b.x + b.d / 2), y - (b.y + b.d / 2)) <= FLOW_BACK_R + 6) return { type: 'back' };
-  if (y < H - FLOW_BAR_H) return { type: 'grid' };
-  return { type: 'empty' };
 }
 
 /* ---- Envelope editor overlay ----
@@ -1403,7 +1365,7 @@ var flowEnvSegFrom = null, flowEnvSegTo = null;   // selected segment (boundary 
 // the grid stays visible around it.
 function flowEnvPanel() {
   const w = Math.min(620, W - 32);
-  const h = Math.min(440, H - FLOW_BAR_H - 32);
+  const h = Math.min(440, H - 32);
   const id = flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit;
   const n = id ? flowNodeById(id) : null;
   if (!n) return { x: 16, y: 16, w, h };
@@ -1412,8 +1374,8 @@ function flowEnvPanel() {
   let x = nc + FLOW_CELL / 2 + 20;
   if (x + w > W - 8) x = Math.max(8, nc - FLOW_CELL / 2 - 20 - w);
   let y = nyc - 60;
-  if (y + h > H - FLOW_BAR_H - 8) y = nyc + FLOW_CELL / 2 + 20;
-  y = Math.max(8, Math.min(H - FLOW_BAR_H - 8 - h, y));
+  if (y + h > H - 8) y = nyc + FLOW_CELL / 2 + 20;
+  y = Math.max(8, Math.min(H - 8 - h, y));
   return { x, y, w, h };
 }
 function flowEnvPlot(p) {
@@ -3001,8 +2963,35 @@ canvas.addEventListener('pointerdown', e => {
   if (flowWaveEdit) { flowWaveHandleDown(x, y); if (flowWaveEdit) return; }
   if (flowUnisonEdit) { flowUnisonHandleDown(x, y); if (flowUnisonEdit) return; }
   if (flowCurveEdit) { flowCurveHandleDown(x, y); if (flowCurveEdit) return; }
-  // On-node connection ports (arm / cancel / clear). Hit first: they are drawn
-  // on top of the modal and the add menu.
+  // Top-right control row: sidebar toggle, undo, back. Always wins.
+  const top = flowTopHit(x, y);
+  if (top === 'side') {
+    flowSideOpen = !flowSideOpen;
+    if (!flowSideOpen) flowSideScrollY = 0;
+    flowAddMenu = null;
+    flowPanAnim = null;
+    return;
+  }
+  if (top === 'undo') { undoFlow(); return; }
+  if (top === 'back') { closeSoundFlow(); return; }
+  // Node-list side bar: rows jump (pan) the camera; the panel stays open.
+  if (flowSideOpen && x >= 0 && x <= FLOW_SIDE_W) {
+    const s = flowSideRect();
+    if (y >= s.y && y <= s.y + s.h) {
+      const close = flowSideCloseRect();
+      if (x >= close.x && x <= close.x + close.w && y >= close.y && y <= close.y + close.h) {
+        flowSideOpen = false;
+        flowSideScrollY = 0;
+        return;
+      }
+      if (y < s.y + FLOW_SIDE_HDR) return;   // header: swallow
+      flowPtr = { kind: 'side', x, y, startX: x, startY: y, lastT: e.timeStamp, vx: 0, vy: 0, moved: false };
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+      return;
+    }
+  }
+  // On-node connection ports (arm / cancel / clear). Drawn on top of the modal
+  // and the add menu, so they hit before those.
   const portHit = hitFlowPort(x, y);
   if (portHit) {
     const pn = portHit.node, pt = portHit.pt;
@@ -3019,11 +3008,6 @@ canvas.addEventListener('pointerdown', e => {
     else flowConnArm = { nodeId: pn.id, slot: pt.slot };
     return;
   }
-  // Back button always wins.
-  if (hitTestFlow(x, y).type === 'back') { closeSoundFlow(); return; }
-  // Undo button (bottom bar).
-  const u = flowUndoRect();
-  if (x >= u.x && x <= u.x + u.w && y >= u.y && y <= u.y + u.h) { undoFlow(); return; }
   // Add-node menu option (create the node).
   const opt = hitAddMenu(x, y);
   if (opt) { addFlowNode(opt.type); return; }
@@ -3074,23 +3058,6 @@ canvas.addEventListener('pointerdown', e => {
       return;   // modal body: swallow, never pan from here
     }
   }
-  // Bottom bar: a tap on a chip (toggle/double-tap), a long-press (move/delete),
-  // or a drag scrolls the strip.
-  if (y >= H - FLOW_BAR_H) {
-    // ✕ badge underneath a chip: remove that node from the bar (undoable).
-    const closeNode = hitChipClose(x, y);
-    if (closeNode) {
-      removeNodeFromBar(closeNode.id);
-      return;
-    }
-    const chip = hitBarChip(x, y);
-    flowAddMenu = null;
-    flowPanAnim = null;
-    flowPtr = { kind: 'bar', chip: chip ? chip.node : null, x, y, startX: x, startY: y, lastT: e.timeStamp, vx: 0, vy: 0, moved: false };
-    if (chip) flowHold = { id: chip.node.id, kind: 'bar', t0: performance.now(), stage: 0 };
-    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-    return;
-  }
   // Grid: start a pan (a small movement counts as a tap on release). Pressing
   // on a node also arms the long-press hold.
   flowAddMenu = null;
@@ -3127,9 +3094,9 @@ canvas.addEventListener('pointermove', e => {
     if (flowHold) { flowHold = null; flowMoveId = null; }
   }
   const dx = x - flowPtr.x, dy = y - flowPtr.y;
-  if (flowPtr.kind === 'bar') {
-    if (flowPtr.moved) flowBarScrollX = Math.max(0, Math.min(flowBarMaxScroll(), flowBarScrollX - dx));
-    flowPtr.x = x;
+  if (flowPtr.kind === 'side') {
+    if (flowPtr.moved) flowSideScrollY = Math.max(0, Math.min(flowSideMaxScroll(), flowSideScrollY - dy));
+    flowPtr.x = x; flowPtr.y = y;
     return;
   }
   const dt = Math.max(1, e.timeStamp - flowPtr.lastT);
@@ -3157,15 +3124,14 @@ canvas.addEventListener('pointerup', e => {
   if (!flowPtr) return;
   const kind = flowPtr.kind;
   const wasMoved = flowPtr.moved;
-  const chip = flowPtr.chip;
   const tapX = flowPtr.startX, tapY = flowPtr.startY;
   const vx = flowPtr.vx, vy = flowPtr.vy;
   flowPtr = null;
   if (kind === 'modal') { saveFlow(); return; }   // note-life slider drag ended
-  if (kind === 'bar') {
-    if (wasMoved || !chip) return;   // a scroll, or an empty-bar tap
-    flowMoveId = null;               // tapping a chip cancels move mode
-    handleChipTap(chip);
+  if (kind === 'side') {
+    if (wasMoved) return;   // a scroll of the node list
+    const jump = flowSideRowAt(tapX, tapY);
+    if (jump) panToNode(jump);   // jump only — the list stays open
     return;
   }
   if (wasMoved) {
@@ -3198,21 +3164,6 @@ canvas.addEventListener('pointerup', e => {
     return;
   }
   if (node) {
-    const now = performance.now();
-    // Double-tap on a grid node: select it and add it to the bottom bar (useful
-    // for nodes whose chip was hidden with the medium-long hold).
-    if (flowLastGridTap && flowLastGridTap.id === node.id && now - flowLastGridTap.t < FLOW_DOUBLE_TAP_MS) {
-      flowLastGridTap = null;
-      flowSelId = node.id;
-      flowAddMenu = null;
-      if (node.inBar === false) {
-        flowPushHistory();
-        node.inBar = true;
-        saveFlow();
-      }
-      return;
-    }
-    flowLastGridTap = { id: node.id, t: now };
     flowSelId = node.id;
     flowAddMenu = null;
     saveFlow();
@@ -3220,7 +3171,6 @@ canvas.addEventListener('pointerup', e => {
     if (flowConnArm) { flowConnArm = null; return; }   // cancelled on an empty cell
     flowAddMenu = { gx, gy };
     flowSelId = null;
-    flowLastGridTap = null;
   }
 });
 
@@ -3246,7 +3196,7 @@ function flowLoop(now) {
         flowAddMenu = null;
       }
     }
-    // Animated pan to a double-tapped node's cell (ease-out cubic).
+    // Animated pan to a node's cell (sidebar jump) — ease-out cubic.
     if (flowPanAnim) {
       const f = clamp01((performance.now() - flowPanAnim.t0) / 350);
       const e = 1 - Math.pow(1 - f, 3);

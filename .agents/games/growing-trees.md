@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.19.1` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.20.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -204,6 +204,15 @@ delete controls. Editing overlays are larger anchored transparent modals
 (`flowEnvPanel`, `rgba(14,14,16,0.74)`) near the edited node. Grid/nodes are
 scaled up via `FLOW_CELL = 88`.
 
+**No bottom bar.** Navigation is a read-only **node-list side bar**
+(`flowSideRect`/`drawFlowSide`, left edge, `FLOW_SIDE_W = 250`): the ☰ top-right
+button (or the header ✕) opens/closes it; each row lists a node's emoji, type,
+and `gx,gy`; tapping a row pans the camera to it (`panToNode`) and the list
+stays open — no selection/editing happens there. All editing (select, move via
+long-press, delete via the property modal, connect via ports) happens on the
+field. Top-right control row: ☰ sidebar toggle, ↺ undo, ‹ back
+(`flowTopButtonRects`/`flowTopHit`).
+
 Persistence: nodes save under the same `growingTrees.flow.v1` key; `loadFlow`
 migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
 `envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Edits are
@@ -212,7 +221,7 @@ before restoring.
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.19.1`) after changes.
+- **Always bump the `#version` badge** (currently `v1.20.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
