@@ -151,6 +151,52 @@ that play its same waveform in parallel with per-voice offsets:
   static voice offsets add on top of any active pitch envelope.
 - Persistence: per-layer `voices` array, clamped on load; absent → null.
 
+## Sound flow editor — node types (WIP)
+
+The full-screen sound flow editor (`flow.js`, opened from the bottom-right
+button) arranges sound-definition nodes on a pannable grid and wires them into
+a playable graph. Node types own a slice of the legacy creator's data model and
+are edited in dark-theme overlays that reuse the legacy logic by temporarily
+pointing a shared global at the node's own data (the volume-envelope overlay
+swaps `ENVELOPE`; the wave/unison overlays swap a layer-shaped proxy into
+`OSC_STACK` at `selectedLayerIdx` 0 and restore it on close):
+
+- `note` (🎵) — the entry point of a sound. Its drawer assigns the connections:
+  a required **volume envelope**, up to **3 waves** (1 required), and each
+  wave's optional **mix envelope**; it also has a **▶ Play** that compiles the
+  graph and previews it (`compileFlowNote`/`playFlowNote` — builds `ENVELOPE`,
+  `OSC_STACK` layers + per-voice envs, swaps the globals in around
+  `previewNote`, restores).
+- `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
+  the old `envelope` node type (migrated on load). Overlay reuses the legacy
+  envelope editor helpers.
+- `env` (📈) — kind-agnostic breakpoint curve `{ points: [{t, v}] }`, v ∈ −1..1
+  with **0 = neutral**. Consumers decide the meaning: a wave's mix envelope maps
+  v → mix weight `1+v` (0 = full), a unison's st/ct/vol animation envelopes map
+  to `v·24` / `v·100` / `1+v`. Overlay is a Point/Draw/Delete curve editor.
+- `wave` (🌊) — harmonic structure `{ amplitudes[32], specPoints, presetId }`;
+  drawer assigns an optional **mix env** and **unison**.
+- `unison` (🦄) — exactly one additional voice `[{ id, st, ct, vol, muted }]`
+  (the first stored voice is kept; defaults to a single voice). Drawer shows a
+  single V1 chip + `VOICE_INTERVALS` chips + a readout; the ✎ chip opens the
+  overlay (interval presets + st/ct/vol faders). Drawer also assigns optional
+  **vol / st / ct** env connections (compiled to per-voice `envs`).
+
+Connections are consumer-owned named slots (`conn` on each node): the note has
+`{ volumeEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison }`, the
+unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
+(fan-out). Slots are type-constrained (DAG by construction); a note is
+"ready" (playable) with a volume env + ≥1 wave, shown by a warning badge
+otherwise. UX: tap a slot's pill in the drawer to arm it ("Connecting…"), tap a
+node on the grid to assign, tap the pill again to cancel, ✕ clears. Wires are
+drawn as beziers colored by slot role.
+
+Persistence: nodes save under the same `growingTrees.flow.v1` key; `loadFlow`
+migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
+`envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Edits are
+coalesced into one undo entry per overlay session; undo closes any open overlay
+before restoring.
+
 ## Maintenance Notes
 
 - **Always bump the `#version` badge** (currently `v1.11.0`) after changes.
