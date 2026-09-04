@@ -11,19 +11,22 @@
    spectrum), and Unison (🦄, one additional voice with optional
    vol/st/ct animation envelopes).
 
-   Connections are consumer-owned slots assigned from the right
-   drawer (tap a pill to arm it, tap a node on the grid to
-   connect); wires render as colored beziers. A note's ▶ Play
-   compiles the graph into the legacy audio globals and previews
-   the sound.
+   Connections are consumer-owned slots shown as emoji-labeled ports on the
+   node's own edges (tap a port to arm it, tap a node on the grid to connect,
+   tap the port again to cancel, its ✕ clears); wires render as colored beziers
+   from a source to the consumer's port. A selected node opens a small
+   semi-transparent property modal beside it, and editing a volume/wave/unison/
+   env node opens a larger anchored transparent editor. A note's ▶ Play compiles
+   the graph into the legacy audio globals and previews the sound.
    ============================================================ */
 
 const flowBtn = document.getElementById('flowBtn');
 const FLOW_BAR_H = 88;          // height of the bottom node-palette bar
-const FLOW_CELL = 72;           // grid square size (px)
+const FLOW_CELL = 88;           // grid square size (px)
 const FLOW_BACK_R = 22;         // back-button radius
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
-const FLOW_PANEL_W = 180;       // right-side attribute panel width
+const FLOW_MODAL_W = 280;       // in-place property modal width (floats near the node)
+const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
 const FLOW_CHIP_W = 78;         // bottom-bar node chip width
 const FLOW_CHIP_H = 46;         // bottom-bar node chip height
 const FLOW_CHIP_GAP = 8;        // gap between bottom-bar chips
@@ -114,29 +117,58 @@ function flowNodeById(id) {
 function flowNodeAt(gx, gy) {
   return flowNodes.find(n => n.gx === gx && n.gy === gy);
 }
-// The attribute-panel rect (docked on the right, above the bottom bar).
-function flowPanelRect() {
-  return { x: W - 16 - FLOW_PANEL_W, y: 16, w: FLOW_PANEL_W, h: H - FLOW_BAR_H - 32 };
+// The in-place property modal: floats beside the selected node's cell (right by
+// default, flips left when it would leave the screen), clamped into the grid
+// area so it never covers the node itself or the bottom bar. Semi-transparent,
+// so the grid shows through behind it.
+function flowModalRect(node) {
+  const h = flowModalHeight(node);
+  const p = flowCellScreen(node.gx, node.gy);
+  const nc = p.x + FLOW_CELL / 2;
+  const ny = p.y + FLOW_CELL / 2;
+  let x = nc + FLOW_CELL / 2 + 14;
+  if (x + FLOW_MODAL_W > W - 8) x = nc - FLOW_CELL / 2 - 14 - FLOW_MODAL_W;
+  x = Math.max(8, Math.min(W - 8 - FLOW_MODAL_W, x));
+  let y = ny - h / 2;
+  y = Math.max(8, Math.min(H - FLOW_BAR_H - 8 - h, y));
+  return { x, y, w: FLOW_MODAL_W, h };
 }
-function flowPanelCloseRect(panel) {
-  return { x: panel.x + panel.w - 34, y: panel.y + 7, w: 26, h: 26 };
+function flowModalHeight(node) {
+  if (node.type === 'note' || node.type === 'unison') return 150;
+  return 132;
 }
-function flowPanelEnvBtnRect(panel) {
-  const w = panel.w - 28;
-  return { x: panel.x + 14, y: panel.y + 54, w, h: 40 };
+function flowModalCloseRect(m) {
+  return { x: m.x + m.w - 34, y: m.y + 7, w: 26, h: 26 };
+}
+// A note's play button and the edit button (volumeEnv / env / wave).
+function flowModalPlayRect(m) {
+  return { x: m.x + 14, y: m.y + 42, w: m.w - 28, h: 26 };
+}
+function flowModalEditRect(m) {
+  return { x: m.x + 14, y: m.y + 46, w: m.w - 28, h: 34 };
+}
+// A note's "Note life" slider: scales the connected volume-envelope node's
+// component durations (the legacy Note-life slider's behaviour, applied to the
+// volume env feeding this note). Range = FLOW_NOTE_LIFE_MIN..MAX ms.
+function flowNoteLifeSlider(m) {
+  return { x: m.x + 62, x2: m.x + m.w - 62, y: m.y + 86 };
+}
+function flowModalDeleteRect(node, m) {
+  const y = (node.type === 'note' || node.type === 'unison') ? m.y + 118 : m.y + 102;
+  return { x: m.x + 14, y, w: m.w - 28, h: 26 };
 }
 // The add-menu option buttons, laid out around the anchored cell (clamped to
 // stay inside the grid area). One per node type for now.
 function flowAddMenuOptions() {
   const p = flowCellScreen(flowAddMenu.gx, flowAddMenu.gy);
   const keys = Object.keys(FLOW_NODE_TYPES);
-  const gap = 12;
-  const totalW = keys.length * 48 + (keys.length - 1) * gap;
-  const cx0 = Math.max(48, Math.min(W - 48, p.x + FLOW_CELL / 2));
-  const cy = Math.max(30, Math.min(H - FLOW_BAR_H - 30, p.y - 40));
+  const gap = 14;
+  const totalW = keys.length * 56 + (keys.length - 1) * gap;
+  const cx0 = Math.max(56, Math.min(W - 56, p.x + FLOW_CELL / 2));
+  const cy = Math.max(34, Math.min(H - FLOW_BAR_H - 34, p.y - 44));
   return keys.map((type, i) => {
-    const x = cx0 - totalW / 2 + i * (48 + gap) + 24;
-    return { type, cx: x, cy, r: 24, emoji: FLOW_NODE_TYPES[type].emoji, label: FLOW_NODE_TYPES[type].label };
+    const x = cx0 - totalW / 2 + i * (56 + gap) + 28;
+    return { type, cx: x, cy, r: 28, emoji: FLOW_NODE_TYPES[type].emoji, label: FLOW_NODE_TYPES[type].label };
   });
 }
 function hitAddMenu(x, y) {
@@ -204,8 +236,9 @@ function connSlotSet(node, slot, val) {
 function slotKey(slot) {
   return slot.key + (slot.idx != null ? ':' + slot.idx : '');
 }
-// The connection slots a node exposes, in drawer order. Each row carries its
-// pills (usually one; the note's wave rows carry a second pill for the mix env).
+// The connection slots a node exposes, in modal/port order. Each row carries
+// its pills (usually one; the note's wave rows carry a second pill for the mix
+// env) — the legacy structure kept for wiring/detach/prune and the ports.
 function flowSlotRows(node) {
   const rows = [];
   if (node.type === 'note') {
@@ -397,7 +430,7 @@ function panToNode(node) {
   };
 }
 // A tap on a bottom-bar chip: single tap toggles selection (opens/closes the
-// attribute drawer); a double-tap recenters the grid on that node instead.
+// in-place property modal); a double-tap recenters the grid on that node instead.
 function handleChipTap(node) {
   const now = performance.now();
   if (flowLastChipTap && flowLastChipTap.id === node.id && now - flowLastChipTap.t < FLOW_DOUBLE_TAP_MS) {
@@ -410,7 +443,7 @@ function handleChipTap(node) {
   }
   flowLastChipTap = { id: node.id, t: now };
   if (flowSelId === node.id) {
-    flowSelId = null;   // deselect: closes the attribute drawer
+    flowSelId = null;   // deselect: closes the property modal
   } else {
     flowSelId = node.id;
     flowAddMenu = null;
@@ -421,14 +454,15 @@ function handleChipTap(node) {
 /* ---- Long-press: move mode ----
    Holding a node (on the bar or on the grid) still for FLOW_HOLD_MOVE ms puts
    it into move mode — it flashes slowly. The next tap on an empty grid cell
-   moves the node there. Deleting a node is only available in the right-side
-   attribute drawer; removing a chip from the bar uses its ✕ badge. */
+   moves the node there. Deleting a node is available in its in-place property
+   modal; removing a chip from the bar uses its ✕ badge. */
 function deleteFlowNode(id) {
   flowPushHistory();
   flowDetachNode(id);          // clear every slot pointing at this node
   flowNodes = flowNodes.filter(n => n.id !== id);
   if (flowSelId === id) flowSelId = null;
   if (flowMoveId === id) flowMoveId = null;
+  if (flowConnArm && flowConnArm.nodeId === id) flowConnArm = null;
   flowAddMenu = null;
   saveFlow();
 }
@@ -632,80 +666,34 @@ flowBtn.addEventListener('click', () => {
   openSoundFlow();
 });
 
-/* ---- Connection drawer (right-side panel slots) ----
-   Each node type lays its connection slots out as compact rows with value
-   pills. A row carries one pill (vol env / mix env / unison / env slots) or two
-   (a note's wave row: the wave + its mix env). Tapping an empty or filled pill
-   arms it; tapping it again cancels; the ✕ inside a filled pill clears it.
-   While armed, tapping a valid node on the grid assigns it. */
-function flowDrawerPlayRect(panel) {
-  return { x: panel.x + 14, y: panel.y + 36, w: panel.w - 28, h: 26 };
-}
-// Connection-slot rows for a node, positioned inside its drawer.
-function flowConnRows(node, panel) {
-  const yTop = node.type === 'note' ? panel.y + 66 : node.type === 'wave' ? panel.y + 102 : panel.y + 98;
-  const rowH = node.type === 'note' ? 24 : node.type === 'unison' ? 20 : 26;
-  const out = [];
-  flowSlotRows(node).forEach((r, i) => {
-    const y = yTop + i * rowH, h = rowH;
-    const labelW = r.label.length <= 4 ? 46 : (r.label.length <= 6 ? 56 : 62);
-    const avail = panel.w - 28 - labelW - 6;
-    const two = !!r.pill2;
-    const pillW = two ? Math.floor((avail - 8) / 2) : avail;
-    let px = panel.x + 14 + labelW + 6;
-    const pills = [];
-    const mk = (slot, req) => {
-      const filled = !!connSlotGet(node, slot);
-      return { slot, rect: { x: px, y: y, w: pillW, h }, filled, req: req && !filled };
-    };
-    pills.push(mk(r.slot, r.req));
-    px += pillW + 8;
-    if (two) pills.push(mk(r.pill2, false));
-    out.push({ slot: r.slot, pill2: r.pill2, label: r.label, req: r.req, y, h, pills });
-  });
-  return out;
-}
-function flowConnPillHit(x, y, row, pillRect) {
-  if (x < pillRect.x || x > pillRect.x + pillRect.w || y < pillRect.y || y > pillRect.y + pillRect.h) return false;
-  return true;
-}
-// The Y just below a node's drawer content (where the Delete button sits).
-function flowDrawerEndY(node, panel) {
-  const rows = flowSlotRows(node).length;
-  if (node.type === 'note') return panel.y + 66 + rows * 24;
-  if (node.type === 'wave') return panel.y + 102 + rows * 26;
-  if (node.type === 'unison') return panel.y + 98 + rows * 20;
-  return panel.y + 94;   // volumeEnv / env: right below the edit button
-}
-function flowDrawerDeleteRect(node, panel) {
-  return { x: panel.x + 14, y: flowDrawerEndY(node, panel) + 6, w: panel.w - 28, h: 26 };
-}
-// Hit-test the whole drawer (play button + slots + per-node extras). Returns
-// { kind:'arm', slot } | { kind:'clear', slot } | { kind:'cancel' } | { kind:'play' } | null.
-function flowHitDrawer(x, y, panel, node) {
+/* ---- In-place property modal (replaces the old right drawer) ----
+   The modal floats beside the selected node and holds only the node's own
+   controls: ▶ Play + Note life (note), Edit buttons + summary (volumeEnv / env /
+   wave), the compact voices strip (unison), and Delete. Connection slots no
+   longer live here — they are drawn as small ports around the node itself (see
+   the On-node ports section below) and wired directly to it. */
+// Hit-test the modal (play / edit / note-life slider / unison compact voices).
+// The ✕ close and Delete buttons are handled separately in pointerdown.
+function flowHitModal(x, y, m, node) {
   if (node.type === 'note') {
-    const p = flowDrawerPlayRect(panel);
+    const p = flowModalPlayRect(m);
     if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return { kind: 'play' };
+    const s = flowNoteLifeSlider(m);
+    if (y >= s.y - 18 && y <= s.y + 16 && x >= s.x - 10 && x <= s.x2) return { kind: 'noteLife' };
   }
-  for (const row of flowConnRows(node, panel)) {
-    for (const pill of row.pills) {
-      if (!flowConnPillHit(x, y, row, pill.rect)) continue;
-      const k = slotKey(pill.slot);
-      const armed = flowConnArm && flowConnArm.nodeId === node.id && slotKey(flowConnArm.slot) === k;
-      if (armed) return { kind: 'cancel' };
-      if (pill.filled && x >= pill.rect.x + pill.rect.w - 18) return { kind: 'clear', slot: pill.slot };
-      return { kind: 'arm', slot: pill.slot };
-    }
+  if (node.type !== 'note' && node.type !== 'unison') {
+    const eb = flowModalEditRect(m);
+    if (x >= eb.x && x <= eb.x + eb.w && y >= eb.y && y <= eb.y + eb.h) return { kind: 'edit' };
   }
   if (node.type === 'unison') {
-    const vc = flowUnisonMiniChips(panel);
+    const vc = flowUnisonMiniChips(m);
     for (const c of vc) {
       if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
         if (c.edit) return { kind: 'uned' };
         return { kind: 'vsel', i: c.i };
       }
     }
-    const ic = flowUnisonMiniIntervals(panel);
+    const ic = flowUnisonMiniIntervals(m);
     if (flowUnisonSelectedOf(node)) {
       for (const b of ic) {
         if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return { kind: 'interval', st: b.st };
@@ -714,23 +702,12 @@ function flowHitDrawer(x, y, panel, node) {
   }
   return null;
 }
-// The draw part of the drawer (slots + note play + unison compact voices).
-function drawFlowDrawer(node, panel) {
-  // Connection slot rows.
-  for (const row of flowConnRows(node, panel)) {
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = '700 11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(row.label, panel.x + 14, row.y + row.h / 2);
-    for (const pill of row.pills) {
-      drawFlowConnPill(node, panel, row, pill);
-    }
-  }
-  // Note: play button on top.
+// The draw part of the modal (no connection slots — those are on the node).
+function drawFlowModal(node, m) {
+  // Note: ▶ play button + Note-life slider (scales the volume env's durations).
   if (node.type === 'note') {
     const ready = flowNoteReady(node);
-    const p = flowDrawerPlayRect(panel);
+    const p = flowModalPlayRect(m);
     drawRoundRect(p.x, p.y, p.w, p.h, 9);
     ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
     ctx.fill();
@@ -743,47 +720,235 @@ function drawFlowDrawer(node, panel) {
     ctx.textBaseline = 'middle';
     ctx.fillText(ready ? '▶ Play sound' : '▶ Needs volume + wave', p.x + p.w / 2, p.y + p.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
+    // Note-life slider.
+    const env = flowNoteLifeEnv(node);
+    const ms = env ? flowNoteLifeMs(node) : 0;
+    ctx.fillStyle = env ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
+    ctx.font = '800 11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Note life', m.x + 14, m.y + 86);
+    ctx.textAlign = 'right';
+    ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', m.x + m.w - 14, m.y + 86);
+    ctx.textBaseline = 'alphabetic';
+    const s = flowNoteLifeSlider(m);
+    ctx.globalAlpha = env ? 1 : 0.4;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y); ctx.lineTo(s.x2, s.y);
+    ctx.stroke();
+    if (env) {
+      const frac = clamp01((ms - FLOW_NOTE_LIFE_MIN) / (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN));
+      const tx = s.x + frac * (s.x2 - s.x);
+      ctx.strokeStyle = FLOW_WAVE_ACCENT;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y); ctx.lineTo(tx, s.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(tx, s.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.globalAlpha = 1;
+    return;
   }
-  // Unison: compact single-voice chip + interval chips + readout (above the slots).
-  if (node.type === 'unison') drawFlowUnisonMini(node, panel);
-}
-function drawFlowConnPill(node, panel, row, pill) {
-  const r = pill.rect;
-  const k = slotKey(pill.slot);
-  const armed = flowConnArm && flowConnArm.nodeId === node.id && slotKey(flowConnArm.slot) === k;
-  drawRoundRect(r.x, r.y, r.w, r.h, 8);
-  ctx.fillStyle = armed ? '#3a3f52' : 'rgba(255,255,255,0.06)';
+  // Unison: compact single-voice chip + interval chips + readout.
+  if (node.type === 'unison') { drawFlowUnisonMini(node, m); return; }
+  // volumeEnv / env / wave: edit button + a one-line summary.
+  const eb = flowModalEditRect(m);
+  drawRoundRect(eb.x, eb.y, eb.w, eb.h, 9);
+  ctx.fillStyle = '#2b2b2b';
   ctx.fill();
-  ctx.strokeStyle = armed ? FLOW_UNISON_ACCENT : (pill.req) ? '#e06060' : 'rgba(255,255,255,0.4)';
-  ctx.lineWidth = armed || pill.req ? 1.5 : 1;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 12px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  if (pill.filled && !armed) {
-    const src = flowNodeById(connSlotGet(node, pill.slot));
-    ctx.font = '13px sans-serif';
-    ctx.fillStyle = '#ffffff';
-    if (src) ctx.fillText(FLOW_NODE_TYPES[src.type].emoji, r.x + r.w / 2 - 5, r.y + r.h / 2 + 1);
-    // ✕ clear (right edge).
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.font = '800 11px sans-serif';
-    ctx.fillText('✕', r.x + r.w - 10, r.y + r.h / 2 + 1);
-  } else if (armed) {
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '700 10px sans-serif';
-    ctx.fillText('…', r.x + r.w / 2, r.y + r.h / 2 + 1);
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.font = '800 11px sans-serif';
-    ctx.fillText('✕', r.x + r.w - 10, r.y + r.h / 2 + 1);
-  } else {
-    ctx.fillStyle = pill.req ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.45)';
-    ctx.font = '800 13px sans-serif';
-    ctx.fillText('＋', r.x + r.w / 2, r.y + r.h / 2 + 1);
+  ctx.fillText(node.type === 'wave' ? '🌊 Edit waveform' : node.type === 'env' ? '📈 Edit curve' : '📉 Edit volume', eb.x + eb.w / 2, eb.y + eb.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+  // Summary line.
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '700 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let sum = '';
+  if (node.type === 'volumeEnv') {
+    const nC = (node.envelope && node.envelope.components) ? node.envelope.components.length : 0;
+    sum = nC ? nC + ' segments · ' + Math.round(compsMs(node.envelope.components)) + ' ms' : 'Default envelope';
+  } else if (node.type === 'env') {
+    const pts = (node.env && node.env.points) ? node.env.points : [];
+    sum = pts.length ? pts.length + ' points' : 'Flat curve';
+  } else if (node.type === 'wave') {
+    const pr = (node.wave && node.wave.presetId) ? node.wave.presetId : null;
+    sum = pr ? 'Preset: ' + pr : ((node.wave && node.wave.specPoints) ? node.wave.specPoints.length + ' harmonics' : '');
   }
+  ctx.fillText(sum, eb.x + eb.w / 2, eb.y + eb.h + 12);
   ctx.textBaseline = 'alphabetic';
 }
+// The connected volume-envelope node feeding a note (its Note-life slider target).
+function flowNoteLifeEnv(node) {
+  const id = node && node.conn && node.conn.volumeEnv;
+  const env = id ? flowNodeById(id) : null;
+  return (env && env.type === 'volumeEnv' && env.envelope) ? env : null;
+}
+function flowNoteLifeMs(node) {
+  const env = flowNoteLifeEnv(node);
+  return env ? compsMs(env.envelope.components) : 0;
+}
+function flowNoteLifeFromX(s, x) {
+  const f = clamp01((x - s.x) / (s.x2 - s.x));
+  const ms = FLOW_NOTE_LIFE_MIN + f * (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN);
+  return Math.round(ms / 10) * 10;
+}
+function flowSetNoteLife(node, ms) {
+  const env = flowNoteLifeEnv(node);
+  if (!env) return;
+  const saved = ENVELOPE;
+  ENVELOPE = env.envelope;
+  try { setNoteLifetime(ms); } finally { ENVELOPE = saved; }
+}
 
-/* ---- Unison compact voices (right drawer) ----
+/* ---- On-node connection ports ----
+   Each consumer node's slots are drawn as small emoji-labeled dots around its
+   cell ring. Tapping a dot arms that slot ("Connecting…"); tapping it again
+   cancels; a filled dot's ✕ clears it. While armed, tapping a valid source node
+   on the grid assigns it. Wires terminate at the consumer's port anchor. */
+function flowPortEmoji(slot) {
+  if (slot.key === 'volumeEnv') return '📉';
+  if (slot.key === 'waves') return '🌊';
+  if (slot.key === 'unison') return '🦄';
+  return '📈';   // mixEnv(s), volEnv, stEnv, ctEnv
+}
+function flowPortLabel(slot) {
+  if (slot.key === 'volumeEnv') return 'Vol';
+  if (slot.key === 'waves') return 'W' + ((slot.idx != null ? slot.idx : 0) + 1);
+  if (slot.key === 'mixEnvs' || slot.key === 'mixEnv') return (slot.key === 'mixEnvs' ? 'M' + ((slot.idx != null ? slot.idx : 0) + 1) : 'Mix');
+  if (slot.key === 'unison') return 'Uni';
+  if (slot.key === 'volEnv') return 'Vol';
+  if (slot.key === 'stEnv') return 'St';
+  if (slot.key === 'ctEnv') return 'Ct';
+  return '';
+}
+// Screen-space port dots for a node (ring just outside the circle).
+function flowPorts(node) {
+  const p = flowCellScreen(node.gx, node.gy);
+  const cx = p.x + FLOW_CELL / 2, cy = p.y + FLOW_CELL / 2;
+  const R = FLOW_CELL / 2;
+  const out = [];
+  const add = (slot, px, py, edge, req) => {
+    out.push({
+      slot, cx: px, cy: py, edge, req: !!req,
+      emoji: flowPortEmoji(slot),
+      label: flowPortLabel(slot),
+      color: flowWireColor(slotKey(slot)),
+    });
+  };
+  if (node.type === 'note') {
+    add({ key: 'volumeEnv' }, cx, cy - R - 4, 'top', true);
+    for (let i = 0; i < 3; i++) {
+      const y = cy + (i - 1) * 27;
+      add({ key: 'waves', idx: i }, cx + R + 4, y, 'right', i === 0);
+      add({ key: 'mixEnvs', idx: i }, cx - R - 4, y, 'left');
+    }
+  } else if (node.type === 'wave') {
+    add({ key: 'mixEnv' }, cx, cy - R - 4, 'top');
+    add({ key: 'unison' }, cx, cy + R + 4, 'bottom');
+  } else if (node.type === 'unison') {
+    add({ key: 'volEnv' }, cx - R - 4, cy - 27, 'left');
+    add({ key: 'stEnv' }, cx - R - 4, cy, 'left');
+    add({ key: 'ctEnv' }, cx - R - 4, cy + 27, 'left');
+  }
+  return out;
+}
+// The port dot for a particular slot (wire endpoint / armed-slot match).
+function flowPortAnchor(node, slot) {
+  const s = slotKey(slot);
+  for (const pt of flowPorts(node)) if (slotKey(pt.slot) === s) return pt;
+  return null;
+}
+// The ✕ clear badge on a filled port (sits just beyond the dot, outward).
+function flowPortClearPos(pt) {
+  const o = FLOW_PORT_R + 10;
+  if (pt.edge === 'right') return { cx: pt.cx + o, cy: pt.cy };
+  if (pt.edge === 'left') return { cx: pt.cx - o, cy: pt.cy };
+  if (pt.edge === 'top') return { cx: pt.cx, cy: pt.cy - o };
+  return { cx: pt.cx, cy: pt.cy + o };
+}
+// Screen-space port hit test. Ports live in the grid area only (never in the
+// bottom bar). On a filled port the ✕ badge (radius 8) takes precedence and the
+// dot itself is a narrower target, so the rim between them does nothing rather
+// than accidentally clearing.
+function hitFlowPort(x, y) {
+  if (y >= H - FLOW_BAR_H) return null;
+  for (const n of flowNodes) {
+    for (const pt of flowPorts(n)) {
+      const dDot = Math.hypot(x - pt.cx, y - pt.cy);
+      if (dDot > FLOW_PORT_R + 6) continue;
+      const filled = !!connSlotGet(n, pt.slot);
+      if (filled) {
+        const c = flowPortClearPos(pt);
+        if (Math.hypot(x - c.cx, y - c.cy) <= 8) return { node: n, pt, clear: true };
+        if (dDot <= FLOW_PORT_R) return { node: n, pt };
+      } else {
+        return { node: n, pt };
+      }
+    }
+  }
+  return null;
+}
+function drawFlowPorts() {
+  for (const n of flowNodes) {
+    for (const pt of flowPorts(n)) {
+      const filled = !!connSlotGet(n, pt.slot);
+      const src = filled ? flowNodeById(connSlotGet(n, pt.slot)) : null;
+      const k = slotKey(pt.slot);
+      const armed = flowConnArm && flowConnArm.nodeId === n.id && slotKey(flowConnArm.slot) === k;
+      // Dot.
+      ctx.beginPath();
+      ctx.arc(pt.cx, pt.cy, FLOW_PORT_R, 0, Math.PI * 2);
+      ctx.fillStyle = armed ? '#3a3f52' : (filled ? pt.color : 'rgba(255,255,255,0.08)');
+      ctx.fill();
+      ctx.strokeStyle = armed ? FLOW_UNISON_ACCENT : (filled ? pt.color : (pt.req ? '#e06060' : 'rgba(255,255,255,0.45)'));
+      ctx.lineWidth = armed ? 2.5 : (filled || pt.req ? 2 : 1.5);
+      ctx.stroke();
+      // Inner glyph: a filled port shows the connected node's emoji.
+      ctx.fillStyle = filled ? '#ffffff' : 'rgba(255,255,255,0.6)';
+      ctx.font = (filled ? '15px' : '13px') + ' sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(filled ? (src ? FLOW_NODE_TYPES[src.type].emoji : pt.emoji) : pt.emoji, pt.cx, pt.cy + 1);
+      // Label on the outward side of the dot.
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = '800 9px sans-serif';
+      ctx.fillText(pt.label, pt.cx, pt.edge === 'top' ? pt.cy - FLOW_PORT_R - 5 : pt.cy + FLOW_PORT_R + 6);
+      // ✕ clear badge on filled ports.
+      if (filled) {
+        const c = flowPortClearPos(pt);
+        ctx.beginPath();
+        ctx.arc(c.cx, c.cy, 7, 0, Math.PI * 2);
+        ctx.fillStyle = '#c0392b';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 9px sans-serif';
+        ctx.fillText('✕', c.cx, c.cy + 1);
+      }
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+}
+
+/* ---- Unison compact voices (property modal) ----
    A unison node is exactly one additional voice: a single V1 chip + an ✎ that
    opens the full overlay, the legacy interval chips (they set the voice's
    semitones), and a one-line readout of the voice's st/ct/vol. */
@@ -902,7 +1067,10 @@ function drawFlowWires() {
         const a = flowCellScreen(src.gx, src.gy);
         const b = flowCellScreen(n.gx, n.gy);
         const ax = a.x + FLOW_CELL / 2, ay = a.y + FLOW_CELL / 2;
-        const bx = b.x + FLOW_CELL / 2, by = b.y + FLOW_CELL / 2;
+        // Wires terminate at the consumer's on-node port for this slot.
+        const port = flowPortAnchor(n, slot);
+        const bx = port ? port.cx : b.x + FLOW_CELL / 2;
+        const by = port ? port.cy : b.y + FLOW_CELL / 2;
         const color = flowWireColor(slotKey(slot));
         ctx.globalAlpha = sel ? 1 : 0.5;
         ctx.strokeStyle = color;
@@ -946,7 +1114,7 @@ function drawFlow(now) {
 
   // ---- Cell coordinate labels (bottom-right of each square) ----
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '13px monospace';
+  ctx.font = '15px monospace';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   for (let gy = gy0; gy <= gy1; gy++) {
@@ -1003,7 +1171,7 @@ function drawFlow(now) {
     ctx.strokeStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.4)';
     ctx.lineWidth = sel ? 2.5 : 1;
     ctx.stroke();
-    ctx.font = '36px sans-serif';
+    ctx.font = '44px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(FLOW_NODE_TYPES[n.type].emoji, cx, cy + 2);
@@ -1011,15 +1179,15 @@ function drawFlow(now) {
     // Warning badge on a note whose required connections are missing.
     if (n.type === 'note' && !flowNoteReady(n)) {
       ctx.beginPath();
-      ctx.arc(cx + FLOW_CELL / 2 - 12, cy - FLOW_CELL / 2 + 12, 9, 0, Math.PI * 2);
+      ctx.arc(cx + FLOW_CELL / 2 - 14, cy - FLOW_CELL / 2 + 14, 11, 0, Math.PI * 2);
       ctx.fillStyle = '#e06060';
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.fillStyle = '#ffffff';
-      ctx.font = '800 11px sans-serif';
-      ctx.fillText('!', cx + FLOW_CELL / 2 - 12, cy - FLOW_CELL / 2 + 12 + 1);
+      ctx.font = '800 13px sans-serif';
+      ctx.fillText('!', cx + FLOW_CELL / 2 - 14, cy - FLOW_CELL / 2 + 14 + 1);
     }
     ctx.globalAlpha = 1;
   }
@@ -1035,24 +1203,24 @@ function drawFlow(now) {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.stroke();
-      ctx.font = '24px sans-serif';
+      ctx.font = '28px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(o.emoji, o.cx, o.cy + 1);
       ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = '700 11px sans-serif';
+      ctx.font = '700 12px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(o.label, o.cx, o.cy + o.r + 15);
     }
   }
 
-  // ---- Attribute panel (right side, for the selected node) ----
+  // ---- In-place property modal (floats beside the selected node) ----
   const selNode = flowNodeById(flowSelId);
   if (selNode) {
-    const panel = flowPanelRect();
-    drawRoundRect(panel.x, panel.y, panel.w, panel.h, 12);
-    ctx.fillStyle = 'rgba(12,12,12,0.92)';
+    const m = flowModalRect(selNode);
+    drawRoundRect(m.x, m.y, m.w, m.h, 12);
+    ctx.fillStyle = 'rgba(14,14,16,0.74)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 2;
@@ -1062,8 +1230,8 @@ function drawFlow(now) {
     ctx.font = '800 15px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(FLOW_NODE_TYPES[selNode.type].label, panel.x + 14, panel.y + 28);
-    const close = flowPanelCloseRect(panel);
+    ctx.fillText(FLOW_NODE_TYPES[selNode.type].label, m.x + 14, m.y + 28);
+    const close = flowModalCloseRect(m);
     ctx.beginPath();
     ctx.arc(close.x + close.w / 2, close.y + close.h / 2, 10, 0, Math.PI * 2);
     ctx.fillStyle = '#333333';
@@ -1072,31 +1240,10 @@ function drawFlow(now) {
     ctx.font = '800 12px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('✕', close.x + close.w / 2, close.y + close.h / 2 + 4);
-    // Drawer content depends on node type.
-    if (selNode.type === 'note') {
-      drawFlowDrawer(selNode, panel);
-    } else {
-      // Edit button for volumeEnv / env / wave (the unison drawer's ✎ chip
-      // opens its overlay instead, to keep the drawer compact).
-      if (selNode.type !== 'unison') {
-        const eb = flowPanelEnvBtnRect(panel);
-        drawRoundRect(eb.x, eb.y, eb.w, eb.h, 9);
-        ctx.fillStyle = '#2b2b2b';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '800 12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(selNode.type === 'wave' ? '🌊 Edit waveform' : selNode.type === 'env' ? '📈 Edit curve' : '📉 Edit volume', eb.x + eb.w / 2, eb.y + eb.h / 2 + 1);
-        ctx.textBaseline = 'alphabetic';
-      }
-      drawFlowDrawer(selNode, panel);
-    }
-    // Delete button: positioned right after the drawer content.
-    const del = flowDrawerDeleteRect(selNode, panel);
+    // Modal content (play / edit / note-life / unison voices; no slot rows).
+    drawFlowModal(selNode, m);
+    // Delete button.
+    const del = flowModalDeleteRect(selNode, m);
     drawRoundRect(del.x, del.y, del.w, del.h, 9);
     ctx.fillStyle = '#c0392b';
     ctx.fill();
@@ -1108,9 +1255,12 @@ function drawFlow(now) {
     ctx.textBaseline = 'alphabetic';
   }
 
+  // ---- On-node connection ports (drawn on top of the modal) ----
+  drawFlowPorts();
+
   // ---- Connecting banner (a slot is armed, awaiting a grid tap) ----
   if (flowConnArm) {
-    drawRoundRect(16, 16, 300, 34, 10);
+    drawRoundRect(16, 16, 332, 34, 10);
     ctx.fillStyle = 'rgba(22,26,34,0.95)';
     ctx.fill();
     ctx.strokeStyle = FLOW_UNISON_ACCENT;
@@ -1120,7 +1270,7 @@ function drawFlow(now) {
     ctx.font = '800 13px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Connecting… tap a node to connect · tap the slot to cancel', 30, 34);
+    ctx.fillText('Connecting… tap a node to connect · tap the port to cancel', 30, 34);
     ctx.textBaseline = 'alphabetic';
   }
 
@@ -1162,7 +1312,7 @@ function drawFlow(now) {
       ctx.stroke();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = '20px sans-serif';
+      ctx.font = '22px sans-serif';
       ctx.fillText(FLOW_NODE_TYPES[c.node.type].emoji, c.x + c.w / 2, c.y + 16);
       ctx.font = '700 11px monospace';
       ctx.fillStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.8)';
@@ -1248,8 +1398,23 @@ var flowEnvLastTap = null; // double-tap-to-delete on an envelope boundary
 var flowEnvMode = 'point'; // 'point' | 'draw' | 'line' (segment line types) | 'delete'
 var flowEnvSegFrom = null, flowEnvSegTo = null;   // selected segment (boundary indexes)
 
+// The shared editor panel: a large floating modal anchored near the node being
+// edited (right by default, clamping/flipping to stay on screen), so the rest of
+// the grid stays visible around it.
 function flowEnvPanel() {
-  return { x: 16, y: 16, w: W - 32, h: H - FLOW_BAR_H - 32 };
+  const w = Math.min(620, W - 32);
+  const h = Math.min(440, H - FLOW_BAR_H - 32);
+  const id = flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit;
+  const n = id ? flowNodeById(id) : null;
+  if (!n) return { x: 16, y: 16, w, h };
+  const p = flowCellScreen(n.gx, n.gy);
+  const nc = p.x + FLOW_CELL / 2, nyc = p.y + FLOW_CELL / 2;
+  let x = nc + FLOW_CELL / 2 + 20;
+  if (x + w > W - 8) x = Math.max(8, nc - FLOW_CELL / 2 - 20 - w);
+  let y = nyc - 60;
+  if (y + h > H - FLOW_BAR_H - 8) y = nyc + FLOW_CELL / 2 + 20;
+  y = Math.max(8, Math.min(H - FLOW_BAR_H - 8 - h, y));
+  return { x, y, w, h };
 }
 function flowEnvPlot(p) {
   const top = p.y + 140, bottom = p.y + p.h - 28, left = p.x + 32, right = p.x + p.w - 18;
@@ -1307,6 +1472,7 @@ function openFlowEnvelopeEditor(id) {
   flowEnvSegTo = null;
   flowAddMenu = null;
   flowMoveId = null;
+  flowConnArm = null;
   flowSelId = id;
 }
 function closeFlowEnvelopeEditor() {
@@ -1461,7 +1627,7 @@ function drawFlowEnvEditor() {
   const pl = flowEnvPlot(p);
   // Partially transparent backdrop: the flow grid shows through.
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
-  ctx.fillStyle = 'rgba(14,14,16,0.92)';
+  ctx.fillStyle = 'rgba(14,14,16,0.74)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 2;
@@ -1873,16 +2039,16 @@ function flowEnvHandleUp() {
 var flowWaveEdit = null;     // id of the wave node being edited, or null
 var flowWaveSaved = null;    // { stack, layerIdx } of the instrument, saved before the swap
 var flowWaveDirty = false;   // any edit happened this session (coalesces into one undo entry)
-var flowWavePtr = null;      // { mode: 'point'|'draw', idx?, lastX? } active drag
+var flowWavePtr = null;      // { mode: 'point'|'draw'|'erase', idx?, lastX? } active drag
 var flowWaveLastTap = null;  // double-tap-to-delete on a spectrum dot
-var flowWaveMode = 'point';  // 'point' | 'draw' | 'delete'
+var flowWaveMode = 'point';  // 'point' | 'draw' | 'erase' | 'delete'
 
 function flowWavePanel() { return flowEnvPanel(); }
 function flowWavePlot(p) { return flowEnvPlot(p); }
 function flowWaveCloseRect(p) { return flowEnvCloseRect(p); }
 function flowWaveClearPill(p) { return flowEnvClearPill(p); }
 function flowWaveToolbar(p) {
-  const modes = [['point', 'Point'], ['draw', 'Draw'], ['delete', 'Delete']];
+  const modes = [['point', 'Point'], ['draw', 'Draw'], ['erase', 'Erase'], ['delete', 'Delete']];
   const w = 54, gap = 6, h = 26, y = p.y + 48, x0 = p.x + 16;
   return modes.map((m, i) => ({ mode: m[0], label: m[1], x: x0 + i * (w + gap), y, w, h }));
 }
@@ -1920,6 +2086,7 @@ function openFlowWaveEditor(id) {
   flowWaveMode = 'point';
   flowAddMenu = null;
   flowMoveId = null;
+  flowConnArm = null;
   flowSelId = id;
 }
 function closeFlowWaveEditor() {
@@ -1942,6 +2109,31 @@ function flowWaveMutate(fn) {
   if (!flowWaveDirty) { flowPushHistory(); flowWaveDirty = true; }
   return fn();
 }
+// Erase mode: flatten the spectrum to 0 across the swept corridor. Breakpoints
+// inside the swept span are absorbed (anchors at x 0/1 kept), then zero points
+// are placed at the span edges and the finger so the region between them
+// interpolates to silence; a single tap zeroes just that harmonic.
+function flowWaveEraseAt(l, t, fromT) {
+  let pts = l.specPoints;
+  if (!pts || !pts.length) { initLayerSpecPoints(l); pts = l.specPoints; }
+  const lo = fromT == null ? t : Math.min(t, fromT);
+  const hi = fromT == null ? t : Math.max(t, fromT);
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const x = pts[i].x;
+    if (x === 0 || x === 1) continue;
+    if (x >= lo && x <= hi) pts.splice(i, 1);
+  }
+  const zeroAt = x => {
+    for (let i = 0; i < pts.length; i++) {
+      if (Math.abs(pts[i].x - x) < 0.01) { pts[i].a = 0; return; }
+    }
+    if (pts.length < 64) pts.push({ x, a: 0 });
+  };
+  zeroAt(lo);
+  zeroAt(hi);
+  pts.sort((a, b) => a.x - b.x);
+  syncLayerAmplitudes(l);
+}
 function drawFlowWaveEditor() {
   const p = flowWavePanel();
   const pl = flowWavePlot(p);
@@ -1951,7 +2143,7 @@ function drawFlowWaveEditor() {
   const y0 = ampToY(0, pl);
   // Partially transparent backdrop: the flow grid shows through.
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
-  ctx.fillStyle = 'rgba(14,14,16,0.92)';
+  ctx.fillStyle = 'rgba(14,14,16,0.74)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 2;
@@ -2081,6 +2273,8 @@ function drawFlowWaveEditor() {
   ctx.textAlign = 'center';
   ctx.fillText(flowWaveMode === 'draw'
     ? 'Draw · drag across the plot to scribble the spectrum · tap Point to edit dots'
+    : flowWaveMode === 'erase'
+    ? 'Erase · drag across the plot to zero out those harmonics · tap Point to edit dots'
     : flowWaveMode === 'delete'
     ? 'Delete · tap a dot to remove it'
     : 'Point · tap to add a harmonic · drag a dot to move · double-tap a dot to delete · presets above replace the curve', p.x + p.w / 2, p.y + p.h - 8);
@@ -2124,6 +2318,12 @@ function flowWaveHandleDown(x, y) {
       flowWavePtr = { mode: 'draw', lastX: xToT(x, pl) };
       return;
     }
+    if (flowWaveMode === 'erase') {
+      const xf = xToT(x, pl);
+      flowWaveMutate(() => { flowWaveEraseAt(selectedLayer(), xf, null); });
+      flowWavePtr = { mode: 'erase', lastX: xf };
+      return;
+    }
     // Point mode: grab a dot (double-tap deletes), or add a point and drag it.
     const idx = hitTestWaveDot(x, y, pl);
     if (idx >= 0) {
@@ -2161,6 +2361,12 @@ function flowWaveHandleMove(x, y) {
     const xf = xToT(x, pl);
     if (Math.abs(xf - flowWavePtr.lastX) > 0.01) {
       flowWaveMutate(() => { insertSpecPoint(selectedLayer(), xf, yToAmp(y, pl)); });
+      flowWavePtr.lastX = xf;
+    }
+  } else if (flowWavePtr.mode === 'erase') {
+    const xf = xToT(x, pl);
+    if (Math.abs(xf - flowWavePtr.lastX) > 0.01) {
+      flowWaveMutate(() => { flowWaveEraseAt(selectedLayer(), xf, flowWavePtr.lastX); });
       flowWavePtr.lastX = xf;
     }
   }
@@ -2229,6 +2435,7 @@ function openFlowUnisonEditor(id) {
   flowUnisonDrag = null;
   flowAddMenu = null;
   flowMoveId = null;
+  flowConnArm = null;
   flowSelId = id;
 }
 function closeFlowUnisonEditor() {
@@ -2269,7 +2476,7 @@ function drawFlowUnisonEditor() {
   const v = flowUnisonSelectedVoice();
   // Partially transparent backdrop: the flow grid shows through.
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
-  ctx.fillStyle = 'rgba(14,14,16,0.92)';
+  ctx.fillStyle = 'rgba(14,14,16,0.74)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 2;
@@ -2468,6 +2675,7 @@ function openFlowCurveEditor(id) {
   flowCurveMode = 'point';
   flowAddMenu = null;
   flowMoveId = null;
+  flowConnArm = null;
   flowSelId = id;
 }
 function closeFlowCurveEditor() {
@@ -2489,7 +2697,7 @@ function drawFlowCurveEditor() {
   const y0 = ampToY(0, pl);
   // Partially transparent backdrop: the flow grid shows through.
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
-  ctx.fillStyle = 'rgba(14,14,16,0.92)';
+  ctx.fillStyle = 'rgba(14,14,16,0.74)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 2;
@@ -2786,10 +2994,31 @@ function playFlowNote(note) {
 canvas.addEventListener('pointerdown', e => {
   if (!flowActive) return;
   const x = stageX(e), y = stageY(e);
-  if (flowEnvEdit) { flowEnvHandleDown(x, y); return; }
-  if (flowWaveEdit) { flowWaveHandleDown(x, y); return; }
-  if (flowUnisonEdit) { flowUnisonHandleDown(x, y); return; }
-  if (flowCurveEdit) { flowCurveHandleDown(x, y); return; }
+  // When an editor dismisses itself on this tap (outside panel or ✕), fall
+  // through so the tap also acts on whatever is underneath (ports / nodes /
+  // grid). If it handled the tap internally, it stays open and we stop here.
+  if (flowEnvEdit) { flowEnvHandleDown(x, y); if (flowEnvEdit) return; }
+  if (flowWaveEdit) { flowWaveHandleDown(x, y); if (flowWaveEdit) return; }
+  if (flowUnisonEdit) { flowUnisonHandleDown(x, y); if (flowUnisonEdit) return; }
+  if (flowCurveEdit) { flowCurveHandleDown(x, y); if (flowCurveEdit) return; }
+  // On-node connection ports (arm / cancel / clear). Hit first: they are drawn
+  // on top of the modal and the add menu.
+  const portHit = hitFlowPort(x, y);
+  if (portHit) {
+    const pn = portHit.node, pt = portHit.pt;
+    flowAddMenu = null;
+    flowPanAnim = null;
+    if (portHit.clear) {
+      flowPushHistory();
+      connSlotSet(pn, pt.slot, null);
+      saveFlow();
+      return;
+    }
+    const k = slotKey(pt.slot);
+    if (flowConnArm && flowConnArm.nodeId === pn.id && slotKey(flowConnArm.slot) === k) flowConnArm = null;
+    else flowConnArm = { nodeId: pn.id, slot: pt.slot };
+    return;
+  }
   // Back button always wins.
   if (hitTestFlow(x, y).type === 'back') { closeSoundFlow(); return; }
   // Undo button (bottom bar).
@@ -2798,63 +3027,51 @@ canvas.addEventListener('pointerdown', e => {
   // Add-node menu option (create the node).
   const opt = hitAddMenu(x, y);
   if (opt) { addFlowNode(opt.type); return; }
-  // Attribute panel (selected node): slider, close, or swallow.
+  // In-place property modal (selected node): close, delete, or content controls.
   if (flowSelId && flowNodeById(flowSelId)) {
-    const panel = flowPanelRect();
-    if (x >= panel.x && x <= panel.x + panel.w && y >= panel.y && y <= panel.y + panel.h) {
-      const close = flowPanelCloseRect(panel);
+    const selN = flowNodeById(flowSelId);
+    const m = flowModalRect(selN);
+    if (x >= m.x && x <= m.x + m.w && y >= m.y && y <= m.y + m.h) {
+      const close = flowModalCloseRect(m);
       if (x >= close.x && x <= close.x + close.w && y >= close.y && y <= close.y + close.h) {
         flowSelId = null;
         flowAddMenu = null;
+        flowConnArm = null;
         saveFlow();
         return;
       }
-      const selN = flowNodeById(flowSelId);
-      // Delete button (positioned after the drawer content).
-      const del = flowDrawerDeleteRect(selN, panel);
+      // Delete button.
+      const del = flowModalDeleteRect(selN, m);
       if (x >= del.x && x <= del.x + del.w && y >= del.y && y <= del.y + del.h) {
-        deleteFlowNode(flowSelId);   // clears selection too, so the drawer closes
+        deleteFlowNode(flowSelId);   // clears selection too, so the modal closes
         return;
       }
-      // Edit button for volumeEnv / env / wave (the unison drawer's ✎ chip
-      // opens its overlay instead).
-      if (selN && selN.type !== 'note' && selN.type !== 'unison') {
-        const eb = flowPanelEnvBtnRect(panel);
-        if (x >= eb.x && x <= eb.x + eb.w && y >= eb.y && y <= eb.y + eb.h) {
+      // Modal content controls (play / edit / note-life / unison voices).
+      const cH = flowHitModal(x, y, m, selN);
+      if (cH) {
+        if (cH.kind === 'play') {
+          playFlowNote(selN);
+        } else if (cH.kind === 'edit') {
           if (selN.type === 'volumeEnv') openFlowEnvelopeEditor(flowSelId);
           else if (selN.type === 'env') openFlowCurveEditor(flowSelId);
           else openFlowWaveEditor(flowSelId);
-          return;
+        } else if (cH.kind === 'noteLife') {
+          flowPushHistory();
+          const s = flowNoteLifeSlider(m);
+          flowSetNoteLife(selN, flowNoteLifeFromX(s, x));
+          flowPtr = { kind: 'modal', drag: 'noteLife', nodeId: selN.id };
+          try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+        } else if (cH.kind === 'uned') {
+          openFlowUnisonEditor(flowSelId);
+        } else if (cH.kind === 'vsel') {
+          flowUnisonSel = cH.i;
+        } else if (cH.kind === 'interval') {
+          const v = flowUnisonSelectedOf(selN);
+          if (v) { flowPushHistory(); v.st = cH.st; saveFlow(); }
         }
+        return;
       }
-      // Drawer interactions: connection slots, play, unison compact voices.
-      if (selN) {
-        const cH = flowHitDrawer(x, y, panel, selN);
-        if (cH) {
-          if (cH.kind === 'clear') {
-            flowPushHistory();
-            connSlotSet(selN, cH.slot, null);
-            saveFlow();
-          } else if (cH.kind === 'arm') {
-            const k = slotKey(cH.slot);
-            if (flowConnArm && flowConnArm.nodeId === selN.id && slotKey(flowConnArm.slot) === k) flowConnArm = null;
-            else flowConnArm = { nodeId: selN.id, slot: cH.slot };
-          } else if (cH.kind === 'cancel') {
-            flowConnArm = null;
-          } else if (cH.kind === 'play') {
-            playFlowNote(selN);
-          } else if (cH.kind === 'uned') {
-            openFlowUnisonEditor(flowSelId);
-          } else if (cH.kind === 'vsel') {
-            flowUnisonSel = cH.i;
-          } else if (cH.kind === 'interval') {
-            const v = flowUnisonSelectedOf(selN);
-            if (v) { flowPushHistory(); v.st = cH.st; saveFlow(); }
-          }
-          return;
-        }
-      }
-      return;   // panel body: swallow, never pan from here
+      return;   // modal body: swallow, never pan from here
     }
   }
   // Bottom bar: a tap on a chip (toggle/double-tap), a long-press (move/delete),
@@ -2895,6 +3112,15 @@ canvas.addEventListener('pointermove', e => {
   if (flowUnisonEdit) { flowUnisonHandleMove(x, y); return; }
   if (flowCurveEdit) { flowCurveHandleMove(x, y); return; }
   if (!flowPtr) return;
+  // Modal drag (the note-life slider): update straight from the finger's x.
+  if (flowPtr.kind === 'modal') {
+    const n = flowNodeById(flowPtr.nodeId);
+    if (n) {
+      const m = flowModalRect(n);
+      flowSetNoteLife(n, flowNoteLifeFromX(flowNoteLifeSlider(m), x));
+    }
+    return;
+  }
   if (!flowPtr.moved && Math.hypot(x - flowPtr.startX, y - flowPtr.startY) > FLOW_TAP_MAX) {
     flowPtr.moved = true;
     // Moving the finger means it's a drag/scroll, not a long-press: drop the hold.
@@ -2935,6 +3161,7 @@ canvas.addEventListener('pointerup', e => {
   const tapX = flowPtr.startX, tapY = flowPtr.startY;
   const vx = flowPtr.vx, vy = flowPtr.vy;
   flowPtr = null;
+  if (kind === 'modal') { saveFlow(); return; }   // note-life slider drag ended
   if (kind === 'bar') {
     if (wasMoved || !chip) return;   // a scroll, or an empty-bar tap
     flowMoveId = null;               // tapping a chip cancels move mode
@@ -2948,6 +3175,20 @@ canvas.addEventListener('pointerup', e => {
   // Tap: pick the cell under the finger.
   const gx = Math.floor((tapX + flowCam.x) / FLOW_CELL);
   const gy = Math.floor((tapY + flowCam.y) / FLOW_CELL);
+  const node = flowNodeAt(gx, gy);
+  // Connection slot armed: tapping a node assigns it (kept armed on a wrong
+  // type so the user can pick the right node instead). This beats move-mode
+  // placement — a deliberate connection action shouldn't get hijacked.
+  if (flowConnArm && node) {
+    const consumer = flowNodeById(flowConnArm.nodeId);
+    if (consumer && flowConnCanAssign(consumer, flowConnArm.slot, node.id)) {
+      flowPushHistory();
+      connSlotSet(consumer, flowConnArm.slot, node.id);
+      saveFlow();
+      flowConnArm = null;
+    }
+    return;
+  }
   // Move mode: place the flashing node on this cell (empty cells only).
   if (flowMoveId) {
     const id = flowMoveId;
@@ -2956,20 +3197,7 @@ canvas.addEventListener('pointerup', e => {
     else flowMoveId = null;   // cell occupied by another node: cancel move mode
     return;
   }
-  const node = flowNodeAt(gx, gy);
   if (node) {
-    // Connection slot armed: tapping a node assigns it (kept armed on a wrong
-    // type so the user can pick the right node instead).
-    if (flowConnArm) {
-      const consumer = flowNodeById(flowConnArm.nodeId);
-      if (consumer && flowConnCanAssign(consumer, flowConnArm.slot, node.id)) {
-        flowPushHistory();
-        connSlotSet(consumer, flowConnArm.slot, node.id);
-        saveFlow();
-        flowConnArm = null;
-      }
-      return;
-    }
     const now = performance.now();
     // Double-tap on a grid node: select it and add it to the bottom bar (useful
     // for nodes whose chip was hidden with the medium-long hold).
