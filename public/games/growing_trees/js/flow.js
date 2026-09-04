@@ -1,8 +1,10 @@
 /* ============================================================
-   flow.js — full-screen sound flow editor. A black scene with a
-   pannable grid of squares (each shows its x,y position) for
-   arranging sound nodes into a playable graph, opened from the
-   main screen's bottom-right button.
+   flow.js — full-screen sound flow editor. A black, infinitely
+   pannable canvas for arranging sound nodes (at free positions —
+   no grid) into a playable graph, opened from the main screen's
+   bottom-right button. Long-press an empty spot to open the add
+   menu; a new node floats away from its neighbours so wires stay
+   readable.
 
    Node types: Note (🎵, the entry point — aggregates a required
    Volume envelope + up to 3 Waves, each with an optional mix Env),
@@ -14,22 +16,29 @@
    Connections are consumer-owned slots shown as emoji-labeled ports on the
    node's own edges (tap a port to arm it, tap a node on the grid to connect,
    tap the port again to cancel, its ✕ clears); wires render as colored beziers
-   from a source to the consumer's port. A selected node opens a small
-   semi-transparent property modal beside it, and editing a volume/wave/unison/
-   env node opens a larger anchored transparent editor. A note's ▶ Play compiles
-   the graph into the legacy audio globals and previews the sound. The ☰
-   top-right button opens a read-only node-list side bar (tap a row to pan to
-   that node); all editing happens on the field.
+   from a source to the consumer's port. Every node is an always-visible widget
+   card that shows its values (mini envelope / curve / spectrum / faders / play
+   + note-life) read-only, sized to fit exactly. Tapping a widget enters edit
+   mode: it grows in place into its full editor (envelope / wave / curve /
+   unison / note), and tapping outside it shrinks it back. The ▶ Play button on
+   a note widget is always live. Long-press a node to move it (flash + tap to
+   place); hold it longer and a 3-2-1 countdown deletes it (release to cancel).
+   The ☰ top-left button opens a read-only node-list side bar (tap a row to pan
+   to that node); all editing happens on the field.
    ============================================================ */
 
 const flowBtn = document.getElementById('flowBtn');
-const FLOW_CELL = 88;           // grid square size (px)
+const FLOW_CELL = 88;           // node size basis (px): the old grid cell, kept as the visual scale
+const FLOW_SHOW_GRID = false;   // draw the old dotted grid + cell coordinates? (kept for a possible return)
+const FLOW_NODE_SEP = 190;      // min centre-to-centre distance between nodes (float-away spacing; widgets are wider than cells)
+const FLOW_SEP_MS = 250;        // duration of the float-away separation animation
 const FLOW_BACK_R = 22;         // top-right round button radius (sidebar / undo / back)
 const FLOW_TOP_BTN_GAP = 14;    // gap between the top-right buttons
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
-const FLOW_MODAL_W = 280;       // in-place property modal width (floats near the node)
 const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
+const FLOW_HOLD_DELETE = 1200;  // ms of a continued hold (past move mode) before the delete countdown starts
+const FLOW_DELETE_MS = 3000;    // delete countdown duration: a 3-2-1 hold before the node is deleted
 const FLOW_SIDE_W = 250;        // node-list side bar width (left edge)
 const FLOW_SIDE_HDR = 44;       // side bar header height
 const FLOW_SIDE_ROW_H = 44;     // side bar row height
@@ -71,16 +80,17 @@ var flowLastT = 0;              // last RAF timestamp, for dt-based inertia deca
 const FLOW_FLICK_MIN = 0.04;    // px/ms velocity needed to start inertia on release
 const FLOW_FLICK_STOP = 0.001;  // px/ms at which inertia settles and stops
 
-var flowNodes = [];             // [{ id, gx, gy, type, noteLife }] placed sound nodes
+var flowNodes = [];             // [{ id, x, y, type, noteLife }] placed sound nodes (x,y = world px centre)
 var flowSelId = null;           // id of the selected node (attribute panel shown for it)
-var flowAddMenu = null;         // { gx, gy } open add-node menu anchor, or null
+var flowAddMenu = null;         // { x, y } open add-node menu anchor (world px), or null
 var flowSideOpen = false;       // node-list side bar open?
 var flowSideScrollY = 0;        // vertical scroll offset of the side-bar list
-var flowPanAnim = null;         // { x0, y0, x1, y1, t0 } animated pan to a node's cell
-var flowHold = null;            // { id, kind, t0, stage } active long-press hold, or null
+var flowPanAnim = null;         // { x0, y0, x1, y1, t0 } animated pan to a node's position
+var flowHold = null;            // { id, kind, x, y, t0, stage } active long-press hold, or null
 var flowMoveId = null;          // id of the node in move mode (slowly flashing), or null
 var flowConnArm = null;         // { nodeId, slot } armed connection slot awaiting a grid tap, or null
-var flowHistory = [];           // undo stack: [{ nodes }] snapshots taken before each action
+var flowSepAnim = null;         // { id, x0, y0, x1, y1, cam0x, cam0y, t0 } a node drifting to clear spacing (camera follows), or null
+var flowHistory = [];           // undo stack: [{ nodes, cam }] snapshots taken before each action
 
 const FLOW_SAVE_KEY = 'growingTrees.flow.v1';
 
@@ -88,26 +98,32 @@ const FLOW_SAVE_KEY = 'growingTrees.flow.v1';
 function flowGridArea() {
   return { top: 0, bottom: H, left: 0, right: W };
 }
-// The top-right control row: sidebar toggle, undo, and back (rightmost), as
-// three round buttons.
+// The top-right control row: undo and back (rightmost), as two round buttons.
 function flowTopButtonRects() {
   const d = FLOW_BACK_R * 2;
   const backX = W - 16 - d;
   const undoX = backX - d - FLOW_TOP_BTN_GAP;
-  const sideX = undoX - d - FLOW_TOP_BTN_GAP;
   return {
-    side: { x: sideX, y: 16, d },
     undo: { x: undoX, y: 16, d },
     back: { x: backX, y: 16, d },
   };
 }
 function flowTopHit(x, y) {
   const r = flowTopButtonRects();
-  for (const k of ['side', 'undo', 'back']) {
+  for (const k of ['undo', 'back']) {
     const b = r[k];
     if (Math.hypot(x - (b.x + b.d / 2), y - (b.y + b.d / 2)) <= FLOW_BACK_R + 6) return k;
   }
   return null;
+}
+// The side bar's expand/collapse button (top-left; overlays the panel's header
+// when the panel is open).
+function flowSideBtnRect() {
+  return { x: 16, y: 16, d: FLOW_BACK_R * 2 };
+}
+function flowSideBtnHit(x, y) {
+  const b = flowSideBtnRect();
+  return Math.hypot(x - (b.x + b.d / 2), y - (b.y + b.d / 2)) <= FLOW_BACK_R + 6;
 }
 // The integer grid-cell range that intersects the visible grid area.
 function flowCellRange() {
@@ -125,57 +141,65 @@ function flowCellScreen(gx, gy) {
 function flowNodeById(id) {
   return flowNodes.find(n => n.id === id);
 }
-function flowNodeAt(gx, gy) {
-  return flowNodes.find(n => n.gx === gx && n.gy === gy);
+// Screen position of a node's centre.
+function flowNodeScreen(n) {
+  return { x: n.x - flowCam.x, y: n.y - flowCam.y };
 }
-// The in-place property modal: floats beside the selected node's cell (right by
-// default, flips left when it would leave the screen), clamped into the grid
-// area so it never covers the node itself. Semi-transparent, so the grid shows
-// through behind it.
-function flowModalRect(node) {
-  const h = flowModalHeight(node);
-  const p = flowCellScreen(node.gx, node.gy);
-  const nc = p.x + FLOW_CELL / 2;
-  const ny = p.y + FLOW_CELL / 2;
-  let x = nc + FLOW_CELL / 2 + 14;
-  if (x + FLOW_MODAL_W > W - 8) x = nc - FLOW_CELL / 2 - 14 - FLOW_MODAL_W;
-  x = Math.max(8, Math.min(W - 8 - FLOW_MODAL_W, x));
-  let y = ny - h / 2;
-  y = Math.max(8, Math.min(H - 8 - h, y));
-  return { x, y, w: FLOW_MODAL_W, h };
+// The node under the world point (x,y), or null. "Here a node exists" = inside
+// its widget card's bounds (with a little slack), so long-presses near a node
+// still count as on it.
+function flowNodeAt(x, y) {
+  const pad = 8;
+  let best = null, bd = Infinity;
+  for (const n of flowNodes) {
+    const s = flowWidgetSize(n);
+    if (x < n.x - s.w / 2 - pad || x > n.x + s.w / 2 + pad) continue;
+    if (y < n.y - s.h / 2 - pad || y > n.y + s.h / 2 + pad) continue;
+    const d = Math.hypot(x - n.x, y - n.y);
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
 }
-function flowModalHeight(node) {
-  if (node.type === 'note' || node.type === 'unison') return 150;
-  return 132;
+// The idle widget size for a node: sized to exactly fit its read-only content
+// (a single place to tune sizes — a future per-node scale factor can fold in
+// here). volumeEnv / env / wave show a mini plot; unison shows mini faders; a
+// note shows its play button and note-life slider.
+function flowWidgetSize(node) {
+  switch (node.type) {
+    case 'note': return { w: 176, h: 96 };
+    case 'unison': return { w: 176, h: 128 };
+    default: return { w: 176, h: 116 };   // volumeEnv / env / wave mini plots
+  }
 }
-function flowModalCloseRect(m) {
-  return { x: m.x + m.w - 34, y: m.y + 7, w: 26, h: 26 };
+// The node's widget rect in screen space. When the node is being edited, its
+// widget IS the enlarged editor panel (grows in place at the node's position).
+function flowWidgetRect(node, editing) {
+  if (editing) return (node.type === 'note') ? flowNotePanel() : flowEnvPanel();
+  const s = flowWidgetSize(node);
+  const p = flowNodeScreen(node);
+  return { x: p.x - s.w / 2, y: p.y - s.h / 2, w: s.w, h: s.h };
 }
-// A note's play button and the edit button (volumeEnv / env / wave).
-function flowModalPlayRect(m) {
-  return { x: m.x + 14, y: m.y + 42, w: m.w - 28, h: 26 };
+// The id of whichever node is currently being edited (its widget is enlarged),
+// or null when nothing is being edited.
+function flowActiveEditId() {
+  return flowNoteEdit || flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit || null;
 }
-function flowModalEditRect(m) {
-  return { x: m.x + 14, y: m.y + 46, w: m.w - 28, h: 34 };
+// A note widget's ▶ play button and its note-life slider track, laid out for
+// whatever rect it is drawn in (idle widget or enlarged note editor).
+function flowNoteWidgetPlay(r) {
+  return { x: r.x + 10, y: r.y + 30, w: r.w - 20, h: 26 };
 }
-// A note's "Note life" slider: scales the connected volume-envelope node's
-// component durations (the legacy Note-life slider's behaviour, applied to the
-// volume env feeding this note). Range = FLOW_NOTE_LIFE_MIN..MAX ms.
-function flowNoteLifeSlider(m) {
-  return { x: m.x + 62, x2: m.x + m.w - 62, y: m.y + 86 };
+function flowNoteWidgetLife(r) {
+  return { x: r.x + 62, x2: r.x + r.w - 10, y: r.y + 74 };
 }
-function flowModalDeleteRect(node, m) {
-  const y = (node.type === 'note' || node.type === 'unison') ? m.y + 118 : m.y + 102;
-  return { x: m.x + 14, y, w: m.w - 28, h: 26 };
-}
-// The add-menu option buttons, laid out around the anchored cell (clamped to
+// The add-menu option buttons, laid out around the anchored point (clamped to
 // stay inside the grid area). One per node type for now.
 function flowAddMenuOptions() {
-  const p = flowCellScreen(flowAddMenu.gx, flowAddMenu.gy);
+  const p = { x: flowAddMenu.x - flowCam.x, y: flowAddMenu.y - flowCam.y };
   const keys = Object.keys(FLOW_NODE_TYPES);
   const gap = 14;
   const totalW = keys.length * 56 + (keys.length - 1) * gap;
-  const cx0 = Math.max(flowSideOpen ? FLOW_SIDE_W + 40 : 56, Math.min(W - 56, p.x + FLOW_CELL / 2));
+  const cx0 = Math.max(flowSideOpen ? FLOW_SIDE_W + 40 : 56, Math.min(W - 56, p.x));
   const cy = Math.max(34, Math.min(H - 34, p.y - 44));
   return keys.map((type, i) => {
     const x = cx0 - totalW / 2 + i * (56 + gap) + 28;
@@ -344,34 +368,45 @@ function flowUnisonLayer(node) {
   };
 }
 
-// Create a node of `type` in the cell that owns the open add menu, select it,
-// and persist.
+// Create a node of `type` at the open add-menu anchor, select it, and let it
+// float away from any neighbours so the wires have room.
 function addFlowNode(type) {
   if (!flowAddMenu || !FLOW_NODE_TYPES[type]) return;
   flowPushHistory();
   const id = 'node-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
-  const n = { id, gx: flowAddMenu.gx, gy: flowAddMenu.gy, type };
+  const n = { id, x: flowAddMenu.x, y: flowAddMenu.y, type };
   if (type === 'note') n.noteLife = 2500;
   else if (type === 'volumeEnv') n.envelope = clone(DEFAULT_ENVELOPE);
   else if (type === 'env') n.env = defaultEnvCurve();
   else if (type === 'wave') n.wave = defaultWaveSpec();
   else if (type === 'unison') n.voices = defaultUnisonVoices();
   n.conn = defaultConn(type);
+  // The very first node (no nodes existed before this) becomes the world
+  // origin: shift the camera by the node's position so the node is stored at
+  // 0,0 but still appears exactly where it was placed. Any later first node
+  // (after all nodes were deleted) re-anchors the origin the same way.
+  if (!flowNodes.length) {
+    flowCam.x -= n.x;
+    flowCam.y -= n.y;
+    n.x = 0; n.y = 0;
+  }
   flowNodes.push(n);
   flowAddMenu = null;
   flowSelId = id;
   saveFlow();
+  flowSeparateNode(n);   // drift out of any neighbours (no-op when already clear)
 }
 
 /* ---- Undo ----
    Snapshot-based: every mutating action pushes the state BEFORE it onto the
-   stack; Undo pops the most recent snapshot and restores it. Future node
+   stack; Undo pops the most recent snapshot and restores it (nodes + camera,
+   so an undo also returns the view to where the action happened). Future node
    actions just need to call flowPushHistory() before they mutate flowNodes. */
 function flowPushHistory(base) {
   const state = base || clone(flowNodes);
   const top = flowHistory[flowHistory.length - 1];
   if (top && JSON.stringify(top.nodes) === JSON.stringify(state)) return;   // no-op snapshots
-  flowHistory.push({ nodes: state });
+  flowHistory.push({ nodes: state, cam: { x: flowCam.x, y: flowCam.y } });
   if (flowHistory.length > FLOW_HISTORY_MAX) flowHistory.shift();
 }
 function undoFlow() {
@@ -380,28 +415,34 @@ function undoFlow() {
   // An open overlay editor mutates node data on close (wave/unison write their
   // proxy back into the node), so close it first — the undo below then restores
   // the pre-edit snapshot the overlay pushed when it first changed something.
+  if (flowNoteEdit) closeFlowNoteEditor();
   if (flowEnvEdit) closeFlowEnvelopeEditor();
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
   if (flowCurveEdit) closeFlowCurveEditor();
   flowNodes = clone(entry.nodes);
+  if (entry.cam) { flowCam = { x: entry.cam.x, y: entry.cam.y }; flowInertia = null; flowPanAnim = null; }
   if (flowSelId && !flowNodeById(flowSelId)) flowSelId = null;
   if (flowMoveId && !flowNodeById(flowMoveId)) flowMoveId = null;
   flowAddMenu = null;
+  flowSepAnim = null;
   saveFlow();
 }
 
 /* ---- Side bar (node list) ----
-   A read-only list of every placed node (emoji + type + position), opened and
-   closed by the ☰ top-right button or the header ✕. Tapping a row just pans
-   the camera to that node — selection, editing, moving and deleting all stay
-   on the field. The list scrolls vertically when it overflows. */
+   A read-only list of every placed node (emoji + type + position in grid-cell
+   units, i.e. world px ÷ FLOW_CELL), opened and closed by the ☰ top-right
+   button or the header ✕. Tapping a row just pans the camera to that node —
+   selection, editing, moving and deleting all stay on the field. The list
+   scrolls vertically when it overflows. */
 function flowSideRect() {
   return { x: 0, y: 0, w: FLOW_SIDE_W, h: H };
 }
-function flowSideCloseRect() {
+// The "Clear all" pill, right-aligned in the panel header: wipes every node and
+// returns the camera to the origin.
+function flowSideClearRect() {
   const s = flowSideRect();
-  return { x: s.x + s.w - 34, y: 7, w: 26, h: 26 };
+  return { x: s.x + s.w - 96, y: 8, w: 86, h: 28 };
 }
 function flowSideRows() {
   const s = flowSideRect();
@@ -433,29 +474,33 @@ function drawFlowSide() {
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 2;
   ctx.stroke();
-  // Header.
+  // Header (the expand/collapse button overlays the top-left corner).
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 15px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('Nodes', s.x + 14, s.y + 28);
-  const close = flowSideCloseRect();
-  ctx.beginPath();
-  ctx.arc(close.x + close.w / 2, close.y + close.h / 2, 10, 0, Math.PI * 2);
-  ctx.fillStyle = '#333333';
+  ctx.fillText('Nodes', s.x + 68, s.y + 28);
+  // Clear-all pill (right of the header).
+  const cl = flowSideClearRect();
+  drawRoundRect(cl.x, cl.y, cl.w, cl.h, 8);
+  ctx.fillStyle = '#8e2f26';
   ctx.fill();
+  ctx.strokeStyle = '#d0604f';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 12px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('✕', close.x + close.w / 2, close.y + close.h / 2 + 4);
-  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🗑 Clear all', cl.x + cl.w / 2, cl.y + cl.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
   // Rows.
   const top = s.y + FLOW_SIDE_HDR;
   if (!flowNodes.length) {
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.font = '700 12px sans-serif';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('No nodes yet · tap a cell on the grid to add one', s.x + 14, top + 24);
+    ctx.fillText('No nodes yet · long-press anywhere to add one', s.x + 14, top + 24);
     return;
   }
   ctx.save();
@@ -482,10 +527,12 @@ function drawFlowSide() {
     ctx.textAlign = 'left';
     ctx.fillStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.85)';
     ctx.fillText(FLOW_NODE_TYPES[r.node.type].label, r.x + 44, r.y + r.h / 2);
+    // World position in grid-cell units (like the old grid's scale), 2 decimals.
+    const ux = r.node.x / FLOW_CELL, uy = r.node.y / FLOW_CELL;
     ctx.font = '700 11px monospace';
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText(r.node.gx + ',' + r.node.gy, r.x + r.w - 14, r.y + r.h / 2);
+    ctx.fillText(ux.toFixed(2) + ',' + uy.toFixed(2), r.x + r.w - 14, r.y + r.h / 2);
     ctx.textBaseline = 'alphabetic';
   }
   ctx.restore();
@@ -501,38 +548,100 @@ function drawFlowSide() {
   }
 }
 
-// Center the camera on a node's cell with a short eased pan.
+// Center the camera on a node with a short eased pan.
 function panToNode(node) {
   flowInertia = null;
   flowPanAnim = {
     x0: flowCam.x, y0: flowCam.y,
-    x1: node.gx * FLOW_CELL - W / 2 + FLOW_CELL / 2,
-    y1: node.gy * FLOW_CELL - H / 2 + FLOW_CELL / 2,
+    x1: node.x - W / 2,
+    y1: node.y - H / 2,
     t0: performance.now(),
   };
 }
 
-/* ---- Long-press: move mode ----
-   Holding a node on the grid still for FLOW_HOLD_MOVE ms puts it into move
-   mode — it flashes slowly. The next tap on an empty grid cell moves the node
-   there. Deleting a node is available in its in-place property modal. */
+/* ---- Long-press: move mode / add menu ----
+   Holding a node still for FLOW_HOLD_MOVE puts it into move mode — it flashes
+   slowly; the next tap anywhere moves it there (auto-spacing from neighbours).
+   Holding an empty spot for the same time opens the add menu anchored there.
+   Deleting a node is available in its in-place property modal. */
 function deleteFlowNode(id) {
   flowPushHistory();
   flowDetachNode(id);          // clear every slot pointing at this node
   flowNodes = flowNodes.filter(n => n.id !== id);
+  if (flowNoteEdit === id) closeFlowNoteEditor();
+  if (flowEnvEdit === id) closeFlowEnvelopeEditor();
+  if (flowWaveEdit === id) closeFlowWaveEditor();
+  if (flowUnisonEdit === id) closeFlowUnisonEditor();
+  if (flowCurveEdit === id) closeFlowCurveEditor();
   if (flowSelId === id) flowSelId = null;
   if (flowMoveId === id) flowMoveId = null;
   if (flowConnArm && flowConnArm.nodeId === id) flowConnArm = null;
   flowAddMenu = null;
+  if (flowSepAnim && flowSepAnim.id === id) flowSepAnim = null;
   saveFlow();
 }
-function moveFlowNodeTo(id, gx, gy) {
+function moveFlowNodeTo(id, x, y) {
   const n = flowNodeById(id);
   if (!n) return;
   flowPushHistory();
-  n.gx = gx; n.gy = gy;
+  n.x = x; n.y = y;
   flowMoveId = null;
   saveFlow();
+  flowSeparateNode(n);   // auto-space from any neighbours, just like a fresh add
+}
+// Clear every node and return the camera to the world origin (undoable).
+function clearFlowAll() {
+  flowPushHistory();
+  if (flowNoteEdit) closeFlowNoteEditor();
+  if (flowEnvEdit) closeFlowEnvelopeEditor();
+  if (flowWaveEdit) closeFlowWaveEditor();
+  if (flowUnisonEdit) closeFlowUnisonEditor();
+  if (flowCurveEdit) closeFlowCurveEditor();
+  flowNodes = [];
+  flowSelId = null;
+  flowMoveId = null;
+  flowConnArm = null;
+  flowAddMenu = null;
+  flowSepAnim = null;
+  flowSideScrollY = 0;
+  flowCam = { x: 0, y: 0 };
+  flowInertia = null;
+  flowPanAnim = null;
+  saveFlow();
+}
+// Float a node away from every other node until no centre is closer than
+// FLOW_NODE_SEP (only this node moves — existing nodes stay put). The target
+// is found by iteratively pushing it out of each overlapping neighbour, then
+// animated with an ease-out drift that the camera follows, so the node settles
+// in the centre of the screen. No overlap → instant, no animation.
+function flowSeparationTarget(node) {
+  let px = node.x, py = node.y;
+  for (let iter = 0; iter < 24; iter++) {
+    let dx = 0, dy = 0;
+    for (const n of flowNodes) {
+      if (n.id === node.id) continue;
+      const vx = px - n.x, vy = py - n.y;
+      const d = Math.hypot(vx, vy);
+      if (d >= FLOW_NODE_SEP || d === 0) continue;
+      const push = (FLOW_NODE_SEP - d) / d;
+      dx += vx * push; dy += vy * push;
+    }
+    if (Math.hypot(dx, dy) < 0.5) break;
+    px += dx; py += dy;
+  }
+  return { x: px, y: py };
+}
+function flowSeparateNode(node) {
+  const t = flowSeparationTarget(node);
+  if (Math.hypot(t.x - node.x, t.y - node.y) < 0.5) return;   // already clear
+  flowInertia = null;
+  flowPanAnim = null;
+  flowSepAnim = {
+    id: node.id,
+    x0: node.x, y0: node.y, x1: t.x, y1: t.y,
+    cam0x: flowCam.x, cam0y: flowCam.y,   // pan along so the node ends centred
+    t0: performance.now(),
+  };
 }
 // Slowly-pulsing alpha for the node currently in move mode.
 function flowFlashAlpha() {
@@ -640,15 +749,24 @@ function loadFlow() {
     const arr = Array.isArray(d.nodes) ? d.nodes : [];
     flowNodes = [];
     for (const n of arr) {
-      if (!n || typeof n.gx !== 'number' || typeof n.gy !== 'number' || typeof n.type !== 'string') continue;
+      if (!n || typeof n.type !== 'string') continue;
+      const hasPos = (typeof n.x === 'number' && typeof n.y === 'number') || (typeof n.gx === 'number' && typeof n.gy === 'number');
+      if (!hasPos) continue;
       // The old envelope node type became the volume envelope.
       const type = n.type === 'envelope' ? 'volumeEnv' : n.type;
       const node = {
         id: typeof n.id === 'string' ? n.id : 'node-' + Math.random().toString(36).slice(2),
-        gx: Math.round(n.gx), gy: Math.round(n.gy),
         type: FLOW_NODE_TYPES[type] ? type : 'note',
         noteLife: Math.max(FLOW_NOTE_LIFE_MIN, Math.min(FLOW_NOTE_LIFE_MAX, Math.round(+n.noteLife) || 2500)),
       };
+      // Free placement: nodes save their world-px centre (x,y). Old grid saves
+      // (gx,gy cells) migrate to the cell's centre.
+      if (typeof n.x === 'number' && typeof n.y === 'number') {
+        node.x = n.x; node.y = n.y;
+      } else {
+        node.x = Math.round(n.gx) * FLOW_CELL + FLOW_CELL / 2;
+        node.y = Math.round(n.gy) * FLOW_CELL + FLOW_CELL / 2;
+      }
       if (node.type === 'volumeEnv') {
         node.envelope = (n.envelope && Array.isArray(n.envelope.components) && n.envelope.components.length)
           ? n.envelope : clone(DEFAULT_ENVELOPE);
@@ -677,6 +795,7 @@ function openSoundFlow() {
 function closeSoundFlow() {
   flowActive = false;
   mode = 'plant';
+  if (flowNoteEdit) closeFlowNoteEditor();
   if (flowEnvEdit) closeFlowEnvelopeEditor();
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
@@ -690,6 +809,7 @@ function closeSoundFlow() {
   flowMoveId = null;
   flowSideOpen = false;
   flowSideScrollY = 0;
+  flowSepAnim = null;
   playbacks.length = 0;
   stopGestureNote();
   stopPreviewVoices();
@@ -705,133 +825,6 @@ flowBtn.addEventListener('click', () => {
   openSoundFlow();
 });
 
-/* ---- In-place property modal (replaces the old right drawer) ----
-   The modal floats beside the selected node and holds only the node's own
-   controls: ▶ Play + Note life (note), Edit buttons + summary (volumeEnv / env /
-   wave), the compact voices strip (unison), and Delete. Connection slots no
-   longer live here — they are drawn as small ports around the node itself (see
-   the On-node ports section below) and wired directly to it. */
-// Hit-test the modal (play / edit / note-life slider / unison compact voices).
-// The ✕ close and Delete buttons are handled separately in pointerdown.
-function flowHitModal(x, y, m, node) {
-  if (node.type === 'note') {
-    const p = flowModalPlayRect(m);
-    if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return { kind: 'play' };
-    const s = flowNoteLifeSlider(m);
-    if (y >= s.y - 18 && y <= s.y + 16 && x >= s.x - 10 && x <= s.x2) return { kind: 'noteLife' };
-  }
-  if (node.type !== 'note' && node.type !== 'unison') {
-    const eb = flowModalEditRect(m);
-    if (x >= eb.x && x <= eb.x + eb.w && y >= eb.y && y <= eb.y + eb.h) return { kind: 'edit' };
-  }
-  if (node.type === 'unison') {
-    const vc = flowUnisonMiniChips(m);
-    for (const c of vc) {
-      if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) {
-        if (c.edit) return { kind: 'uned' };
-        return { kind: 'vsel', i: c.i };
-      }
-    }
-    const ic = flowUnisonMiniIntervals(m);
-    if (flowUnisonSelectedOf(node)) {
-      for (const b of ic) {
-        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return { kind: 'interval', st: b.st };
-      }
-    }
-  }
-  return null;
-}
-// The draw part of the modal (no connection slots — those are on the node).
-function drawFlowModal(node, m) {
-  // Note: ▶ play button + Note-life slider (scales the volume env's durations).
-  if (node.type === 'note') {
-    const ready = flowNoteReady(node);
-    const p = flowModalPlayRect(m);
-    drawRoundRect(p.x, p.y, p.w, p.h, 9);
-    ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
-    ctx.fill();
-    ctx.strokeStyle = ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.4)';
-    ctx.font = '800 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(ready ? '▶ Play sound' : '▶ Needs volume + wave', p.x + p.w / 2, p.y + p.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-    // Note-life slider.
-    const env = flowNoteLifeEnv(node);
-    const ms = env ? flowNoteLifeMs(node) : 0;
-    ctx.fillStyle = env ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
-    ctx.font = '800 11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Note life', m.x + 14, m.y + 86);
-    ctx.textAlign = 'right';
-    ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', m.x + m.w - 14, m.y + 86);
-    ctx.textBaseline = 'alphabetic';
-    const s = flowNoteLifeSlider(m);
-    ctx.globalAlpha = env ? 1 : 0.4;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(s.x, s.y); ctx.lineTo(s.x2, s.y);
-    ctx.stroke();
-    if (env) {
-      const frac = clamp01((ms - FLOW_NOTE_LIFE_MIN) / (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN));
-      const tx = s.x + frac * (s.x2 - s.x);
-      ctx.strokeStyle = FLOW_WAVE_ACCENT;
-      ctx.beginPath();
-      ctx.moveTo(s.x, s.y); ctx.lineTo(tx, s.y);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(tx, s.y, 8, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    ctx.lineCap = 'butt';
-    ctx.globalAlpha = 1;
-    return;
-  }
-  // Unison: compact single-voice chip + interval chips + readout.
-  if (node.type === 'unison') { drawFlowUnisonMini(node, m); return; }
-  // volumeEnv / env / wave: edit button + a one-line summary.
-  const eb = flowModalEditRect(m);
-  drawRoundRect(eb.x, eb.y, eb.w, eb.h, 9);
-  ctx.fillStyle = '#2b2b2b';
-  ctx.fill();
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 12px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(node.type === 'wave' ? '🌊 Edit waveform' : node.type === 'env' ? '📈 Edit curve' : '📉 Edit volume', eb.x + eb.w / 2, eb.y + eb.h / 2 + 1);
-  ctx.textBaseline = 'alphabetic';
-  // Summary line.
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.font = '700 10px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  let sum = '';
-  if (node.type === 'volumeEnv') {
-    const nC = (node.envelope && node.envelope.components) ? node.envelope.components.length : 0;
-    sum = nC ? nC + ' segments · ' + Math.round(compsMs(node.envelope.components)) + ' ms' : 'Default envelope';
-  } else if (node.type === 'env') {
-    const pts = (node.env && node.env.points) ? node.env.points : [];
-    sum = pts.length ? pts.length + ' points' : 'Flat curve';
-  } else if (node.type === 'wave') {
-    const pr = (node.wave && node.wave.presetId) ? node.wave.presetId : null;
-    sum = pr ? 'Preset: ' + pr : ((node.wave && node.wave.specPoints) ? node.wave.specPoints.length + ' harmonics' : '');
-  }
-  ctx.fillText(sum, eb.x + eb.w / 2, eb.y + eb.h + 12);
-  ctx.textBaseline = 'alphabetic';
-}
 // The connected volume-envelope node feeding a note (its Note-life slider target).
 function flowNoteLifeEnv(node) {
   const id = node && node.conn && node.conn.volumeEnv;
@@ -876,11 +869,12 @@ function flowPortLabel(slot) {
   if (slot.key === 'ctEnv') return 'Ct';
   return '';
 }
-// Screen-space port dots for a node (ring just outside the circle).
+// Screen-space port dots for a node (on the widget card's edges).
 function flowPorts(node) {
-  const p = flowCellScreen(node.gx, node.gy);
-  const cx = p.x + FLOW_CELL / 2, cy = p.y + FLOW_CELL / 2;
-  const R = FLOW_CELL / 2;
+  const p = flowNodeScreen(node);
+  const cx = p.x, cy = p.y;
+  const r = flowWidgetRect(node, false);
+  const w = r.w, h = r.h;
   const out = [];
   const add = (slot, px, py, edge, req) => {
     out.push({
@@ -891,19 +885,19 @@ function flowPorts(node) {
     });
   };
   if (node.type === 'note') {
-    add({ key: 'volumeEnv' }, cx, cy - R - 4, 'top', true);
+    add({ key: 'volumeEnv' }, cx, cy - h / 2 - 6, 'top', true);
     for (let i = 0; i < 3; i++) {
       const y = cy + (i - 1) * 27;
-      add({ key: 'waves', idx: i }, cx + R + 4, y, 'right', i === 0);
-      add({ key: 'mixEnvs', idx: i }, cx - R - 4, y, 'left');
+      add({ key: 'waves', idx: i }, cx + w / 2 + 6, y, 'right', i === 0);
+      add({ key: 'mixEnvs', idx: i }, cx - w / 2 - 6, y, 'left');
     }
   } else if (node.type === 'wave') {
-    add({ key: 'mixEnv' }, cx, cy - R - 4, 'top');
-    add({ key: 'unison' }, cx, cy + R + 4, 'bottom');
+    add({ key: 'mixEnv' }, cx, cy - h / 2 - 6, 'top');
+    add({ key: 'unison' }, cx, cy + h / 2 + 6, 'bottom');
   } else if (node.type === 'unison') {
-    add({ key: 'volEnv' }, cx - R - 4, cy - 27, 'left');
-    add({ key: 'stEnv' }, cx - R - 4, cy, 'left');
-    add({ key: 'ctEnv' }, cx - R - 4, cy + 27, 'left');
+    add({ key: 'volEnv' }, cx - w / 2 - 6, cy - 27, 'left');
+    add({ key: 'stEnv' }, cx - w / 2 - 6, cy, 'left');
+    add({ key: 'ctEnv' }, cx - w / 2 - 6, cy + 27, 'left');
   }
   return out;
 }
@@ -943,6 +937,7 @@ function hitFlowPort(x, y) {
 }
 function drawFlowPorts() {
   for (const n of flowNodes) {
+    if (n.id === flowActiveEditId()) continue;   // the enlarged editor covers its own ports
     for (const pt of flowPorts(n)) {
       const filled = !!connSlotGet(n, pt.slot);
       const src = filled ? flowNodeById(connSlotGet(n, pt.slot)) : null;
@@ -985,105 +980,6 @@ function drawFlowPorts() {
   }
 }
 
-/* ---- Unison compact voices (property modal) ----
-   A unison node is exactly one additional voice: a single V1 chip + an ✎ that
-   opens the full overlay, the legacy interval chips (they set the voice's
-   semitones), and a one-line readout of the voice's st/ct/vol. */
-function flowUnisonSelectedOf(node) {
-  const vs = (node && Array.isArray(node.voices)) ? node.voices : [];
-  return (flowUnisonSel >= 0 && vs[flowUnisonSel]) ? vs[flowUnisonSel] : null;
-}
-function flowUnisonMiniChips(panel) {
-  const n = flowNodeById(flowSelId);
-  const vs = (n && Array.isArray(n.voices)) ? n.voices : [];
-  const gap = 6;
-  const chipW = Math.max(30, Math.min(40, (panel.w - 28 - 40 - (vs.length + 1) * gap) / Math.max(1, vs.length)));
-  const y = panel.y + 44, h = 22;
-  const arr = [];
-  for (let i = 0; i < vs.length; i++) arr.push({ i, x: panel.x + 14 + i * (chipW + gap), y, w: chipW, h });
-  arr.push({ edit: true, x: panel.x + 14 + vs.length * (chipW + gap), y, w: 34, h });
-  return arr;
-}
-function flowUnisonMiniIntervals(panel) {
-  const gap = 4;
-  const w = Math.max(26, Math.min(34, (panel.w - 28 - (VOICE_INTERVALS.length - 1) * gap) / VOICE_INTERVALS.length));
-  const y = panel.y + 70, h = 18;
-  return VOICE_INTERVALS.map((iv, i) => ({ st: iv.st, label: iv.label, x: panel.x + 14 + i * (w + gap), y, w, h }));
-}
-function drawFlowUnisonMini(node, panel) {
-  const vs = (node && Array.isArray(node.voices)) ? node.voices : [];
-  const v = flowUnisonSelectedOf(node);
-  // Voice chip strip (select + edit).
-  for (const c of flowUnisonMiniChips(panel)) {
-    if (c.edit) {
-      drawRoundRect(c.x, c.y, c.w, c.h, 6);
-      ctx.fillStyle = '#2b2b2b';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('✎', c.x + c.w / 2, c.y + c.h / 2 + 1);
-      ctx.textBaseline = 'alphabetic';
-      continue;
-    }
-    const sel = c.i === flowUnisonSel;
-    const vv = vs[c.i];
-    const muted = !!(vv && vv.muted);
-    drawRoundRect(c.x, c.y, c.w, c.h, 6);
-    ctx.fillStyle = sel ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.06)';
-    ctx.fill();
-    ctx.strokeStyle = sel ? FLOW_UNISON_ACCENT : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = sel ? 1.5 : 1;
-    ctx.stroke();
-    ctx.fillStyle = muted ? 'rgba(255,255,255,0.5)' : '#ffffff';
-    ctx.font = '800 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('V' + (c.i + 1), c.x + c.w / 2, c.y + c.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-  }
-  // Interval chips (only when a voice is selected).
-  if (v) {
-    for (const b of flowUnisonMiniIntervals(panel)) {
-      const on = Math.round(+v.st || 0) === b.st;
-      drawRoundRect(b.x, b.y, b.w, b.h, 5);
-      ctx.fillStyle = on ? FLOW_UNISON_ACCENT : '#222222';
-      ctx.fill();
-      ctx.strokeStyle = on ? FLOW_UNISON_ACCENT : 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = on ? 1.5 : 1;
-      ctx.stroke();
-      ctx.fillStyle = on ? '#000000' : '#ffffff';
-      ctx.font = '800 9px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
-      ctx.textBaseline = 'alphabetic';
-    }
-  } else {
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.font = '700 10px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('No voices — ✎ to edit', panel.x + 14, panel.y + 66);
-    ctx.textBaseline = 'alphabetic';
-  }
-  // Readout.
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.font = '700 10px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  if (v) {
-    ctx.fillText('V' + (flowUnisonSel + 1) + ' · ' + (Math.round((+v.st || 0) * 100) / 100) + ' st · ' + Math.round(+v.ct || 0) + ' ¢ · ' + Math.round((+v.vol || 1) * 100) + '%', panel.x + 14, panel.y + 92);
-  } else {
-    ctx.fillText('Add voices in the ✎ editor', panel.x + 14, panel.y + 92);
-  }
-  ctx.textBaseline = 'alphabetic';
-}
-
 /* ---- Wire rendering ----
    Consumer-owned slots are drawn as beziers from the source node's cell to the
    consumer's cell, colored by role. Drawn under the node circles. */
@@ -1101,12 +997,12 @@ function drawFlowWires() {
         if (!tid) continue;
         const src = flowNodeById(tid);
         if (!src) continue;
-        const a = flowCellScreen(src.gx, src.gy);
-        const b = flowCellScreen(n.gx, n.gy);
-        const ax = a.x + FLOW_CELL / 2, ay = a.y + FLOW_CELL / 2;
+        const a = flowNodeScreen(src);
+        const b = flowNodeScreen(n);
+        const ax = a.x, ay = a.y;
         // Wires terminate at the consumer's on-node port for this slot.
         const port = flowPortAnchor(n, slot);
-        const bx = port ? port.cx : b.x + FLOW_CELL / 2;
+        const bx = port ? port.cx : b.x;
         const by = port ? port.cy : b.y + FLOW_CELL / 2;
         const color = flowWireColor(slotKey(slot));
         ctx.globalAlpha = sel ? 1 : 0.5;
@@ -1123,6 +1019,416 @@ function drawFlowWires() {
   }
 }
 
+/* ---- Always-visible node widgets ----
+   Every node is a card that always shows its values read-only: a mini plot for
+   volumeEnv / env / wave, mini faders for unison, and a ▶ play button + note-life
+   slider for a note. The card is sized to fit exactly (flowWidgetSize) and hit-
+   tested as a rect. Tapping a card enters edit mode — the node grows in place
+   into its editor (drawn further down), so the card itself is skipped while the
+   node is being edited. A longer hold turns the card into a 3-2-1 delete
+   countdown (release to cancel). */
+function flowMiniPlot(r) {
+  return { left: r.x + 8, right: r.x + r.w - 8, top: r.y + 28, bottom: r.y + r.h - 6, pw: r.w - 16, ph: r.h - 34 };
+}
+function drawMiniPlotFrame(pl) {
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pl.left, pl.top, pl.pw, pl.ph);
+  const y0 = pl.top + pl.ph / 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath();
+  ctx.moveTo(pl.left, y0); ctx.lineTo(pl.right, y0);
+  ctx.stroke();
+}
+function drawFlowWidget(n) {
+  const r = flowWidgetRect(n, false);
+  const sel = n.id === flowSelId;
+  const move = n.id === flowMoveId;
+  drawRoundRect(r.x, r.y, r.w, r.h, 12);
+  ctx.fillStyle = 'rgba(20,20,24,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = sel ? 2.5 : 1.2;
+  ctx.stroke();
+  if (move) {
+    ctx.globalAlpha = flowFlashAlpha();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 6]);
+    drawRoundRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6, 14);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+  // Header: type emoji + label.
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 13px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(FLOW_NODE_TYPES[n.type].emoji + '  ' + FLOW_NODE_TYPES[n.type].label, r.x + 10, r.y + 20);
+  // Per-type read-only content.
+  if (n.type === 'note') drawFlowWidgetNote(n, r);
+  else if (n.type === 'volumeEnv') drawFlowWidgetEnv(n, r);
+  else if (n.type === 'env') drawFlowWidgetCurve(n, r);
+  else if (n.type === 'wave') drawFlowWidgetWave(n, r);
+  else if (n.type === 'unison') drawFlowWidgetUnison(n, r);
+  // Warning badge on a note whose required connections are missing.
+  if (n.type === 'note' && !flowNoteReady(n)) {
+    ctx.beginPath();
+    ctx.arc(r.x + r.w - 14, r.y + 14, 11, 0, Math.PI * 2);
+    ctx.fillStyle = '#e06060';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', r.x + r.w - 14, r.y + 14 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+  // Delete countdown overlay while a longer hold is deleting this node.
+  if (flowHold && flowHold.id === n.id && flowHold.stage === 2) {
+    const remain = FLOW_DELETE_MS - (performance.now() - flowHold.del0);
+    const num = Math.max(1, Math.ceil(remain / 1000));
+    drawRoundRect(r.x, r.y, r.w, r.h, 12);
+    ctx.fillStyle = 'rgba(130,20,20,0.88)';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 34px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), r.x + r.w / 2, r.y + r.h / 2 - 8);
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('hold to delete · release to cancel', r.x + r.w / 2, r.y + r.h / 2 + 22);
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.globalAlpha = 1;
+}
+function drawFlowWidgetNote(n, r) {
+  const ready = flowNoteReady(n);
+  // Play button (always live — tapping it previews, never edits).
+  const p = flowNoteWidgetPlay(r);
+  drawRoundRect(p.x, p.y, p.w, p.h, 8);
+  ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
+  ctx.fill();
+  ctx.strokeStyle = ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.4)';
+  ctx.font = '800 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ready ? '▶ Play sound' : '▶ Needs volume + wave', p.x + p.w / 2, p.y + p.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+  // Note-life readout: the slider is shown but read-only until edit mode.
+  const env = flowNoteLifeEnv(n);
+  const ms = env ? flowNoteLifeMs(n) : 0;
+  ctx.fillStyle = env ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
+  ctx.font = '800 10px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Note life', r.x + 12, r.y + 74);
+  ctx.textAlign = 'right';
+  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', r.x + r.w - 10, r.y + 74);
+  ctx.textBaseline = 'alphabetic';
+  const s = flowNoteWidgetLife(r);
+  ctx.globalAlpha = env ? 1 : 0.4;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y); ctx.lineTo(s.x2, s.y);
+  ctx.stroke();
+  if (env) {
+    const frac = clamp01((ms - FLOW_NOTE_LIFE_MIN) / (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN));
+    const tx = s.x + frac * (s.x2 - s.x);
+    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y); ctx.lineTo(tx, s.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, s.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+  ctx.globalAlpha = 1;
+}
+function drawFlowWidgetEnv(n, r) {
+  const pl = flowMiniPlot(r);
+  const saved = ENVELOPE;
+  ENVELOPE = n.envelope;
+  try {
+    const eb = envBoundaries();
+    const trim = envTrim(ENVELOPE);
+    const vOf = v => clamp01(v + trim);
+    drawMiniPlotFrame(pl);
+    const pts = [];
+    for (let i = 0; i <= eb.n; i++) pts.push({ x: tToX(eb.tOf(eb.b[i]), pl), y: vToY(vOf(eb.vals[i]), pl), v: vOf(eb.vals[i]), el: i < eb.n ? eb.env.components[i] : null });
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    strokeSegPath(pts, 1, v => vToY(clamp01(v), pl));
+    ctx.lineCap = 'butt';
+    for (let i = 0; i <= eb.n; i++) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(tToX(eb.tOf(eb.b[i]), pl), vToY(vOf(eb.vals[i]), pl), 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // HOLD / CUT / REL marker ticks.
+    const tl = designTimeline();
+    const marks = [['hold', tl.tHoldStart, '#7ecfff'], ['cut', tl.tCut, '#ffb37a'], ['rel', tl.tHoldEnd, '#ff9aa0']];
+    for (const m of marks) {
+      const mx = tToX(m[1], pl);
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = m[2];
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(mx, pl.top); ctx.lineTo(mx, pl.bottom);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  } finally {
+    ENVELOPE = saved;
+  }
+}
+function drawFlowWidgetCurve(n, r) {
+  const pl = flowMiniPlot(r);
+  const pts = (n.env && Array.isArray(n.env.points) && n.env.points.length >= 2) ? n.env.points : null;
+  drawMiniPlotFrame(pl);
+  if (!pts) return;
+  ctx.strokeStyle = '#8dd3ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(tToX(0, pl), ampToY(specValueAtCurve(pts, 0), pl));
+  for (let j = 0; j < pts.length; j++) ctx.lineTo(tToX(pts[j].t, pl), ampToY(pts[j].v, pl));
+  ctx.lineTo(tToX(1, pl), ampToY(specValueAtCurve(pts, 1), pl));
+  ctx.stroke();
+  for (const pt of pts) {
+    ctx.fillStyle = '#8dd3ff';
+    ctx.beginPath();
+    ctx.arc(tToX(pt.t, pl), ampToY(pt.v, pl), 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+function drawFlowWidgetWave(n, r) {
+  const pl = flowMiniPlot(r);
+  const l = flowWaveLayer(n);
+  initLayerSpecPoints(l);
+  const pts = l.specPoints || [];
+  drawMiniPlotFrame(pl);
+  ctx.strokeStyle = FLOW_WAVE_ACCENT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(tToX(0, pl), ampToY(specValueAt(pts, 0), pl));
+  for (let j = 0; j < pts.length; j++) ctx.lineTo(tToX(pts[j].x, pl), ampToY(pts[j].a, pl));
+  ctx.lineTo(tToX(1, pl), ampToY(specValueAt(pts, 1), pl));
+  ctx.stroke();
+  for (const pt of pts) {
+    ctx.fillStyle = FLOW_WAVE_ACCENT;
+    ctx.beginPath();
+    ctx.arc(tToX(pt.x, pl), ampToY(pt.a, pl), 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+function drawFlowWidgetUnison(n, r) {
+  const vs = (Array.isArray(n.voices) && n.voices.length) ? n.voices : null;
+  if (!vs) {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '700 10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No voices yet', r.x + 10, r.y + r.h / 2 + 6);
+    ctx.textBaseline = 'alphabetic';
+    return;
+  }
+  const v = vs[Math.min(flowUnisonSel, vs.length - 1)];
+  let y = r.y + 30;
+  for (const d of VOICE_PARAM_DEFS) {
+    const val = +((v && v[d.key] != null) ? v[d.key] : (d.key === 'vol' ? 1 : 0));
+    drawFlowWidgetFader(d.label, val, d.min, d.max, d.fmt, y, r);
+    y += 28;
+  }
+}
+function drawFlowWidgetFader(label, val, min, max, fmt, y, r) {
+  const trackX1 = r.x + 58, trackX2 = r.x + r.w - 54;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '800 9px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, r.x + 10, y);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(trackX1, y); ctx.lineTo(trackX2, y);
+  ctx.stroke();
+  const f = clamp01((val - min) / (max - min));
+  const kx = trackX1 + f * (trackX2 - trackX1);
+  ctx.strokeStyle = FLOW_UNISON_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(trackX1, y); ctx.lineTo(kx, y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(kx, y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineCap = 'butt';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '700 9px sans-serif';
+  ctx.fillText(fmt(val), r.x + r.w - 8, y);
+}
+
+/* ---- Note editor ----
+   A note's editing surface is just its widget grown in place: a big ▶ play
+   button plus an editable Note-life slider (scales the connected volume env).
+   Tapping outside the enlarged card closes it back down. */
+var flowNoteEdit = null;    // id of the note node being edited, or null
+function flowNoteEditorPlay(p) {
+  return { x: p.x + 16, y: p.y + 46, w: p.w - 32, h: 36 };
+}
+function flowNoteEditorLife(p) {
+  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 128 };
+}
+function openFlowNoteEditor(id) {
+  const n = flowNodeById(id);
+  if (!n || n.type !== 'note') return;
+  flowNoteEdit = id;
+  flowAddMenu = null;
+  flowMoveId = null;
+  flowConnArm = null;
+  flowSelId = id;
+}
+function closeFlowNoteEditor() {
+  if (!flowNoteEdit) return;
+  flowNoteEdit = null;
+  saveFlow();
+}
+function drawFlowNoteEditor() {
+  const p = flowNotePanel();
+  const n = flowNodeById(flowNoteEdit);
+  if (!n) return;
+  drawRoundRect(p.x, p.y, p.w, p.h, 14);
+  ctx.fillStyle = 'rgba(14,14,16,0.74)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('🎵  Note', p.x + 16, p.y + 30);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '700 11px sans-serif';
+  ctx.fillText('Aggregates volume + up to 3 waves', p.x + 96, p.y + 30);
+  // Big play button.
+  const ready = flowNoteReady(n);
+  const pb = flowNoteEditorPlay(p);
+  drawRoundRect(pb.x, pb.y, pb.w, pb.h, 10);
+  ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
+  ctx.fill();
+  ctx.strokeStyle = ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.4)';
+  ctx.font = '800 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ready ? '▶ Play sound' : '▶ Needs volume + wave', pb.x + pb.w / 2, pb.y + pb.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+  // Note-life slider (editable here).
+  const env = flowNoteLifeEnv(n);
+  const ms = env ? flowNoteLifeMs(n) : 0;
+  ctx.fillStyle = env ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Note life', p.x + 16, p.y + 128);
+  ctx.textAlign = 'right';
+  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', p.x + p.w - 16, p.y + 128);
+  ctx.textBaseline = 'alphabetic';
+  const s = flowNoteEditorLife(p);
+  ctx.globalAlpha = env ? 1 : 0.4;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y); ctx.lineTo(s.x2, s.y);
+  ctx.stroke();
+  if (env) {
+    const frac = clamp01((ms - FLOW_NOTE_LIFE_MIN) / (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN));
+    const tx = s.x + frac * (s.x2 - s.x);
+    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y); ctx.lineTo(tx, s.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, s.y, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '700 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Tap outside this card to close', p.x + p.w / 2, p.y + p.h - 16);
+  ctx.textBaseline = 'alphabetic';
+}
+function flowNoteHandleDown(x, y) {
+  const p = flowNotePanel();
+  if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowNoteEditor(); return; }
+  const pb = flowNoteEditorPlay(p);
+  if (x >= pb.x && x <= pb.x + pb.w && y >= pb.y && y <= pb.y + pb.h) {
+    const n = flowNodeById(flowNoteEdit);
+    if (n) playFlowNote(n);
+    return;
+  }
+  const s = flowNoteEditorLife(p);
+  if (y >= s.y - 18 && y <= s.y + 18 && x >= s.x - 12 && x <= s.x2 + 12) {
+    const n = flowNodeById(flowNoteEdit);
+    if (n) {
+      flowPushHistory();
+      flowSetNoteLife(n, flowNoteLifeFromX(s, x));
+      flowPtr = { kind: 'noteLife', nodeId: n.id };
+    }
+  }
+}
+function flowNoteHandleMove(x, y) {
+  if (!flowPtr || flowPtr.kind !== 'noteLife') return;
+  const n = flowNodeById(flowPtr.nodeId);
+  if (n) flowSetNoteLife(n, flowNoteLifeFromX(flowNoteEditorLife(flowNotePanel()), x));
+}
+function flowNoteHandleUp() {
+  if (flowPtr && flowPtr.kind === 'noteLife') saveFlow();
+  flowPtr = null;
+}
+// Open the editor for a node (tap on its widget → edit mode, growing in place).
+function openFlowNodeEditor(id) {
+  const n = flowNodeById(id);
+  if (!n) return;
+  if (n.type === 'note') openFlowNoteEditor(id);
+  else if (n.type === 'volumeEnv') openFlowEnvelopeEditor(id);
+  else if (n.type === 'env') openFlowCurveEditor(id);
+  else if (n.type === 'wave') openFlowWaveEditor(id);
+  else if (n.type === 'unison') openFlowUnisonEditor(id);
+}
+
 /* ---- Rendering ---- */
 function drawFlow(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1132,34 +1438,37 @@ function drawFlow(now) {
 
   const g = flowGridArea();
 
-  // ---- Grid squares: white dotted lines, panned by flowCam ----
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 5]);
-  ctx.beginPath();
-  const { gx0, gx1, gy0, gy1 } = flowCellRange();
-  for (let gx = gx0; gx <= gx1; gx++) {
-    const sx = Math.round(gx * FLOW_CELL - flowCam.x);
-    ctx.moveTo(sx, g.top); ctx.lineTo(sx, g.bottom);
-  }
-  for (let gy = gy0; gy <= gy1; gy++) {
-    const sy = Math.round(gy * FLOW_CELL - flowCam.y);
-    ctx.moveTo(g.left, sy); ctx.lineTo(g.right, sy);
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // ---- Cell coordinate labels (bottom-right of each square) ----
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '15px monospace';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'bottom';
-  for (let gy = gy0; gy <= gy1; gy++) {
+  // ---- Grid squares: white dotted lines, panned by flowCam (hidden; kept for
+  // a possible return — flip FLOW_SHOW_GRID) ----
+  if (FLOW_SHOW_GRID) {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 5]);
+    ctx.beginPath();
+    const { gx0, gx1, gy0, gy1 } = flowCellRange();
     for (let gx = gx0; gx <= gx1; gx++) {
-      const p = flowCellScreen(gx, gy);
-      const lx = Math.min(g.right - 3, p.x + FLOW_CELL - 3);
-      const ly = Math.min(g.bottom - 2, p.y + FLOW_CELL - 2);
-      ctx.fillText(gx + ',' + gy, lx, ly);
+      const sx = Math.round(gx * FLOW_CELL - flowCam.x);
+      ctx.moveTo(sx, g.top); ctx.lineTo(sx, g.bottom);
+    }
+    for (let gy = gy0; gy <= gy1; gy++) {
+      const sy = Math.round(gy * FLOW_CELL - flowCam.y);
+      ctx.moveTo(g.left, sy); ctx.lineTo(g.right, sy);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ---- Cell coordinate labels (bottom-right of each square) ----
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = '15px monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    for (let gy = gy0; gy <= gy1; gy++) {
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const p = flowCellScreen(gx, gy);
+        const lx = Math.min(g.right - 3, p.x + FLOW_CELL - 3);
+        const ly = Math.min(g.bottom - 2, p.y + FLOW_CELL - 2);
+        ctx.fillText(gx + ',' + gy, lx, ly);
+      }
     }
   }
 
@@ -1172,61 +1481,22 @@ function drawFlow(now) {
     if (consumer) {
       for (const n of flowNodes) {
         if (!flowConnCanAssign(consumer, flowConnArm.slot, n.id)) continue;
-        const p = flowCellScreen(n.gx, n.gy);
-        const cx = p.x + FLOW_CELL / 2, cy = p.y + FLOW_CELL / 2;
+        const r = flowWidgetRect(n, false);
         ctx.globalAlpha = 0.5 + 0.5 * Math.sin(performance.now() / 250);
         ctx.strokeStyle = '#5cdb7a';
         ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(cx, cy, FLOW_CELL / 2, 0, Math.PI * 2);
+        drawRoundRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6, 14);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
     }
   }
 
-  // ---- Sound nodes ----
+  // ---- Sound nodes: always-visible widget cards (the editing node's enlarged
+  // editor draws in its place, further down). ----
   for (const n of flowNodes) {
-    const p = flowCellScreen(n.gx, n.gy);
-    const cx = p.x + FLOW_CELL / 2, cy = p.y + FLOW_CELL / 2;
-    const sel = n.id === flowSelId;
-    const move = n.id === flowMoveId;
-    if (move) {
-      ctx.globalAlpha = flowFlashAlpha();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.arc(cx, cy, FLOW_CELL / 2 - 2, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    ctx.beginPath();
-    ctx.arc(cx, cy, FLOW_CELL / 2 - 6, 0, Math.PI * 2);
-    ctx.fillStyle = sel ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.10)';
-    ctx.fill();
-    ctx.strokeStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = sel ? 2.5 : 1;
-    ctx.stroke();
-    ctx.font = '44px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(FLOW_NODE_TYPES[n.type].emoji, cx, cy + 2);
-    ctx.textBaseline = 'alphabetic';
-    // Warning badge on a note whose required connections are missing.
-    if (n.type === 'note' && !flowNoteReady(n)) {
-      ctx.beginPath();
-      ctx.arc(cx + FLOW_CELL / 2 - 14, cy - FLOW_CELL / 2 + 14, 11, 0, Math.PI * 2);
-      ctx.fillStyle = '#e06060';
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 13px sans-serif';
-      ctx.fillText('!', cx + FLOW_CELL / 2 - 14, cy - FLOW_CELL / 2 + 14 + 1);
-    }
-    ctx.globalAlpha = 1;
+    if (n.id === flowActiveEditId()) continue;
+    drawFlowWidget(n);
   }
 
   // ---- Add-node menu (around the anchored cell) ----
@@ -1252,47 +1522,7 @@ function drawFlow(now) {
     }
   }
 
-  // ---- In-place property modal (floats beside the selected node) ----
-  const selNode = flowNodeById(flowSelId);
-  if (selNode) {
-    const m = flowModalRect(selNode);
-    drawRoundRect(m.x, m.y, m.w, m.h, 12);
-    ctx.fillStyle = 'rgba(14,14,16,0.74)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    // Header: node type + ✕ close.
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '800 15px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(FLOW_NODE_TYPES[selNode.type].label, m.x + 14, m.y + 28);
-    const close = flowModalCloseRect(m);
-    ctx.beginPath();
-    ctx.arc(close.x + close.w / 2, close.y + close.h / 2, 10, 0, Math.PI * 2);
-    ctx.fillStyle = '#333333';
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '800 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('✕', close.x + close.w / 2, close.y + close.h / 2 + 4);
-    // Modal content (play / edit / note-life / unison voices; no slot rows).
-    drawFlowModal(selNode, m);
-    // Delete button.
-    const del = flowModalDeleteRect(selNode, m);
-    drawRoundRect(del.x, del.y, del.w, del.h, 9);
-    ctx.fillStyle = '#c0392b';
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '800 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🗑 Delete', del.x + del.w / 2, del.y + del.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-  }
-
-  // ---- On-node connection ports (drawn on top of the modal) ----
+  // ---- On-node connection ports (drawn on top of the widgets) ----
   drawFlowPorts();
 
   // ---- Node-list side bar (on top of the grid, before the banner/buttons) ----
@@ -1300,8 +1530,8 @@ function drawFlow(now) {
 
   // ---- Connecting banner (a slot is armed, awaiting a grid tap) ----
   if (flowConnArm) {
-    const bx = flowSideOpen ? FLOW_SIDE_W + 16 : 16;   // clear of the side bar
-    const bw = Math.max(200, Math.min(332, W - 176 - bx));   // clear of the top buttons
+    const bx = flowSideOpen ? FLOW_SIDE_W + 16 : 70;   // clear of the side bar / toggle button
+    const bw = Math.max(200, Math.min(332, W - 176 - bx));   // clear of the top-right buttons
     drawRoundRect(bx, 16, bw, 34, 10);
     ctx.fillStyle = 'rgba(22,26,34,0.95)';
     ctx.fill();
@@ -1316,9 +1546,25 @@ function drawFlow(now) {
     ctx.textBaseline = 'alphabetic';
   }
 
-  // ---- Top-right control row (sidebar / undo / back) ----
+  // ---- Top-left side-bar expand/collapse button (overlays the panel header) ----
+  const sb = flowSideBtnRect();
+  ctx.beginPath();
+  ctx.arc(sb.x + sb.d / 2, sb.y + sb.d / 2, FLOW_BACK_R, 0, Math.PI * 2);
+  ctx.fillStyle = '#2b2b2b';
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(flowSideOpen ? '✕' : '☰', sb.x + sb.d / 2, sb.y + sb.d / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+
+  // ---- Top-right control row (undo / back) ----
   const tbs = flowTopButtonRects();
-  const tbIcons = [['side', flowSideOpen ? '✕' : '☰'], ['undo', '↺'], ['back', '‹']];
+  const tbIcons = [['undo', '↺'], ['back', '‹']];
   for (const [k, glyph] of tbIcons) {
     const b = tbs[k];
     const can = k !== 'undo' || flowHistory.length > 0;
@@ -1337,8 +1583,9 @@ function drawFlow(now) {
     ctx.textBaseline = 'alphabetic';
   }
 
-  // ---- Envelope editor overlay (on top of everything else) ----
-  if (flowEnvEdit) drawFlowEnvEditor();
+  // ---- Editor overlay: the node's enlarged in-place editor (on top) ----
+  if (flowNoteEdit) drawFlowNoteEditor();
+  else if (flowEnvEdit) drawFlowEnvEditor();
   else if (flowWaveEdit) drawFlowWaveEditor();
   else if (flowUnisonEdit) drawFlowUnisonEditor();
   else if (flowCurveEdit) drawFlowCurveEditor();
@@ -1360,22 +1607,29 @@ var flowEnvLastTap = null; // double-tap-to-delete on an envelope boundary
 var flowEnvMode = 'point'; // 'point' | 'draw' | 'line' (segment line types) | 'delete'
 var flowEnvSegFrom = null, flowEnvSegTo = null;   // selected segment (boundary indexes)
 
-// The shared editor panel: a large floating modal anchored near the node being
-// edited (right by default, clamping/flipping to stay on screen), so the rest of
-// the grid stays visible around it.
+// The shared enlarged editor panel: the node's own widget, grown in place at
+// its position (centered on the node, clamped to stay on screen), so the rest
+// of the grid stays visible around it. Tapping outside it ends edit mode.
 function flowEnvPanel() {
-  const w = Math.min(620, W - 32);
-  const h = Math.min(440, H - 32);
-  const id = flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit;
+  const w = Math.min(600, W - 24);
+  const h = Math.min(440, H - 24);
+  const id = flowActiveEditId();
   const n = id ? flowNodeById(id) : null;
-  if (!n) return { x: 16, y: 16, w, h };
-  const p = flowCellScreen(n.gx, n.gy);
-  const nc = p.x + FLOW_CELL / 2, nyc = p.y + FLOW_CELL / 2;
-  let x = nc + FLOW_CELL / 2 + 20;
-  if (x + w > W - 8) x = Math.max(8, nc - FLOW_CELL / 2 - 20 - w);
-  let y = nyc - 60;
-  if (y + h > H - 8) y = nyc + FLOW_CELL / 2 + 20;
-  y = Math.max(8, Math.min(H - 8 - h, y));
+  if (!n) return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  const p = flowNodeScreen(n);
+  const x = Math.max(12, Math.min(W - 12 - w, p.x - w / 2));
+  const y = Math.max(12, Math.min(H - 12 - h, p.y - h / 2));
+  return { x, y, w, h };
+}
+// The note editor's enlarged panel: a more compact card than the graph editors.
+function flowNotePanel() {
+  const w = Math.min(420, W - 24);
+  const h = Math.min(240, H - 24);
+  const n = flowNoteEdit ? flowNodeById(flowNoteEdit) : null;
+  if (!n) return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  const p = flowNodeScreen(n);
+  const x = Math.max(12, Math.min(W - 12 - w, p.x - w / 2));
+  const y = Math.max(12, Math.min(H - 12 - h, p.y - h / 2));
   return { x, y, w, h };
 }
 function flowEnvPlot(p) {
@@ -2959,32 +3213,31 @@ canvas.addEventListener('pointerdown', e => {
   // When an editor dismisses itself on this tap (outside panel or ✕), fall
   // through so the tap also acts on whatever is underneath (ports / nodes /
   // grid). If it handled the tap internally, it stays open and we stop here.
+  if (flowNoteEdit) { flowNoteHandleDown(x, y); if (flowNoteEdit) return; }
   if (flowEnvEdit) { flowEnvHandleDown(x, y); if (flowEnvEdit) return; }
   if (flowWaveEdit) { flowWaveHandleDown(x, y); if (flowWaveEdit) return; }
   if (flowUnisonEdit) { flowUnisonHandleDown(x, y); if (flowUnisonEdit) return; }
   if (flowCurveEdit) { flowCurveHandleDown(x, y); if (flowCurveEdit) return; }
-  // Top-right control row: sidebar toggle, undo, back. Always wins.
-  const top = flowTopHit(x, y);
-  if (top === 'side') {
+  // Top-left side-bar expand/collapse button, then the top-right undo/back.
+  if (flowSideBtnHit(x, y)) {
     flowSideOpen = !flowSideOpen;
     if (!flowSideOpen) flowSideScrollY = 0;
     flowAddMenu = null;
     flowPanAnim = null;
     return;
   }
+  const top = flowTopHit(x, y);
   if (top === 'undo') { undoFlow(); return; }
   if (top === 'back') { closeSoundFlow(); return; }
   // Node-list side bar: rows jump (pan) the camera; the panel stays open.
   if (flowSideOpen && x >= 0 && x <= FLOW_SIDE_W) {
     const s = flowSideRect();
     if (y >= s.y && y <= s.y + s.h) {
-      const close = flowSideCloseRect();
-      if (x >= close.x && x <= close.x + close.w && y >= close.y && y <= close.y + close.h) {
-        flowSideOpen = false;
-        flowSideScrollY = 0;
-        return;
+      if (y < s.y + FLOW_SIDE_HDR) {
+        const cl = flowSideClearRect();
+        if (x >= cl.x && x <= cl.x + cl.w && y >= cl.y && y <= cl.y + cl.h) { clearFlowAll(); }
+        return;   // header: swallow (or the clear-all pill)
       }
-      if (y < s.y + FLOW_SIDE_HDR) return;   // header: swallow
       flowPtr = { kind: 'side', x, y, startX: x, startY: y, lastT: e.timeStamp, vx: 0, vy: 0, moved: false };
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
       return;
@@ -3011,83 +3264,29 @@ canvas.addEventListener('pointerdown', e => {
   // Add-node menu option (create the node).
   const opt = hitAddMenu(x, y);
   if (opt) { addFlowNode(opt.type); return; }
-  // In-place property modal (selected node): close, delete, or content controls.
-  if (flowSelId && flowNodeById(flowSelId)) {
-    const selN = flowNodeById(flowSelId);
-    const m = flowModalRect(selN);
-    if (x >= m.x && x <= m.x + m.w && y >= m.y && y <= m.y + m.h) {
-      const close = flowModalCloseRect(m);
-      if (x >= close.x && x <= close.x + close.w && y >= close.y && y <= close.y + close.h) {
-        flowSelId = null;
-        flowAddMenu = null;
-        flowConnArm = null;
-        saveFlow();
-        return;
-      }
-      // Delete button.
-      const del = flowModalDeleteRect(selN, m);
-      if (x >= del.x && x <= del.x + del.w && y >= del.y && y <= del.y + del.h) {
-        deleteFlowNode(flowSelId);   // clears selection too, so the modal closes
-        return;
-      }
-      // Modal content controls (play / edit / note-life / unison voices).
-      const cH = flowHitModal(x, y, m, selN);
-      if (cH) {
-        if (cH.kind === 'play') {
-          playFlowNote(selN);
-        } else if (cH.kind === 'edit') {
-          if (selN.type === 'volumeEnv') openFlowEnvelopeEditor(flowSelId);
-          else if (selN.type === 'env') openFlowCurveEditor(flowSelId);
-          else openFlowWaveEditor(flowSelId);
-        } else if (cH.kind === 'noteLife') {
-          flowPushHistory();
-          const s = flowNoteLifeSlider(m);
-          flowSetNoteLife(selN, flowNoteLifeFromX(s, x));
-          flowPtr = { kind: 'modal', drag: 'noteLife', nodeId: selN.id };
-          try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-        } else if (cH.kind === 'uned') {
-          openFlowUnisonEditor(flowSelId);
-        } else if (cH.kind === 'vsel') {
-          flowUnisonSel = cH.i;
-        } else if (cH.kind === 'interval') {
-          const v = flowUnisonSelectedOf(selN);
-          if (v) { flowPushHistory(); v.st = cH.st; saveFlow(); }
-        }
-        return;
-      }
-      return;   // modal body: swallow, never pan from here
-    }
-  }
   // Grid: start a pan (a small movement counts as a tap on release). Pressing
-  // on a node also arms the long-press hold.
+  // on a node arms a long-press move/delete hold; pressing empty space arms a
+  // long-press add-menu hold.
   flowAddMenu = null;
   flowInertia = null;
   flowPanAnim = null;
-  const gx = Math.floor((x + flowCam.x) / FLOW_CELL);
-  const gy = Math.floor((y + flowCam.y) / FLOW_CELL);
-  const node = flowNodeAt(gx, gy);
+  const wx = x + flowCam.x, wy = y + flowCam.y;
+  const node = flowNodeAt(wx, wy);
   flowPtr = { kind: 'grid', x, y, startX: x, startY: y, lastT: e.timeStamp, vx: 0, vy: 0, moved: false };
-  if (node) flowHold = { id: node.id, kind: 'grid', t0: performance.now(), stage: 0 };
+  if (node) flowHold = { id: node.id, kind: 'move', t0: performance.now(), stage: 0 };
+  else flowHold = { id: null, kind: 'add', x: wx, y: wy, t0: performance.now(), stage: 0 };
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
 });
 
 canvas.addEventListener('pointermove', e => {
   if (!flowActive) return;
   const x = stageX(e), y = stageY(e);
+  if (flowNoteEdit) { flowNoteHandleMove(x, y); return; }
   if (flowEnvEdit) { flowEnvHandleMove(x, y); return; }
   if (flowWaveEdit) { flowWaveHandleMove(x, y); return; }
   if (flowUnisonEdit) { flowUnisonHandleMove(x, y); return; }
   if (flowCurveEdit) { flowCurveHandleMove(x, y); return; }
   if (!flowPtr) return;
-  // Modal drag (the note-life slider): update straight from the finger's x.
-  if (flowPtr.kind === 'modal') {
-    const n = flowNodeById(flowPtr.nodeId);
-    if (n) {
-      const m = flowModalRect(n);
-      flowSetNoteLife(n, flowNoteLifeFromX(flowNoteLifeSlider(m), x));
-    }
-    return;
-  }
   if (!flowPtr.moved && Math.hypot(x - flowPtr.startX, y - flowPtr.startY) > FLOW_TAP_MAX) {
     flowPtr.moved = true;
     // Moving the finger means it's a drag/scroll, not a long-press: drop the hold.
@@ -3110,12 +3309,13 @@ canvas.addEventListener('pointermove', e => {
 
 canvas.addEventListener('pointerup', e => {
   if (!flowActive) return;
+  if (flowNoteEdit) { flowNoteHandleUp(); return; }
   if (flowEnvEdit) { flowEnvHandleUp(); return; }
   if (flowWaveEdit) { flowWaveHandleUp(); return; }
   if (flowUnisonEdit) { flowUnisonHandleUp(); return; }
   if (flowCurveEdit) { flowCurveHandleUp(); return; }
-  // A held press that reached move mode: consume the release so it doesn't also
-  // select/deselect or open the add menu (the node keeps flashing).
+  // A held press that reached its long-press action (move mode / add menu):
+  // consume the release so it doesn't also select/deselect or act as a tap.
   if (flowHold) {
     const h = flowHold;
     flowHold = null;
@@ -3127,7 +3327,6 @@ canvas.addEventListener('pointerup', e => {
   const tapX = flowPtr.startX, tapY = flowPtr.startY;
   const vx = flowPtr.vx, vy = flowPtr.vy;
   flowPtr = null;
-  if (kind === 'modal') { saveFlow(); return; }   // note-life slider drag ended
   if (kind === 'side') {
     if (wasMoved) return;   // a scroll of the node list
     const jump = flowSideRowAt(tapX, tapY);
@@ -3138,10 +3337,9 @@ canvas.addEventListener('pointerup', e => {
     if (Math.hypot(vx, vy) > FLOW_FLICK_MIN) flowInertia = { vx, vy };
     return;
   }
-  // Tap: pick the cell under the finger.
-  const gx = Math.floor((tapX + flowCam.x) / FLOW_CELL);
-  const gy = Math.floor((tapY + flowCam.y) / FLOW_CELL);
-  const node = flowNodeAt(gx, gy);
+  // Tap: the world point under the finger.
+  const tapWX = tapX + flowCam.x, tapWY = tapY + flowCam.y;
+  const node = flowNodeAt(tapWX, tapWY);
   // Connection slot armed: tapping a node assigns it (kept armed on a wrong
   // type so the user can pick the right node instead). This beats move-mode
   // placement — a deliberate connection action shouldn't get hijacked.
@@ -3155,21 +3353,30 @@ canvas.addEventListener('pointerup', e => {
     }
     return;
   }
-  // Move mode: place the flashing node on this cell (empty cells only).
+  // Move mode: place the flashing node at this point, auto-spacing it from any
+  // neighbours (a tap too close to another node still moves it, then it floats
+  // out to clear spacing).
   if (flowMoveId) {
-    const id = flowMoveId;
-    const t = flowNodeAt(gx, gy);
-    if (!t || t.id === id) moveFlowNodeTo(id, gx, gy);
-    else flowMoveId = null;   // cell occupied by another node: cancel move mode
+    moveFlowNodeTo(flowMoveId, tapWX, tapWY);
     return;
   }
   if (node) {
-    flowSelId = node.id;
-    flowAddMenu = null;
-    saveFlow();
+    // A note widget's ▶ play button is always live: tapping it previews the
+    // sound instead of entering edit mode.
+    if (node.type === 'note') {
+      const wr = flowWidgetRect(node, false);
+      const pb = flowNoteWidgetPlay(wr);
+      if (tapX >= pb.x && tapX <= pb.x + pb.w && tapY >= pb.y && tapY <= pb.y + pb.h) {
+        playFlowNote(node);
+        flowSelId = node.id;
+        return;
+      }
+    }
+    // Tap a widget = enter edit mode: it grows in place (tap outside shrinks it).
+    openFlowNodeEditor(node.id);
   } else {
-    if (flowConnArm) { flowConnArm = null; return; }   // cancelled on an empty cell
-    flowAddMenu = { gx, gy };
+    if (flowConnArm) { flowConnArm = null; return; }   // cancelled on an empty spot
+    flowAddMenu = null;   // a plain tap never opens the add menu — long-press does
     flowSelId = null;
   }
 });
@@ -3182,21 +3389,58 @@ canvas.addEventListener('pointercancel', () => {
   flowInertia = null;
   flowPanAnim = null;
   flowHold = null;
+  flowSepAnim = null;
 });
 
 function flowLoop(now) {
   if (flowActive) {
-    // Long-press hold: move mode at FLOW_HOLD_MOVE.
+    // Long-press hold: move mode on a node (stage 1), then a longer hold on the
+    // same node becomes a delete countdown (stage 2); holding empty space opens
+    // the add menu.
     if (flowHold) {
       const el = performance.now() - flowHold.t0;
       if (flowHold.stage === 0 && el >= FLOW_HOLD_MOVE) {
         flowHold.stage = 1;
-        flowMoveId = flowHold.id;   // start flashing (move mode)
-        flowSelId = flowHold.id;
-        flowAddMenu = null;
+        if (flowHold.kind === 'add') {
+          flowAddMenu = { x: flowHold.x, y: flowHold.y };   // add menu at the held spot
+          flowSelId = null;
+          flowConnArm = null;
+          flowMoveId = null;
+        } else {
+          flowMoveId = flowHold.id;   // start flashing (move mode)
+          flowSelId = flowHold.id;
+          flowAddMenu = null;
+        }
+      }
+      // Keep holding past move mode → switch to the 3-2-1 delete countdown.
+      if (flowHold.kind !== 'add' && flowHold.stage === 1 && el >= FLOW_HOLD_DELETE) {
+        flowHold.stage = 2;
+        flowHold.del0 = performance.now();
+        flowMoveId = null;   // cancel move placement
+      }
+      if (flowHold.stage === 2 && performance.now() - flowHold.del0 >= FLOW_DELETE_MS) {
+        const id = flowHold.id;
+        flowHold = null;
+        deleteFlowNode(id);
       }
     }
-    // Animated pan to a node's cell (sidebar jump) — ease-out cubic.
+    // Float-away separation: a newly added / moved node drifts to clear space,
+    // and the camera pans with it so the node settles in the centre of the screen.
+    if (flowSepAnim) {
+      const n = flowNodeById(flowSepAnim.id);
+      if (n) {
+        const f = clamp01((performance.now() - flowSepAnim.t0) / FLOW_SEP_MS);
+        const e = 1 - Math.pow(1 - f, 3);
+        n.x = mix(flowSepAnim.x0, flowSepAnim.x1, e);
+        n.y = mix(flowSepAnim.y0, flowSepAnim.y1, e);
+        flowCam.x = mix(flowSepAnim.cam0x, flowSepAnim.x1 - W / 2, e);
+        flowCam.y = mix(flowSepAnim.cam0y, flowSepAnim.y1 - H / 2, e);
+        if (f >= 1) { flowSepAnim = null; saveFlow(); }
+      } else {
+        flowSepAnim = null;
+      }
+    }
+    // Animated pan to a node (sidebar jump) — ease-out cubic.
     if (flowPanAnim) {
       const f = clamp01((performance.now() - flowPanAnim.t0) / 350);
       const e = 1 - Math.pow(1 - f, 3);

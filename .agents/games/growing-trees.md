@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.20.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.24.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -154,22 +154,27 @@ that play its same waveform in parallel with per-voice offsets:
 ## Sound flow editor — node types (WIP)
 
 The full-screen sound flow editor (`flow.js`, opened from the bottom-right
-button) arranges sound-definition nodes on a pannable grid and wires them into
-a playable graph. Node types own a slice of the legacy creator's data model and
-are edited in dark-theme anchored overlays that reuse the legacy logic by
-temporarily pointing a shared global at the node's own data (the
-volume-envelope overlay swaps `ENVELOPE`; the wave/unison overlays swap a
-layer-shaped proxy into `OSC_STACK` at `selectedLayerIdx` 0 and restore it on
-close):
+button) arranges sound-definition nodes at **free positions on an infinitely
+pannable canvas** and wires them into a playable graph. The old dotted grid and
+its `gx,gy` coordinate labels are **hidden** (drawing code kept, gated by
+`FLOW_SHOW_GRID = false` in case it returns). Node types own a slice of the
+legacy creator's data model and are edited in dark-theme anchored overlays that
+reuse the legacy logic by temporarily pointing a shared global at the node's own
+data (the volume-envelope overlay swaps `ENVELOPE`; the wave/unison overlays
+swap a layer-shaped proxy into `OSC_STACK` at `selectedLayerIdx` 0 and restore
+it on close):
 
 - `note` (🎵) — the entry point of a sound. Its on-node ports assign the
   connections: a required **volume envelope**, up to **3 waves** (1 required),
-  and each wave's optional **mix envelope**; its modal has a **▶ Play** that
-  compiles the graph and previews it (`compileFlowNote`/`playFlowNote` — builds
-  `ENVELOPE`, `OSC_STACK` layers + per-voice envs, swaps the globals in around
+  and each wave's optional **mix envelope**; its widget card has a **▶ Play**
+  that is always live (tapping it previews, never edits — compiles the graph
+  and previews it via `compileFlowNote`/`playFlowNote`: builds `ENVELOPE`,
+  `OSC_STACK` layers + per-voice envs, swaps the globals in around
   `previewNote`, restores), plus a **Note life** slider that scales the
   connected volume-envelope node's component durations (the legacy
-  `setNoteLifetime`).
+  `setNoteLifetime`). Tapping the note card enters its **note editor**
+  (`flowNoteEdit`, `flowNotePanel`) — a big play button + editable Note-life
+  slider.
 - `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
   the old `envelope` node type (migrated on load). Overlay reuses the legacy
   envelope editor helpers.
@@ -182,8 +187,8 @@ close):
   Point/Draw/**Erase**/Delete modes edit the spectrum (Erase drags flatten the
   swept harmonics to 0 via `flowWaveEraseAt`).
 - `unison` (🦄) — exactly one additional voice `[{ id, st, ct, vol, muted }]`
-  (the first stored voice is kept; defaults to a single voice). Its modal shows
-  a single V1 chip + `VOICE_INTERVALS` chips + a readout; the ✎ chip opens the
+  (the first stored voice is kept; defaults to a single voice). Its widget shows
+  mini read-only faders for the selected voice's st/ct/vol; tapping it opens the
   overlay (interval presets + st/ct/vol faders). On-node ports assign optional
   **vol / st / ct** env connections (compiled to per-voice `envs`).
 
@@ -197,23 +202,56 @@ emoji-labeled **ports around the node itself** (`flowPorts` — note: Vol top +
 W1..W3 right + M1..M3 left; wave: mix top + unison bottom; unison: Vol/St/Ct
 left). Tap a port to arm it ("Connecting…"), tap a valid source node to assign,
 tap the port again to cancel, a filled port's ✕ clears it; wires terminate at
-the consumer's port anchor. Selected nodes open a small semi-transparent
-**property modal** (`flowModalRect`/`drawFlowModal`) beside the node (flips
-sides / clamps to stay on screen) with the play / edit / note-life / unison /
-delete controls. Editing overlays are larger anchored transparent modals
-(`flowEnvPanel`, `rgba(14,14,16,0.74)`) near the edited node. Grid/nodes are
-scaled up via `FLOW_CELL = 88`.
+ the consumer's port anchor. **Every node is an always-visible widget card**
+ (`flowWidgetRect`/`drawFlowWidget`) that shows its values read-only — a mini
+ envelope/curve/spectrum plot for volumeEnv/env/wave, mini faders for unison,
+ a ▶ play + Note-life slider for a note — **sized to fit exactly**
+ (`flowWidgetSize`; the single place to tune sizes, where a future per-node
+ scale factor can fold in). **Tapping a card enters edit mode**: the node grows
+ **in place** into its full editor (the panel is centered on the node's
+ position via `flowEnvPanel`/`flowNotePanel`, clamped to the screen), and
+ **tapping outside it shrinks it back** (editors close on an outside tap).
+ Cards are drawn on a `rgba(20,20,24,0.92)` background; the enlarged editor
+ overlay uses `rgba(14,14,16,0.74)`.
+
+**Placement & spacing.** Nodes store a world-px centre (`x,y`, no grid); a node
+"exists" at a spot when the point falls inside its widget card's bounds plus a
+small pad (`flowNodeAt`, rect-based). The
+**first node ever placed** (i.e. when no nodes exist yet) becomes the world
+origin: `addFlowNode` shifts the camera by the node's position so it's stored
+at `0,0` yet still appears exactly where it was placed — and the origin
+re-anchors this way whenever a new first node is created after all nodes have
+been deleted (mass delete or otherwise). A
+**long-press** (500 ms) on an empty spot opens the **add menu** anchored there
+ (`flowAddMenu` = `{x,y}` world coords); a **plain tap never opens it** — it only
+ dismisses any open add menu (and clears selection). Long-press a **node** to
+ enter move mode (it flashes); the next tap moves it anywhere. **Hold it longer
+ still** (≥ `FLOW_HOLD_DELETE = 1200` ms) to start a **delete countdown** — the
+ card turns red with a 3-2-1 (`FLOW_DELETE_MS = 3000`) overlay; releasing early
+ cancels, reaching 0 deletes the node (`deleteFlowNode`). There is **no delete
+ button** anywhere. Both adds and
+moves then run **float-away separation**: the affected node is pushed out of
+every neighbour until its centre is ≥ `FLOW_NODE_SEP = 190` px from the rest
+(only that node moves — existing nodes stay put) and drifts there with a 250 ms
+ease-out (`flowSepAnim`), leaving room for the wires. The camera pans with the
+drift, so the node settles in the centre of the screen.
 
 **No bottom bar.** Navigation is a read-only **node-list side bar**
-(`flowSideRect`/`drawFlowSide`, left edge, `FLOW_SIDE_W = 250`): the ☰ top-right
-button (or the header ✕) opens/closes it; each row lists a node's emoji, type,
-and `gx,gy`; tapping a row pans the camera to it (`panToNode`) and the list
-stays open — no selection/editing happens there. All editing (select, move via
-long-press, delete via the property modal, connect via ports) happens on the
-field. Top-right control row: ☰ sidebar toggle, ↺ undo, ‹ back
-(`flowTopButtonRects`/`flowTopHit`).
+(`flowSideRect`/`drawFlowSide`, left edge, `FLOW_SIDE_W = 250`): a ☰ button at
+the **top-left** (`flowSideBtnRect`, overlaying the panel's header while open)
+expands/collapses it; each row lists a node's emoji, type, and its position in
+grid-cell units (world px ÷ `FLOW_CELL`, 2 decimals — the old grid's scale);
+tapping a row pans the camera to it (`panToNode`) and the list
+stays open — no selection/editing happens there. A red **🗑 Clear all** pill in
+the panel header (`flowSideClearRect`) wipes every node and returns the camera
+to the world origin — undoable, and undo restores the camera too (history
+snapshots carry the camera, so every undo returns the view to where the action
+happened). All editing (tap a widget to edit, long-press to move, longer hold
+for the delete countdown, connect via ports) happens on the field. Top-right
+control row: ↺ undo, ‹ back (`flowTopButtonRects`/`flowTopHit`).
 
-Persistence: nodes save under the same `growingTrees.flow.v1` key; `loadFlow`
+Persistence: nodes save under the same `growingTrees.flow.v1` key, storing their
+world-px `x,y`; `loadFlow` migrates old `gx,gy` grid saves to cell centres,
 migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
 `envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Edits are
 coalesced into one undo entry per overlay session; undo closes any open overlay
@@ -221,7 +259,7 @@ before restoring.
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.20.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.25.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
