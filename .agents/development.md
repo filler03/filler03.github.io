@@ -22,6 +22,23 @@ There is **no build system, no bundler, no package.json, and no dependencies** f
 - **Touch + mouse** input support in all games
 - **Dark themes** with gradients and glassmorphism as the default visual style
 
+### Running Long-Lived Processes (Local Server / Headless Chrome)
+
+Launching a long-lived process directly from the opencode shell tool **blocks the tool until it times out** (each blocked command burns the full 2-minute default). `pkill` on those processes has the same hang. Rules that work:
+
+1. **Launch detached** in a subshell so the shell returns immediately:
+   ```bash
+   (setsid python3 -m http.server 8123 >/tmp/opencode/http.log 2>&1 &)
+   (setsid /path/to/chrome --headless=new --no-sandbox --remote-debugging-port=9333 --user-data-dir=/tmp/opencode/chrome-prof about:blank </dev/null >/tmp/opencode/chrome.log 2>&1 &)
+   ```
+2. **Kill by PID, never `pkill`**:
+   ```bash
+   PID=$(pgrep -f "http.server 8123" | head -1); [ -n "$PID" ] && kill -9 "$PID"
+   ```
+3. Give the server a second to come up before connecting.
+
+A working headless-Chrome smoke-test script is kept in `/tmp/opencode/` (throwaway): serve the repo over HTTP, connect to the page via CDP with Node's built-in `WebSocket`, enable `Runtime`/`Page`, drive taps with `Input.dispatchMouseEvent`, assert game globals via `Runtime.evaluate`, and check for `Runtime.exceptionThrown`/`Log.entryAdded` errors. Rebuild the script fresh each session — never reuse a stale one.
+
 ## Multiplayer Servers (`apps/`)
 
 ### No External Dependencies

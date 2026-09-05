@@ -197,7 +197,10 @@ it on close):
   aligned beside the fader it drives (Semitones / Cents / Volume); while an env
   is connected, that fader (and the semitone interval chips, for st) is locked —
   rendered greyed with an `ENV` readout and inert until the connection is
-  removed (`flowUnisonParamLocked`).
+  removed (`flowUnisonParamLocked`). In the overlay a locked fader shows a
+  **Disconnect** button (`flowUnisonDisconnectEnv`) that severs the env
+  connection (coalesced into the session's undo entry) and immediately
+  re-enables the fader/chips.
 
 Connections are consumer-owned named slots (`conn` on each node): the note has
 `{ volumeEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison[] }` (a wave
@@ -277,7 +280,11 @@ snapshots carry the camera, so every undo returns the view to where the action
 happened). All editing (tap a widget to edit, long-press to move, longer hold
 for the delete countdown, connect via ports) happens on the field. ↺ undo sits
 top-right and the ‹ back-to-playing-field button sits **bottom-right**
-(`flowTopButtonRects`/`flowTopHit`) — away from the editors' corners. The
+(`flowTopButtonRects`/`flowTopHit`) — away from the editors' corners. The two
+buttons are drawn **on top of the editor overlays** and win the pointerdown
+hit-test, so the undo button stays visible and tappable while an editor is open
+(no need to exit edit mode first — undo reverts the session's edits in place
+and leaves the editor open). The
 editor windows have **no ✕ button**; tapping anywhere outside a window closes
 it (each editor's `*HandleDown` dismisses on an outside tap).
 
@@ -285,8 +292,11 @@ Persistence: nodes save under the same `growingTrees.flow.v1` key, storing their
 world-px `x,y`; `loadFlow` migrates old `gx,gy` grid saves to cell centres,
 migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
 `envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Edits are
-coalesced into one undo entry per overlay session; undo closes any open overlay
-before restoring.
+coalesced into one undo entry per overlay session; undo **never leaves edit
+mode** — it pops the session's snapshot, restores, and reopens the same editor
+(`flowActiveEditId` + `openFlowNodeEditor`). If an open editor has **not**
+changed anything yet, pressing undo does nothing (no unrelated earlier snapshot
+is popped — `flowEditorPending` gates the pop).
 
 ## Maintenance Notes
 
