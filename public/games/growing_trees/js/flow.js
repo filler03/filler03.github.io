@@ -32,8 +32,7 @@ const FLOW_CELL = 88;           // node size basis (px): the old grid cell, kept
 const FLOW_SHOW_GRID = false;   // draw the old dotted grid + cell coordinates? (kept for a possible return)
 const FLOW_NODE_SEP = 190;      // min centre-to-centre distance between nodes (float-away spacing; widgets are wider than cells)
 const FLOW_SEP_MS = 250;        // duration of the float-away separation animation
-const FLOW_BACK_R = 22;         // top-right round button radius (sidebar / undo / back)
-const FLOW_TOP_BTN_GAP = 14;    // gap between the top-right buttons
+const FLOW_BACK_R = 22;         // round button radius (sidebar / undo / back)
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
 const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
@@ -98,14 +97,14 @@ const FLOW_SAVE_KEY = 'growingTrees.flow.v1';
 function flowGridArea() {
   return { top: 0, bottom: H, left: 0, right: W };
 }
-// The top-right control row: undo and back (rightmost), as two round buttons.
+// The control buttons: undo at top-right, and the back-to-playing-field button
+// at bottom-right (kept away from the editors' corners so it can't be tapped
+// when dismissing a window).
 function flowTopButtonRects() {
   const d = FLOW_BACK_R * 2;
-  const backX = W - 16 - d;
-  const undoX = backX - d - FLOW_TOP_BTN_GAP;
   return {
-    undo: { x: undoX, y: 16, d },
-    back: { x: backX, y: 16, d },
+    undo: { x: W - 16 - d, y: 16, d },
+    back: { x: W - 16 - d, y: H - 16 - d, d },
   };
 }
 function flowTopHit(x, y) {
@@ -1419,9 +1418,12 @@ function flowNoteHandleUp() {
   flowPtr = null;
 }
 // Open the editor for a node (tap on its widget → edit mode, growing in place).
+// The camera pans to center the node while the editor is open, so the enlarged
+// window settles in the middle of the screen.
 function openFlowNodeEditor(id) {
   const n = flowNodeById(id);
   if (!n) return;
+  panToNode(n);
   if (n.type === 'note') openFlowNoteEditor(id);
   else if (n.type === 'volumeEnv') openFlowEnvelopeEditor(id);
   else if (n.type === 'env') openFlowCurveEditor(id);
@@ -1562,7 +1564,7 @@ function drawFlow(now) {
   ctx.fillText(flowSideOpen ? '✕' : '☰', sb.x + sb.d / 2, sb.y + sb.d / 2 + 1);
   ctx.textBaseline = 'alphabetic';
 
-  // ---- Top-right control row (undo / back) ----
+  // ---- Control buttons: undo (top-right) and back-to-playing-field (bottom-right) ----
   const tbs = flowTopButtonRects();
   const tbIcons = [['undo', '↺'], ['back', '‹']];
   for (const [k, glyph] of tbIcons) {
@@ -1609,10 +1611,12 @@ var flowEnvSegFrom = null, flowEnvSegTo = null;   // selected segment (boundary 
 
 // The shared enlarged editor panel: the node's own widget, grown in place at
 // its position (centered on the node, clamped to stay on screen), so the rest
-// of the grid stays visible around it. Tapping outside it ends edit mode.
+// of the grid stays visible around it. Tapping outside it ends edit mode. The
+// size is a fixed px target (not a screen percentage) so on large screens like
+// an iPad it stays a modest window; it only clamps down to fit a small screen.
 function flowEnvPanel() {
-  const w = Math.min(600, W - 24);
-  const h = Math.min(440, H - 24);
+  const w = Math.min(520, W - 24);
+  const h = Math.min(360, H - 24);
   const id = flowActiveEditId();
   const n = id ? flowNodeById(id) : null;
   if (!n) return { x: (W - w) / 2, y: (H - h) / 2, w, h };
@@ -1635,9 +1639,6 @@ function flowNotePanel() {
 function flowEnvPlot(p) {
   const top = p.y + 140, bottom = p.y + p.h - 28, left = p.x + 32, right = p.x + p.w - 18;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
-}
-function flowEnvCloseRect(p) {
-  return { x: p.x + p.w - 48, y: p.y + 8, w: 38, h: 38 };
 }
 function flowEnvClearPill(p) {
   return { x: p.x + p.w - 70, y: p.y + 46, w: 54, h: 26 };
@@ -1857,15 +1858,6 @@ function drawFlowEnvEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Shapes this node’s volume over its note', p.x + 86, p.y + 30);
-  const cl = flowEnvCloseRect(p);
-  ctx.beginPath();
-  ctx.arc(cl.x + cl.w / 2, cl.y + cl.h / 2, 14, 0, Math.PI * 2);
-  ctx.fillStyle = '#333333';
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 15px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('✕', cl.x + cl.w / 2, cl.y + cl.h / 2 + 5);
   // Mode toolbar.
   for (const b of flowEnvToolbar(p)) {
     const active = flowEnvMode === b.mode;
@@ -2115,10 +2107,8 @@ function flowEnvHitBoundary(x, y, pl) {
 function flowEnvHandleDown(x, y) {
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p);
-  // Close (✕) — or tap anywhere outside the panel to dismiss.
+  // Tap anywhere outside the panel to dismiss (no ✕ button).
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowEnvelopeEditor(); return; }
-  const cl = flowEnvCloseRect(p);
-  if (x >= cl.x && x <= cl.x + cl.w && y >= cl.y && y <= cl.y + cl.h) { closeFlowEnvelopeEditor(); return; }
   // Mode toolbar.
   for (const b of flowEnvToolbar(p)) {
     if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
@@ -2261,7 +2251,6 @@ var flowWaveMode = 'point';  // 'point' | 'draw' | 'erase' | 'delete'
 
 function flowWavePanel() { return flowEnvPanel(); }
 function flowWavePlot(p) { return flowEnvPlot(p); }
-function flowWaveCloseRect(p) { return flowEnvCloseRect(p); }
 function flowWaveClearPill(p) { return flowEnvClearPill(p); }
 function flowWaveToolbar(p) {
   const modes = [['point', 'Point'], ['draw', 'Draw'], ['erase', 'Erase'], ['delete', 'Delete']];
@@ -2373,15 +2362,6 @@ function drawFlowWaveEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Harmonic structure · overtones 1–32', p.x + 86, p.y + 30);
-  const cl = flowWaveCloseRect(p);
-  ctx.beginPath();
-  ctx.arc(cl.x + cl.w / 2, cl.y + cl.h / 2, 14, 0, Math.PI * 2);
-  ctx.fillStyle = '#333333';
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 15px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('✕', cl.x + cl.w / 2, cl.y + cl.h / 2 + 5);
   // Mode toolbar.
   for (const b of flowWaveToolbar(p)) {
     const active = flowWaveMode === b.mode;
@@ -2499,8 +2479,6 @@ function flowWaveHandleDown(x, y) {
   const p = flowWavePanel();
   const pl = flowWavePlot(p);
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowWaveEditor(); return; }
-  const cl = flowWaveCloseRect(p);
-  if (x >= cl.x && x <= cl.x + cl.w && y >= cl.y && y <= cl.y + cl.h) { closeFlowWaveEditor(); return; }
   // Mode toolbar.
   for (const b of flowWaveToolbar(p)) {
     if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
@@ -2607,7 +2585,6 @@ var flowUnisonSel = 0;        // index of the selected voice
 var flowUnisonDrag = null;    // { key } active fader drag, or null
 
 function flowUnisonPanel() { return flowEnvPanel(); }
-function flowUnisonCloseRect(p) { return flowEnvCloseRect(p); }
 function flowUnisonSelectedVoice() {
   const vs = layerVoices(selectedLayer());
   return (flowUnisonSel >= 0 && vs[flowUnisonSel]) ? vs[flowUnisonSel] : null;
@@ -2706,15 +2683,6 @@ function drawFlowUnisonEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('One extra voice playing the same wave', p.x + 86, p.y + 30);
-  const cl = flowUnisonCloseRect(p);
-  ctx.beginPath();
-  ctx.arc(cl.x + cl.w / 2, cl.y + cl.h / 2, 13, 0, Math.PI * 2);
-  ctx.fillStyle = '#333333';
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 15px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('✕', cl.x + cl.w / 2, cl.y + cl.h / 2 + 4);
   // Interval preset chips (semitones for the single voice).
   for (const ic of flowUnisonIntervals(p)) {
     const on = v && Math.round(+v.st || 0) === ic.st;
@@ -2790,8 +2758,6 @@ function drawFlowUnisonEditor() {
 function flowUnisonHandleDown(x, y) {
   const p = flowUnisonPanel();
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowUnisonEditor(); return; }
-  const cl = flowUnisonCloseRect(p);
-  if (x >= cl.x && x <= cl.x + cl.w && y >= cl.y && y <= cl.y + cl.h) { closeFlowUnisonEditor(); return; }
   // Interval preset chips (semitone jumps for the single voice).
   const v = flowUnisonSelectedVoice();
   if (v) {
@@ -2838,7 +2804,6 @@ var flowCurveMode = 'point';  // 'point' | 'draw' | 'delete'
 
 function flowCurvePanel() { return flowEnvPanel(); }
 function flowCurvePlot(p) { return flowEnvPlot(p); }
-function flowCurveCloseRect(p) { return flowEnvCloseRect(p); }
 function flowCurveClearPill(p) { return flowEnvClearPill(p); }
 function flowCurveToolbar(p) {
   const modes = [['point', 'Point'], ['draw', 'Draw'], ['delete', 'Delete']];
@@ -2927,15 +2892,6 @@ function drawFlowCurveEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Neutral curve · 0 = no change · consumers decide the meaning', p.x + 86, p.y + 30);
-  const cl = flowCurveCloseRect(p);
-  ctx.beginPath();
-  ctx.arc(cl.x + cl.w / 2, cl.y + cl.h / 2, 14, 0, Math.PI * 2);
-  ctx.fillStyle = '#333333';
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 15px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('✕', cl.x + cl.w / 2, cl.y + cl.h / 2 + 5);
   // Mode toolbar.
   for (const b of flowCurveToolbar(p)) {
     const active = flowCurveMode === b.mode;
@@ -3042,8 +2998,6 @@ function flowCurveHandleDown(x, y) {
   const p = flowCurvePanel();
   const pl = flowCurvePlot(p);
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowCurveEditor(); return; }
-  const cl = flowCurveCloseRect(p);
-  if (x >= cl.x && x <= cl.x + cl.w && y >= cl.y && y <= cl.y + cl.h) { closeFlowCurveEditor(); return; }
   for (const b of flowCurveToolbar(p)) {
     if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
       flowCurveMode = b.mode;

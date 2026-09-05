@@ -206,13 +206,17 @@ tap the port again to cancel, a filled port's ✕ clears it; wires terminate at
  (`flowWidgetRect`/`drawFlowWidget`) that shows its values read-only — a mini
  envelope/curve/spectrum plot for volumeEnv/env/wave, mini faders for unison,
  a ▶ play + Note-life slider for a note — **sized to fit exactly**
- (`flowWidgetSize`; the single place to tune sizes, where a future per-node
- scale factor can fold in). **Tapping a card enters edit mode**: the node grows
- **in place** into its full editor (the panel is centered on the node's
- position via `flowEnvPanel`/`flowNotePanel`, clamped to the screen), and
- **tapping outside it shrinks it back** (editors close on an outside tap).
- Cards are drawn on a `rgba(20,20,24,0.92)` background; the enlarged editor
- overlay uses `rgba(14,14,16,0.74)`.
+(`flowWidgetSize`; the single place to tune sizes, where a future per-node
+  scale factor can fold in). **Tapping a card enters edit mode**: the node grows
+  **in place** into its full editor (the panel is centered on the node's
+  position via `flowEnvPanel`/`flowNotePanel`, clamped to the screen), and
+  **tapping outside it shrinks it back** (editors close on an outside tap).
+  Opening an editor also **pans the camera to center the node** (`panToNode`
+  from `openFlowNodeEditor`), so the enlarged window settles mid-screen.
+  The graph editors' window is a **fixed px size** (`flowEnvPanel`: 520×360 —
+  it clamps down only to fit a small screen, never grows with the screen, so it
+  stays a modest window on an iPad). Cards are drawn on a `rgba(20,20,24,0.92)`
+  background; the enlarged editor overlay uses `rgba(14,14,16,0.74)`.
 
 **Placement & spacing.** Nodes store a world-px centre (`x,y`, no grid); a node
 "exists" at a spot when the point falls inside its widget card's bounds plus a
@@ -247,8 +251,11 @@ the panel header (`flowSideClearRect`) wipes every node and returns the camera
 to the world origin — undoable, and undo restores the camera too (history
 snapshots carry the camera, so every undo returns the view to where the action
 happened). All editing (tap a widget to edit, long-press to move, longer hold
-for the delete countdown, connect via ports) happens on the field. Top-right
-control row: ↺ undo, ‹ back (`flowTopButtonRects`/`flowTopHit`).
+for the delete countdown, connect via ports) happens on the field. ↺ undo sits
+top-right and the ‹ back-to-playing-field button sits **bottom-right**
+(`flowTopButtonRects`/`flowTopHit`) — away from the editors' corners. The
+editor windows have **no ✕ button**; tapping anywhere outside a window closes
+it (each editor's `*HandleDown` dismisses on an outside tap).
 
 Persistence: nodes save under the same `growingTrees.flow.v1` key, storing their
 world-px `x,y`; `loadFlow` migrates old `gx,gy` grid saves to cell centres,
@@ -259,7 +266,7 @@ before restoring.
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.25.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.29.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).

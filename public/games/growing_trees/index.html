@@ -241,6 +241,10 @@
   body.flow #statHud,
   body.flow #version,
   body.flow #soundOverlay { display: none; }
+  /* The flow editor is black; make the body behind the safe-area canvas black
+     too, so notched/rounded-corner devices don't show white stripes at the
+     screen edges. */
+  body.flow { background: #000; }
   #settingsPanel {
     position: fixed;
     top: 0; right: 0; bottom: 0; left: 0;
@@ -555,7 +559,7 @@
 <canvas id="scene"></canvas>
 <select id="creatorPoints" aria-label="Draw point count"></select>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.25.0</div>
+<div id="version">v1.29.0</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
