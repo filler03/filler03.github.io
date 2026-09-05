@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.24.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.30.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -178,10 +178,12 @@ it on close):
 - `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
   the old `envelope` node type (migrated on load). Overlay reuses the legacy
   envelope editor helpers.
-- `env` (📈) — kind-agnostic breakpoint curve `{ points: [{t, v}] }`, v ∈ −1..1
-  with **0 = neutral**. Consumers decide the meaning: a wave's mix envelope maps
-  v → mix weight `1+v` (0 = full), a unison's st/ct/vol animation envelopes map
-  to `v·24` / `v·100` / `1+v`. Overlay is a Point/Draw/Delete curve editor.
+- `env` (📈) — kind-agnostic breakpoint curve `{ points: [{t, v, seg?}], trim }`,
+  v ∈ −1..1 with **0 = neutral**. Consumers decide the meaning: a wave's mix
+  envelope maps v → mix weight `1+v` (0 = full), a unison's st/ct/vol animation
+  envelopes map to `v·24` / `v·100` / `1+v`. Each point owns the span from
+  itself to the next, so spans carry **segment line types** (Line / Stairs /
+  Spring / Pulse) that the audio engine honors (`curveValue` / `envValueAt`).
 - `wave` (🌊) — harmonic structure `{ amplitudes[32], specPoints, presetId }`;
   on-node ports assign an optional **mix env** and **unison**. The overlay's
   Point/Draw/**Erase**/Delete modes edit the spectrum (Erase drags flatten the
@@ -217,6 +219,19 @@ tap the port again to cancel, a filled port's ✕ clears it; wires terminate at
   it clamps down only to fit a small screen, never grows with the screen, so it
   stays a modest window on an iPad). Cards are drawn on a `rgba(20,20,24,0.92)`
   background; the enlarged editor overlay uses `rgba(14,14,16,0.74)`.
+
+**Graph editors are gesture-driven (no mode toolbar).** The 📉 Envelope and 📈
+Env curve overlays have **no Point/Draw/Delete buttons** — the gesture decides
+the mode on each press inside the plot: grabbing a **dot** moves it; **tap +
+drag empty space** adds a point and drags it; a **swipe starting in the left
+edge strip** of the plot (`FLOW_ENV_DRAW_ZONE` = 26 px) scribbles draw mode;
+**tapping a line segment** selects it and opens the line-mode strip **docked at
+the top of the editor window** (Line/Stairs/Spring/Pulse pills + the active
+type's params — no floating card over the plot). **Drag a dot off the graph and
+release to delete it** — a 🗑 pill appears while it's outside the plot
+(protected anchors and the last envelope component can't be deleted; the dot's
+data stays clamped while its visual rides the finger). HOLD/CUT/REL marker tabs,
+the trim slider, and the Clear pill are unchanged.
 
 **Placement & spacing.** Nodes store a world-px centre (`x,y`, no grid); a node
 "exists" at a spot when the point falls inside its widget card's bounds plus a
@@ -266,7 +281,7 @@ before restoring.
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.29.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.30.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).

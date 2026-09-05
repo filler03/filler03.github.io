@@ -749,7 +749,7 @@ function initLivePathAudio(ds) {
   const ctx0 = audioCtx.currentTime;
   // A new note on a pitch steals the voice already ringing there (retrigger),
   // so rapid taps on one band restrike instead of stacking voices.
-  ds.pitch = pitchFor(ds.startX, ds.startY);
+  ds.pitch = ds.pitchOverride || pitchFor(ds.startX, ds.startY);
   retriggerPitch(ds.pitch, ds);
   const gain = audioCtx.createGain();
   const g = gain.gain;

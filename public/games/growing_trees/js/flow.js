@@ -16,12 +16,17 @@
    Connections are consumer-owned slots shown as emoji-labeled ports on the
    node's own edges (tap a port to arm it, tap a node on the grid to connect,
    tap the port again to cancel, its ✕ clears); wires render as colored beziers
-   from a source to the consumer's port. Every node is an always-visible widget
+   from a source to the consumer's port, colored by the source node's type (tap
+   a wire to select it — long-press it to delete, and off-screen endpoints get
+   edge jump buttons). Every node is an always-visible widget
    card that shows its values (mini envelope / curve / spectrum / faders / play
    + note-life) read-only, sized to fit exactly. Tapping a widget enters edit
    mode: it grows in place into its full editor (envelope / wave / curve /
-   unison / note), and tapping outside it shrinks it back. The ▶ Play button on
-   a note widget is always live. Long-press a node to move it (flash + tap to
+   unison / note), and tapping outside it shrinks it back. A note widget offers
+   four always-live ▶ play options: tap (body through the cut, then release),
+   full length (whole note), live (press & hold — sustains the body, release
+   plays the tail), and repeat (loops the tap / full options until stopped).
+   Long-press a node to move it (flash + tap to
    place); hold it longer and a 3-2-1 countdown deletes it (release to cancel).
    The ☰ top-left button opens a read-only node-list side bar (tap a row to pan
    to that node); all editing happens on the field.
@@ -35,6 +40,7 @@ const FLOW_SEP_MS = 250;        // duration of the float-away separation animati
 const FLOW_BACK_R = 22;         // round button radius (sidebar / undo / back)
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
 const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
+const FLOW_MIX_PORT_DIST = 55;  // a note's mix port sits this far (px) along its wave's wire, close to the note
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
 const FLOW_HOLD_DELETE = 1200;  // ms of a continued hold (past move mode) before the delete countdown starts
 const FLOW_DELETE_MS = 3000;    // delete countdown duration: a 3-2-1 hold before the node is deleted
@@ -44,8 +50,19 @@ const FLOW_SIDE_ROW_H = 44;     // side bar row height
 const FLOW_HISTORY_MAX = 50;    // undo stack depth
 const FLOW_WAVE_ACCENT = '#4fc3f7';      // wave-editor plot accent (cyan)
 const FLOW_UNISON_ACCENT = '#d98cff';    // unison-editor accent (violet)
-// Wire colors, keyed by connection-slot role.
-const FLOW_WIRE_COLORS = {
+const FLOW_ENV_DRAW_ZONE = 26;           // px strip inside a plot's left border: a swipe starting here is draw mode
+const FLOW_ENV_HEADER_H = 24;            // extra header room above the graph editors' plot for the docked line-mode strip
+// Wire colors: a connection line's color comes from the SOURCE ("from") node's
+// type — each type has its own accent. A filled port inherits its source's
+// color (so the port matches the wire); an empty port keeps a role-based hint
+// (FLOW_ROLE_COLORS) for what could connect there.
+const FLOW_SOURCE_COLORS = {
+  wave: FLOW_WAVE_ACCENT,      // 🌊 → cyan
+  volumeEnv: '#4caf50',        // 📉 → green
+  env: '#ffb74d',              // 📈 → orange
+  unison: '#ba68c8',           // 🦄 → violet
+};
+const FLOW_ROLE_COLORS = {
   volumeEnv: '#4caf50',
   waves: FLOW_WAVE_ACCENT,
   mixEnvs: '#ffb74d',
@@ -55,6 +72,10 @@ const FLOW_WIRE_COLORS = {
   stEnv: '#64b5f6',
   ctEnv: '#f48fb1',
 };
+// The color of a wire / filled port, from the source node's type.
+function flowSourceColor(node) {
+  return (node && FLOW_SOURCE_COLORS[node.type]) || '#bdbdbd';
+}
 
 // Node types: the add-menu option and the node's grid image share its emoji.
 // `wave` defines the node's harmonic structure (a 32-harmonic spectrum, like a
@@ -81,6 +102,7 @@ const FLOW_FLICK_STOP = 0.001;  // px/ms at which inertia settles and stops
 
 var flowNodes = [];             // [{ id, x, y, type, noteLife }] placed sound nodes (x,y = world px centre)
 var flowSelId = null;           // id of the selected node (attribute panel shown for it)
+var flowSelConn = null;         // { nodeId, slot } the selected connection wire (edge jump buttons shown), or null
 var flowAddMenu = null;         // { x, y } open add-node menu anchor (world px), or null
 var flowSideOpen = false;       // node-list side bar open?
 var flowSideScrollY = 0;        // vertical scroll offset of the side-bar list
@@ -183,10 +205,20 @@ function flowWidgetRect(node, editing) {
 function flowActiveEditId() {
   return flowNoteEdit || flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit || null;
 }
-// A note widget's ▶ play button and its note-life slider track, laid out for
-// whatever rect it is drawn in (idle widget or enlarged note editor).
-function flowNoteWidgetPlay(r) {
-  return { x: r.x + 10, y: r.y + 30, w: r.w - 20, h: 26 };
+// A note widget's four ▶ play buttons (tap / full / live / repeat) and its
+// note-life slider track, laid out for whatever rect they are drawn in (idle
+// widget or enlarged note editor). The widget squeezes them into a row; the
+// editor stacks them full-width below the header.
+function flowNoteWidgetButtons(r) {
+  const gap = 4, n = 4;
+  const w = (r.w - 20 - (n - 1) * gap) / n;
+  const y = r.y + 30, h = 26;
+  return {
+    tap:    { x: r.x + 10, y, w, h },
+    full:   { x: r.x + 10 + (w + gap), y, w, h },
+    live:   { x: r.x + 10 + 2 * (w + gap), y, w, h },
+    repeat: { x: r.x + 10 + 3 * (w + gap), y, w, h },
+  };
 }
 function flowNoteWidgetLife(r) {
   return { x: r.x + 62, x2: r.x + r.w - 10, y: r.y + 74 };
@@ -227,8 +259,10 @@ function defaultUnisonVoices() {
 }
 // A generic env node's default curve: flat at 0 — the neutral value that is a
 // no-op for every consumer (mix = full, st/ct = no bend, voice vol = 1×).
+// `trim` is a whole-curve vertical offset in the −1..1 graph units, like the
+// volume envelope's trim slider (0 = the curve as designed).
 function defaultEnvCurve() {
-  return { points: [{ t: 0, v: 0 }, { t: 1, v: 0 }] };
+  return { points: [{ t: 0, v: 0 }, { t: 1, v: 0 }], trim: 0 };
 }
 
 /* ---- Connections ----
@@ -287,7 +321,6 @@ function flowSlotRows(node) {
       });
     }
   } else if (node.type === 'wave') {
-    rows.push({ slot: { key: 'mixEnv' }, label: 'Mix env', y: 0 });
     rows.push({ slot: { key: 'unison' }, label: 'Unison', y: 0 });
   } else if (node.type === 'unison') {
     rows.push({ slot: { key: 'volEnv' }, label: 'Vol env', y: 0 });
@@ -331,13 +364,21 @@ function flowNoteReady(note) {
   const c = flowNodeConn(note);
   return !!c.volumeEnv && !!c.waves.some(Boolean);
 }
+// Clear a slot and, for a note's wave slot, its paired mix-env slot (the mix
+// port rides that wave's wire, so it must not outlive the wave connection).
+function connSlotClearPair(node, slot) {
+  connSlotSet(node, slot, null);
+  if (node.type === 'note' && slot.key === 'waves' && slot.idx != null) {
+    connSlotSet(node, { key: 'mixEnvs', idx: slot.idx }, null);
+  }
+}
 // Clear every slot that references `id` (used when a node is deleted).
 function flowDetachNode(id) {
   for (const n of flowNodes) {
     for (const r of flowSlotRows(n)) {
       const pills = r.pill2 ? [r.slot, r.pill2] : [r.slot];
       for (const slot of pills) {
-        if (connSlotGet(n, slot) === id) connSlotSet(n, slot, null);
+        if (connSlotGet(n, slot) === id) connSlotClearPair(n, slot);
       }
     }
   }
@@ -392,6 +433,7 @@ function addFlowNode(type) {
   flowNodes.push(n);
   flowAddMenu = null;
   flowSelId = id;
+  flowSelConn = null;
   saveFlow();
   flowSeparateNode(n);   // drift out of any neighbours (no-op when already clear)
 }
@@ -423,6 +465,7 @@ function undoFlow() {
   if (entry.cam) { flowCam = { x: entry.cam.x, y: entry.cam.y }; flowInertia = null; flowPanAnim = null; }
   if (flowSelId && !flowNodeById(flowSelId)) flowSelId = null;
   if (flowMoveId && !flowNodeById(flowMoveId)) flowMoveId = null;
+  flowClearSelConn();
   flowAddMenu = null;
   flowSepAnim = null;
   saveFlow();
@@ -573,6 +616,7 @@ function deleteFlowNode(id) {
   if (flowUnisonEdit === id) closeFlowUnisonEditor();
   if (flowCurveEdit === id) closeFlowCurveEditor();
   if (flowSelId === id) flowSelId = null;
+  flowClearSelConn();   // this node may be a selected wire's source/consumer
   if (flowMoveId === id) flowMoveId = null;
   if (flowConnArm && flowConnArm.nodeId === id) flowConnArm = null;
   flowAddMenu = null;
@@ -598,6 +642,7 @@ function clearFlowAll() {
   if (flowCurveEdit) closeFlowCurveEditor();
   flowNodes = [];
   flowSelId = null;
+  flowSelConn = null;
   flowMoveId = null;
   flowConnArm = null;
   flowAddMenu = null;
@@ -685,14 +730,19 @@ function voicesFromSavedFlow(vs) {
   }));
 }
 // A generic env node's curve, loaded and clamped: points sorted by t, t 0..1,
-// v −1..1; falls back to the flat-neutral default when nothing valid is stored.
+// v −1..1, trim −1..1; falls back to the flat-neutral default when nothing
+// valid is stored. A point's `.seg` (its span's line type) is preserved.
 function envCurveFromSaved(e) {
   if (e && Array.isArray(e.points) && e.points.length >= 2) {
     const pts = e.points
       .filter(p => p && typeof p.t === 'number' && typeof p.v === 'number')
-      .map(p => ({ t: clamp01(p.t), v: Math.max(-1, Math.min(1, p.v)) }));
+      .map(p => {
+        const pt = { t: clamp01(p.t), v: Math.max(-1, Math.min(1, p.v)) };
+        if (p.seg && typeof p.seg === 'object') pt.seg = clone(p.seg);
+        return pt;
+      });
     pts.sort((a, b) => a.t - b.t);
-    if (pts.length >= 2) return { points: pts };
+    if (pts.length >= 2) return { points: pts, trim: Math.max(-1, Math.min(1, +e.trim || 0)) };
   }
   return defaultEnvCurve();
 }
@@ -734,8 +784,10 @@ function flowPruneConns() {
       const seen = {};
       for (let i = 0; i < 3; i++) {
         const w = c.waves[i];
-        if (w && seen[w]) c.waves[i] = null;
+        if (w && seen[w]) { c.waves[i] = null; }
         if (w) seen[w] = true;
+        // A mix env rides its wave's wire — without the wave, it's orphaned.
+        if (!c.waves[i]) c.mixEnvs[i] = null;
       }
     }
   }
@@ -806,9 +858,12 @@ function closeSoundFlow() {
   flowPanAnim = null;
   flowHold = null;
   flowMoveId = null;
+  flowSelConn = null;
   flowSideOpen = false;
   flowSideScrollY = 0;
   flowSepAnim = null;
+  flowStopRepeat();
+  if (flowLive) flowLiveEnd();   // restores the shared sound globals too
   playbacks.length = 0;
   stopGestureNote();
   stopPreviewVoices();
@@ -868,6 +923,63 @@ function flowPortLabel(slot) {
   if (slot.key === 'ctEnv') return 'Ct';
   return '';
 }
+// A connection's wire path in screen space: the cubic bezier from the source
+// node's centre to the consumer's port anchor (mirrors drawFlowWires). Returns
+// null when the slot is empty.
+function flowConnPath(consumer, slot) {
+  const tid = connSlotGet(consumer, slot);
+  const src = tid ? flowNodeById(tid) : null;
+  if (!src) return null;
+  const a = flowNodeScreen(src);
+  const b = flowNodeScreen(consumer);
+  const port = flowPortAnchor(consumer, slot);
+  const bx = port ? port.cx : b.x;
+  const by = port ? port.cy : b.y + FLOW_CELL / 2;
+  return { a: { x: a.x, y: a.y }, b: { x: bx, y: by }, mx: bx + (a.x - bx) * 0.5 };
+}
+// Point on a cubic bezier at parameter t (0 = source centre, 1 = consumer port).
+function flowBezierPoint(path, t) {
+  const u = 1 - t;
+  const p0 = path.a, p3 = path.b;
+  const p1 = { x: path.mx, y: path.a.y }, p2 = { x: path.mx, y: path.b.y };
+  return {
+    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+  };
+}
+// Unit tangent vector at parameter t.
+function flowBezierTangent(path, t) {
+  const u = 1 - t;
+  const p0 = path.a, p3 = path.b;
+  const p1 = { x: path.mx, y: path.a.y }, p2 = { x: path.mx, y: path.b.y };
+  const x = 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x);
+  const y = 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y);
+  const len = Math.hypot(x, y) || 1;
+  return { x: x / len, y: y / len };
+}
+// Walk the bezier from the consumer port (t = 1) toward the source until the
+// arc is at least `dist` px away; fall back to the midpoint on a short wire.
+// Returns the point plus the unit normal (perpendicular to the tangent) for the
+// port's label / ✕ badge to sit just off the wire.
+function flowBezierAtDistFromB(path, dist) {
+  const STEPS = 60;
+  let prev = { x: path.b.x, y: path.b.y }, acc = 0;
+  let last = { t: 1, x: path.b.x, y: path.b.y };
+  for (let i = 1; i <= STEPS; i++) {
+    const t = 1 - i / STEPS;
+    const pt = flowBezierPoint(path, t);
+    acc += Math.hypot(pt.x - prev.x, pt.y - prev.y);
+    prev = pt;
+    last = { t, x: pt.x, y: pt.y };
+    if (acc >= dist) break;
+  }
+  if (last.t <= 0) {
+    const mid = flowBezierPoint(path, 0.5);
+    last = { t: 0.5, x: mid.x, y: mid.y };
+  }
+  const tan = flowBezierTangent(path, last.t);
+  return { x: last.x, y: last.y, nx: -tan.y, ny: tan.x };
+}
 // Screen-space port dots for a node (on the widget card's edges).
 function flowPorts(node) {
   const p = flowNodeScreen(node);
@@ -875,23 +987,33 @@ function flowPorts(node) {
   const r = flowWidgetRect(node, false);
   const w = r.w, h = r.h;
   const out = [];
-  const add = (slot, px, py, edge, req) => {
+  const add = (slot, px, py, edge, req, nx, ny) => {
+    const filled = !!connSlotGet(node, slot);
+    const src = filled ? flowNodeById(connSlotGet(node, slot)) : null;
     out.push({
-      slot, cx: px, cy: py, edge, req: !!req,
+      slot, cx: px, cy: py, edge, req: !!req, nx: nx || 0, ny: ny || 0,
       emoji: flowPortEmoji(slot),
       label: flowPortLabel(slot),
-      color: flowWireColor(slotKey(slot)),
+      color: src ? flowSourceColor(src) : (FLOW_ROLE_COLORS[slot.key] || '#bdbdbd'),
     });
   };
   if (node.type === 'note') {
     add({ key: 'volumeEnv' }, cx, cy - h / 2 - 6, 'top', true);
     for (let i = 0; i < 3; i++) {
       const y = cy + (i - 1) * 27;
-      add({ key: 'waves', idx: i }, cx + w / 2 + 6, y, 'right', i === 0);
-      add({ key: 'mixEnvs', idx: i }, cx - w / 2 - 6, y, 'left');
+      const wx = cx + w / 2 + 6;
+      add({ key: 'waves', idx: i }, wx, y, 'right', i === 0);
+      // The per-wave mix port rides its wave's wire, close to the note — it only
+      // exists while that wave is connected (no wave, no mix port).
+      const waveId = connSlotGet(node, { key: 'waves', idx: i });
+      const wsrc = waveId ? flowNodeById(waveId) : null;
+      if (wsrc) {
+        const path = { a: flowNodeScreen(wsrc), b: { x: wx, y }, mx: wx + (flowNodeScreen(wsrc).x - wx) * 0.5 };
+        const pt = flowBezierAtDistFromB(path, FLOW_MIX_PORT_DIST);
+        add({ key: 'mixEnvs', idx: i }, pt.x, pt.y, 'wire', false, pt.nx, pt.ny);
+      }
     }
   } else if (node.type === 'wave') {
-    add({ key: 'mixEnv' }, cx, cy - h / 2 - 6, 'top');
     add({ key: 'unison' }, cx, cy + h / 2 + 6, 'bottom');
   } else if (node.type === 'unison') {
     add({ key: 'volEnv' }, cx - w / 2 - 6, cy - 27, 'left');
@@ -909,6 +1031,7 @@ function flowPortAnchor(node, slot) {
 // The ✕ clear badge on a filled port (sits just beyond the dot, outward).
 function flowPortClearPos(pt) {
   const o = FLOW_PORT_R + 10;
+  if (pt.edge === 'wire') return { cx: pt.cx + pt.nx * o, cy: pt.cy + pt.ny * o };
   if (pt.edge === 'right') return { cx: pt.cx + o, cy: pt.cy };
   if (pt.edge === 'left') return { cx: pt.cx - o, cy: pt.cy };
   if (pt.edge === 'top') return { cx: pt.cx, cy: pt.cy - o };
@@ -959,7 +1082,11 @@ function drawFlowPorts() {
       // Label on the outward side of the dot.
       ctx.fillStyle = 'rgba(255,255,255,0.7)';
       ctx.font = '800 9px sans-serif';
-      ctx.fillText(pt.label, pt.cx, pt.edge === 'top' ? pt.cy - FLOW_PORT_R - 5 : pt.cy + FLOW_PORT_R + 6);
+      if (pt.edge === 'wire') {
+        ctx.fillText(pt.label, pt.cx + pt.nx * (FLOW_PORT_R + 5), pt.cy + pt.ny * (FLOW_PORT_R + 5));
+      } else {
+        ctx.fillText(pt.label, pt.cx, pt.edge === 'top' ? pt.cy - FLOW_PORT_R - 5 : pt.cy + FLOW_PORT_R + 6);
+      }
       // ✕ clear badge on filled ports.
       if (filled) {
         const c = flowPortClearPos(pt);
@@ -981,40 +1108,198 @@ function drawFlowPorts() {
 
 /* ---- Wire rendering ----
    Consumer-owned slots are drawn as beziers from the source node's cell to the
-   consumer's cell, colored by role. Drawn under the node circles. */
-function flowWireColor(slotKeyStr) {
-  return FLOW_WIRE_COLORS[slotKeyStr.split(':')[0]] || '#bdbdbd';
-}
+   consumer's cell, colored by the SOURCE node's type (the "from" node owns the
+   color). Drawn under the node circles. A selected wire (flowSelConn) is drawn
+   thick and glowing; wires of the selected consumer node are also brightened. */
 function drawFlowWires() {
   for (const n of flowNodes) {
     const rows = flowSlotRows(n);
-    const sel = n.id === flowSelId;
+    const nodeSel = n.id === flowSelId;
     for (const r of rows) {
       const pills = r.pill2 ? [r.slot, r.pill2] : [r.slot];
       for (const slot of pills) {
+        const path = flowConnPath(n, slot);
+        if (!path) continue;
         const tid = connSlotGet(n, slot);
-        if (!tid) continue;
-        const src = flowNodeById(tid);
+        const src = tid ? flowNodeById(tid) : null;
         if (!src) continue;
-        const a = flowNodeScreen(src);
-        const b = flowNodeScreen(n);
-        const ax = a.x, ay = a.y;
-        // Wires terminate at the consumer's on-node port for this slot.
-        const port = flowPortAnchor(n, slot);
-        const bx = port ? port.cx : b.x;
-        const by = port ? port.cy : b.y + FLOW_CELL / 2;
-        const color = flowWireColor(slotKey(slot));
-        ctx.globalAlpha = sel ? 1 : 0.5;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = sel ? 3 : 2;
+        const wireSel = flowSelConn && flowSelConn.nodeId === n.id && slotKey(flowSelConn.slot) === slotKey(slot);
+        ctx.globalAlpha = (wireSel || nodeSel) ? 1 : 0.5;
+        ctx.strokeStyle = flowSourceColor(src);
+        ctx.lineWidth = wireSel ? 6 : (nodeSel ? 5 : 4);
+        ctx.shadowBlur = wireSel ? 12 : 0;
+        ctx.shadowColor = withAlpha(flowSourceColor(src), 0.8);
         ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        const mx = bx + (ax - bx) * 0.5;
-        ctx.bezierCurveTo(mx, ay, mx, by, bx, by);
+        ctx.moveTo(path.a.x, path.a.y);
+        ctx.bezierCurveTo(path.mx, path.a.y, path.mx, path.b.y, path.b.x, path.b.y);
         ctx.stroke();
+        ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
       }
     }
+  }
+}
+
+/* ---- Connection selection / deletion ----
+   Every live wire is selectable: tap one to select it (its endpoints get edge
+   jump buttons when off-screen), long-press it to delete it (same 3-2-1
+   hold-to-delete as a node). */
+// Every live connection as { nodeId, slot }: the consumer node and its slot.
+function flowConnEntries() {
+  const out = [];
+  for (const n of flowNodes) {
+    for (const r of flowSlotRows(n)) {
+      const pills = r.pill2 ? [r.slot, r.pill2] : [r.slot];
+      for (const slot of pills) {
+        if (connSlotGet(n, slot)) out.push({ nodeId: n.id, slot });
+      }
+    }
+  }
+  return out;
+}
+// The wire under the screen point (x,y), or null. Samples each wire's bezier
+// and keeps the nearest one within a finger-friendly distance.
+function hitFlowConn(x, y) {
+  let best = null, bd = 18;
+  for (const c of flowConnEntries()) {
+    const n = flowNodeById(c.nodeId);
+    if (!n) continue;
+    const path = flowConnPath(n, c.slot);
+    if (!path) continue;
+    for (let i = 1; i <= 20; i++) {
+      const t = i / 20;
+      const pt = flowBezierPoint(path, t);
+      const d = Math.hypot(x - pt.x, y - pt.y);
+      if (d < bd) { bd = d; best = { nodeId: c.nodeId, slot: c.slot, x: pt.x, y: pt.y, t }; }
+    }
+  }
+  return best;
+}
+// The connection under the press (as a pointerdown target), preferring a node
+// when the press is on top of a node widget (wires draw under the nodes).
+function flowConnAtPress(x, y) {
+  const wx = x + flowCam.x, wy = y + flowCam.y;
+  if (flowNodeAt(wx, wy)) return null;
+  return hitFlowConn(x, y);
+}
+// Select / clear a wire. Node selection and wire selection are exclusive.
+function selectFlowConn(c) {
+  flowSelConn = c ? { nodeId: c.nodeId, slot: c.slot } : null;
+  if (c) flowSelId = null;
+}
+// Delete a connection (undoable), like clearing the slot's ✕ badge.
+function deleteFlowConn(nodeId, slot) {
+  const n = flowNodeById(nodeId);
+  if (!n || !connSlotGet(n, slot)) return;
+  flowPushHistory();
+  connSlotClearPair(n, slot);
+  saveFlow();
+  if (flowSelConn && flowSelConn.nodeId === nodeId && slotKey(flowSelConn.slot) === slotKey(slot)) flowSelConn = null;
+}
+
+function flowClearSelConn() {
+  if (!flowSelConn) return;
+  const n = flowNodeById(flowSelConn.nodeId);
+  if (!n || !connSlotGet(n, flowSelConn.slot)) flowSelConn = null;
+}
+
+/* ---- Edge jump buttons (selected wire's off-screen endpoints) ----
+   While a wire is selected, each endpoint whose node is off-screen shows a
+   floating arrow button on the edge of the screen, pointing toward that node;
+   tapping it pans the camera to the node. */
+function flowJumpButtons() {
+  const out = [];
+  if (!flowSelConn) return out;
+  const cons = flowNodeById(flowSelConn.nodeId);
+  const srcId = cons ? connSlotGet(cons, flowSelConn.slot) : null;
+  const src = srcId ? flowNodeById(srcId) : null;
+  for (const node of [src, cons]) {
+    if (!node) continue;
+    const p = flowNodeScreen(node);
+    const onX = p.x >= 0 && p.x <= W;
+    const onY = p.y >= 0 && p.y <= H;
+    if (onX && onY) continue;   // on-screen — no button
+    const cx = W / 2, cy = H / 2;
+    let dx = p.x - cx, dy = p.y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    // Scale the direction so the point sits just inside the viewport edge.
+    const tx = dx !== 0 ? ((W / 2 - 34) / Math.abs(dx)) : Infinity;
+    const ty = dy !== 0 ? ((H / 2 - 34) / Math.abs(dy)) : Infinity;
+    const s = Math.min(tx, ty);
+    const bx = Math.max(40, Math.min(W - 40, cx + dx * s));
+    const by = Math.max(40, Math.min(H - 40, cy + dy * s));
+    out.push({ node, x: bx, y: by, angle: Math.atan2(dy, dx) });
+  }
+  return out;
+}
+function hitFlowJumpBtn(x, y) {
+  for (const b of flowJumpButtons()) {
+    if (Math.hypot(x - b.x, y - b.y) <= 26 + 6) return b;
+  }
+  return null;
+}
+function drawFlowJumpButtons() {
+  for (const b of flowJumpButtons()) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.angle);
+    ctx.beginPath();
+    ctx.arc(0, 0, 26, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(30,32,40,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('➤', 0, 2);
+    ctx.restore();
+    // Node emoji just below the arrow.
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(FLOW_NODE_TYPES[b.node.type].emoji, b.x, b.y + 34);
+  }
+}
+// A held-press flash / 3-2-1 delete countdown while long-pressing a connection.
+function drawFlowConnHold() {
+  if (!flowHold || flowHold.kind !== 'conn') return;
+  const n = flowNodeById(flowHold.conn.nodeId);
+  const path = n ? flowConnPath(n, flowHold.conn.slot) : null;
+  if (path) {
+    const pulse = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(performance.now() / 120));
+    ctx.globalAlpha = pulse;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(path.a.x, path.a.y);
+    ctx.bezierCurveTo(path.mx, path.a.y, path.mx, path.b.y, path.b.x, path.b.y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  if (flowHold.stage === 2) {
+    const remain = FLOW_DELETE_MS - (performance.now() - flowHold.del0);
+    const num = Math.max(1, Math.ceil(remain / 1000));
+    const px = flowHold.x, py = flowHold.y;
+    ctx.beginPath();
+    ctx.arc(px, py, 34, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(130,20,20,0.88)';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), px, py - 4);
+    ctx.font = '700 10px sans-serif';
+    ctx.fillText('hold to delete', px, py + 16);
+    ctx.textBaseline = 'alphabetic';
   }
 }
 
@@ -1108,22 +1393,39 @@ function drawFlowWidget(n) {
   }
   ctx.globalAlpha = 1;
 }
-function drawFlowWidgetNote(n, r) {
-  const ready = flowNoteReady(n);
-  // Play button (always live — tapping it previews, never edits).
-  const p = flowNoteWidgetPlay(r);
-  drawRoundRect(p.x, p.y, p.w, p.h, 8);
-  ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
+// Draw one of a note's three play buttons (tap / full / live). `ready` dims a
+// button whose note has no volume + wave yet; `active` highlights the live
+// button while it is being held.
+// Draw one of a note's four play buttons (tap / full / live / repeat).
+// `ready` dims a button whose note has no volume + wave yet; `active` highlights
+// a button that is engaged (a held live note, or the repeat toggle on); `stop`
+// turns the button red with a stop label (the looping button while a repeat runs).
+function drawFlowNotePlayButton(b, label, ready, active, font, stop) {
+  drawRoundRect(b.x, b.y, b.w, b.h, 8);
+  if (stop) ctx.fillStyle = '#8a2b2b';
+  else if (active) ctx.fillStyle = '#0e5a34';
+  else ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
   ctx.fill();
-  ctx.strokeStyle = ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = (stop || active) ? '#ffffff' : (ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)');
+  ctx.lineWidth = (stop || active) ? 2 : 1.5;
   ctx.stroke();
   ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.4)';
-  ctx.font = '800 11px sans-serif';
+  ctx.font = font || '800 10px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(ready ? '▶ Play sound' : '▶ Needs volume + wave', p.x + p.w / 2, p.y + p.h / 2 + 1);
+  ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2 + 1);
   ctx.textBaseline = 'alphabetic';
+}
+function drawFlowWidgetNote(n, r) {
+  const ready = flowNoteReady(n);
+  // Four play buttons (always live — tapping them plays, never edits).
+  const btns = flowNoteWidgetButtons(r);
+  const looping = flowLoopingMode();
+  const liveOn = !!(flowLive && flowLive.nodeId === n.id);
+  drawFlowNotePlayButton(btns.tap, looping === 'tap' ? '■' : 'Tap', ready, looping === 'tap', '800 9px sans-serif');
+  drawFlowNotePlayButton(btns.full, looping === 'full' ? '■' : 'Full', ready, looping === 'full', '800 9px sans-serif');
+  drawFlowNotePlayButton(btns.live, 'Live', ready, liveOn, '800 9px sans-serif');
+  drawFlowNotePlayButton(btns.repeat, '⟳', ready, flowRepeat, '800 11px sans-serif');
   // Note-life readout: the slider is shown but read-only until edit mode.
   const env = flowNoteLifeEnv(n);
   const ms = env ? flowNoteLifeMs(n) : 0;
@@ -1203,19 +1505,16 @@ function drawFlowWidgetEnv(n, r) {
 function drawFlowWidgetCurve(n, r) {
   const pl = flowMiniPlot(r);
   const pts = (n.env && Array.isArray(n.env.points) && n.env.points.length >= 2) ? n.env.points : null;
+  const trim = (n.env && +n.env.trim) || 0;
   drawMiniPlotFrame(pl);
   if (!pts) return;
   ctx.strokeStyle = '#8dd3ff';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(tToX(0, pl), ampToY(specValueAtCurve(pts, 0), pl));
-  for (let j = 0; j < pts.length; j++) ctx.lineTo(tToX(pts[j].t, pl), ampToY(pts[j].v, pl));
-  ctx.lineTo(tToX(1, pl), ampToY(specValueAtCurve(pts, 1), pl));
-  ctx.stroke();
+  strokeSegPath(flowCurveScreenPoints(pts, trim, pl), 1, v => ampToY(clampSign(v), pl));
   for (const pt of pts) {
     ctx.fillStyle = '#8dd3ff';
     ctx.beginPath();
-    ctx.arc(tToX(pt.t, pl), ampToY(pt.v, pl), 3, 0, Math.PI * 2);
+    ctx.arc(tToX(pt.t, pl), ampToY(clampSign(pt.v + trim), pl), 3, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -1289,15 +1588,22 @@ function drawFlowWidgetFader(label, val, min, max, fmt, y, r) {
 }
 
 /* ---- Note editor ----
-   A note's editing surface is just its widget grown in place: a big ▶ play
-   button plus an editable Note-life slider (scales the connected volume env).
-   Tapping outside the enlarged card closes it back down. */
+   A note's editing surface is just its widget grown in place: four ▶ play
+   buttons (tap / full length / live / repeat) plus an editable Note-life slider
+   (scales the connected volume env). Tapping outside the enlarged card closes
+   it back down. */
 var flowNoteEdit = null;    // id of the note node being edited, or null
-function flowNoteEditorPlay(p) {
-  return { x: p.x + 16, y: p.y + 46, w: p.w - 32, h: 36 };
+function flowNoteEditorButtons(p) {
+  const w = p.w - 32, h = 30, x = p.x + 16;
+  return {
+    tap:    { x, y: p.y + 44, w, h },
+    full:   { x, y: p.y + 78, w, h },
+    live:   { x, y: p.y + 112, w, h },
+    repeat: { x, y: p.y + 146, w, h },
+  };
 }
 function flowNoteEditorLife(p) {
-  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 128 };
+  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 190 };
 }
 function openFlowNoteEditor(id) {
   const n = flowNodeById(id);
@@ -1331,21 +1637,15 @@ function drawFlowNoteEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Aggregates volume + up to 3 waves', p.x + 96, p.y + 30);
-  // Big play button.
+  // Four play buttons: tap, full length, live (hold), repeat (tap/full loop).
   const ready = flowNoteReady(n);
-  const pb = flowNoteEditorPlay(p);
-  drawRoundRect(pb.x, pb.y, pb.w, pb.h, 10);
-  ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
-  ctx.fill();
-  ctx.strokeStyle = ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.4)';
-  ctx.font = '800 14px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(ready ? '▶ Play sound' : '▶ Needs volume + wave', pb.x + pb.w / 2, pb.y + pb.h / 2 + 1);
-  ctx.textBaseline = 'alphabetic';
+  const btns = flowNoteEditorButtons(p);
+  const looping = flowLoopingMode();
+  const liveOn = !!(flowLive && flowLive.nodeId === n.id);
+  drawFlowNotePlayButton(btns.tap, looping === 'tap' ? '■ Stop' : '▶ Play (tap)', ready, looping === 'tap', '800 13px sans-serif', looping === 'tap');
+  drawFlowNotePlayButton(btns.full, looping === 'full' ? '■ Stop' : '▶ Play (full length)', ready, looping === 'full', '800 13px sans-serif', looping === 'full');
+  drawFlowNotePlayButton(btns.live, '▶ Play (live — press & hold)', ready, liveOn, '800 13px sans-serif');
+  drawFlowNotePlayButton(btns.repeat, flowRepeat ? '⟳ Repeat: ON' : '⟳ Repeat: OFF', ready, flowRepeat, '800 13px sans-serif');
   // Note-life slider (editable here).
   const env = flowNoteLifeEnv(n);
   const ms = env ? flowNoteLifeMs(n) : 0;
@@ -1353,9 +1653,9 @@ function drawFlowNoteEditor() {
   ctx.font = '800 12px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Note life', p.x + 16, p.y + 128);
+  ctx.fillText('Note life', p.x + 16, p.y + 190);
   ctx.textAlign = 'right';
-  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', p.x + p.w - 16, p.y + 128);
+  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', p.x + p.w - 16, p.y + 190);
   ctx.textBaseline = 'alphabetic';
   const s = flowNoteEditorLife(p);
   ctx.globalAlpha = env ? 1 : 0.4;
@@ -1392,15 +1692,22 @@ function drawFlowNoteEditor() {
 function flowNoteHandleDown(x, y) {
   const p = flowNotePanel();
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowNoteEditor(); return; }
-  const pb = flowNoteEditorPlay(p);
-  if (x >= pb.x && x <= pb.x + pb.w && y >= pb.y && y <= pb.y + pb.h) {
-    const n = flowNodeById(flowNoteEdit);
-    if (n) playFlowNote(n);
+  const n = flowNodeById(flowNoteEdit);
+  const btns = flowNoteEditorButtons(p);
+  const hitBtn = btns.tap.x <= x && x <= btns.tap.x + btns.tap.w && y >= btns.tap.y && y <= btns.tap.y + btns.tap.h
+    ? 'tap' : (btns.full.x <= x && x <= btns.full.x + btns.full.w && y >= btns.full.y && y <= btns.full.y + btns.full.h
+      ? 'full' : (btns.live.x <= x && x <= btns.live.x + btns.live.w && y >= btns.live.y && y <= btns.live.y + btns.live.h
+        ? 'live' : (btns.repeat.x <= x && x <= btns.repeat.x + btns.repeat.w && y >= btns.repeat.y && y <= btns.repeat.y + btns.repeat.h
+          ? 'repeat' : null)));
+  if (hitBtn && n) {
+    if (hitBtn === 'tap') flowPlayMode('tap', n);
+    else if (hitBtn === 'full') flowPlayMode('full', n);
+    else if (hitBtn === 'repeat') flowRepeatToggle();
+    else if (flowLiveStart(n)) return;   // live starts on press, ends on release
     return;
   }
   const s = flowNoteEditorLife(p);
   if (y >= s.y - 18 && y <= s.y + 18 && x >= s.x - 12 && x <= s.x2 + 12) {
-    const n = flowNodeById(flowNoteEdit);
     if (n) {
       flowPushHistory();
       flowSetNoteLife(n, flowNoteLifeFromX(s, x));
@@ -1416,6 +1723,7 @@ function flowNoteHandleMove(x, y) {
 function flowNoteHandleUp() {
   if (flowPtr && flowPtr.kind === 'noteLife') saveFlow();
   flowPtr = null;
+  if (flowLive) flowLiveEnd();
 }
 // Open the editor for a node (tap on its widget → edit mode, growing in place).
 // The camera pans to center the node while the editor is open, so the enlarged
@@ -1423,6 +1731,7 @@ function flowNoteHandleUp() {
 function openFlowNodeEditor(id) {
   const n = flowNodeById(id);
   if (!n) return;
+  flowSelConn = null;
   panToNode(n);
   if (n.type === 'note') openFlowNoteEditor(id);
   else if (n.type === 'volumeEnv') openFlowEnvelopeEditor(id);
@@ -1527,6 +1836,12 @@ function drawFlow(now) {
   // ---- On-node connection ports (drawn on top of the widgets) ----
   drawFlowPorts();
 
+  // ---- Selected wire: edge jump buttons to its off-screen endpoints ----
+  drawFlowJumpButtons();
+
+  // ---- Long-press on a wire: flash / 3-2-1 delete countdown ----
+  drawFlowConnHold();
+
   // ---- Node-list side bar (on top of the grid, before the banner/buttons) ----
   if (flowSideOpen) drawFlowSide();
 
@@ -1603,10 +1918,8 @@ function drawFlow(now) {
 var flowEnvEdit = null;    // id of the envelope node being edited, or null
 var flowEnvSaved = null;   // the global ENVELOPE saved before the swap (restored on close)
 var flowEnvDirty = false;  // any edit happened this session (coalesces into one undo entry)
-var flowEnvPtr = null;     // { mode: 'bound'|'trim'|'segparam', ... } active overlay drag
+var flowEnvPtr = null;     // { kind: 'bound'|'draw'|'drawzone'|'segarm'|'trim'|'segparam', ... } active overlay drag
 var flowEnvMarker = null;  // armed HOLD/CUT/REL marker awaiting a destination tap
-var flowEnvLastTap = null; // double-tap-to-delete on an envelope boundary
-var flowEnvMode = 'point'; // 'point' | 'draw' | 'line' (segment line types) | 'delete'
 var flowEnvSegFrom = null, flowEnvSegTo = null;   // selected segment (boundary indexes)
 
 // The shared enlarged editor panel: the node's own widget, grown in place at
@@ -1636,24 +1949,22 @@ function flowNotePanel() {
   const y = Math.max(12, Math.min(H - 12 - h, p.y - h / 2));
   return { x, y, w, h };
 }
-function flowEnvPlot(p) {
-  const top = p.y + 140, bottom = p.y + p.h - 28, left = p.x + 32, right = p.x + p.w - 18;
+// The graph editors' plot area. `header` adds the docked line-mode strip's
+// height above the plot (used by the envelope and env-curve editors, which
+// park the segment type pills there); the wave editor keeps the plain layout.
+function flowEnvPlot(p, header) {
+  const top = p.y + 140 + (header ? FLOW_ENV_HEADER_H : 0), bottom = p.y + p.h - 28, left = p.x + 32, right = p.x + p.w - 18;
   return { top, bottom, left, right, pw: right - left, ph: bottom - top };
 }
 function flowEnvClearPill(p) {
-  return { x: p.x + p.w - 70, y: p.y + 46, w: 54, h: 26 };
-}
-function flowEnvToolbar(p) {
-  const modes = [['point', 'Point'], ['draw', 'Draw'], ['line', 'Line'], ['delete', 'Delete']];
-  const w = 54, gap = 6, h = 26, y = p.y + 48, x0 = p.x + 16;
-  return modes.map((m, i) => ({ mode: m[0], label: m[1], x: x0 + i * (w + gap), y, w, h }));
+  return { x: p.x + p.w - 70, y: p.y + 8, w: 54, h: 26 };
 }
 function flowEnvTrimSlider(p) {
-  const pl = flowEnvPlot(p);
+  const pl = flowEnvPlot(p, true);
   return { x: p.x + 8, w: 14, y0: pl.top + 4, y1: pl.bottom - 4 };
 }
 function flowEnvMarkerTabs(p) {
-  const pl = flowEnvPlot(p);
+  const pl = flowEnvPlot(p, true);
   const defs = [
     { key: 'hold', label: 'HOLD', color: '#7ecfff' },
     { key: 'cut', label: 'CUT', color: '#ffb37a' },
@@ -1683,8 +1994,6 @@ function openFlowEnvelopeEditor(id) {
   flowEnvDirty = false;
   flowEnvPtr = null;
   flowEnvMarker = null;
-  flowEnvLastTap = null;
-  flowEnvMode = 'point';
   flowEnvSegFrom = null;
   flowEnvSegTo = null;
   flowAddMenu = null;
@@ -1700,7 +2009,6 @@ function closeFlowEnvelopeEditor() {
   flowEnvDirty = false;
   flowEnvPtr = null;
   flowEnvMarker = null;
-  flowEnvLastTap = null;
   flowEnvSegFrom = null;
   flowEnvSegTo = null;
   saveFlow();
@@ -1781,24 +2089,16 @@ function flowEnvSetSegParam(key, v) {
     });
   });
 }
-function flowEnvSegStartX(i, pl) {
-  const eb = envBoundaries();
-  return tToX(eb.tOf(eb.b[i]), pl);
+// The line-mode strip (docked at the top of the editor window, above the plot):
+// type pills on the first row, the active type's parameter controls on the
+// second — shown only while a segment is selected.
+function flowSegTypeOf(cur) {
+  return cur ? segOf(cur).type : 'line';
 }
-function flowEnvSegIndexAtX(x, pl) {
-  const m = flowEnvSegModel();
-  if (m.lastPoint < 2) return -1;
-  let best = -1, bd = Infinity;
-  for (let i = 0; i < m.lastPoint - 1; i++) {
-    const d = Math.abs(x - flowEnvSegStartX(i, pl));
-    if (d < bd) { bd = d; best = i; }
-  }
-  return best;
-}
-// The Line-mode editor card (floats over the top of the plot).
-function flowEnvSegParamGroups(x, w, cy) {
-  const cur = flowEnvSegCurrent();
-  const type = cur ? segOf(cur).type : 'line';
+// Parameter control groups for a segment type (`type` = line/stairs/spring/
+// pulse): one group per param, each = label + −/+ buttons + a slider, laid out
+// across the given width at the row's center y.
+function flowSegParamGroups(x, w, cy, type) {
   const params = SEGMENT_TYPE_PARAMS[type] || [];
   const n = params.length;
   if (!n) return [];
@@ -1814,23 +2114,27 @@ function flowEnvSegParamGroups(x, w, cy) {
     return { key: pr, cy, btnW, labelW, gx, gw, bxMinus, bxPlus, x1: bxMinus + btnW + 4, x2: bxPlus - 4 };
   });
 }
-function flowEnvSegCard(p) {
-  const pl = flowEnvPlot(p);
-  const w = Math.min(560, Math.max(340, pl.pw * 0.78));
-  const x = pl.left + 4, y0 = pl.top + 8;
-  const pillW = (w - 20 - (SEGMENT_TYPE_ORDER.length - 1) * 4) / SEGMENT_TYPE_ORDER.length;
-  const pills = SEGMENT_TYPE_ORDER.map((t, i) => ({ t, x: x + 10 + i * (pillW + 4), y: y0 + 26, w: pillW, h: 26 }));
-  const params = flowEnvSegParamGroups(x, w, y0 + 26 + 26 + 6 + 15);
-  return { x, y0, w, h: 26 + 26 + 6 + 30 + 10, rowH: 26, pills, params };
+// The docked line-mode strip: type pills on the first row, the active type's
+// parameter controls on the second. Parked at the top of the editor window
+// (above the plot) instead of floating over it as a card.
+function flowSegStripLayout(p, type) {
+  const x = p.x + 16, w = p.w - 32;
+  const y0 = p.y + 50;
+  const labelW = 80;
+  const pillW = (w - labelW - (SEGMENT_TYPE_ORDER.length - 1) * 6) / SEGMENT_TYPE_ORDER.length;
+  const px0 = x + labelW;
+  const pills = SEGMENT_TYPE_ORDER.map((t, i) => ({ t, x: px0 + i * (pillW + 6), y: y0, w: pillW, h: 26 }));
+  const params = flowSegParamGroups(x, w, y0 + 32 + 13, type);
+  return { x, y0, w, labelW, pills, params, h: 26 + 6 + 26 };
 }
-function flowEnvHitSegCard(x, y, p) {
-  const R = flowEnvSegCard(p);
-  if (x < R.x || x > R.x + R.w || y < R.y0 || y > R.y0 + R.h) return null;
-  for (const pill of R.pills) {
+function flowSegHitStrip(x, y, p, type) {
+  const S = flowSegStripLayout(p, type);
+  if (y < S.y0 - 4 || y >= S.y0 + S.h) return null;
+  for (const pill of S.pills) {
     if (x >= pill.x && x <= pill.x + pill.w && y >= pill.y && y <= pill.y + pill.h) return { type: 'type', t: pill.t };
   }
-  for (const g of R.params) {
-    if (y >= g.cy - g.btnW - 4 && y <= g.cy + g.btnW + 4) {
+  for (const g of S.params) {
+    if (y >= g.cy - g.btnW / 2 - 2 && y <= g.cy + g.btnW / 2 + 2) {
       if (x >= g.bxMinus && x <= g.bxMinus + g.btnW) return { type: 'param', key: g.key, dir: -1 };
       if (x >= g.bxPlus && x <= g.bxPlus + g.btnW) return { type: 'param', key: g.key, dir: 1 };
       if (x >= g.x1 - 6 && x <= g.x2 + 8) return { type: 'slider', key: g.key };
@@ -1838,10 +2142,125 @@ function flowEnvHitSegCard(x, y, p) {
   }
   return { type: 'bar' };
 }
+// Draw the docked line-mode strip. `sel` supplies the editor's segment
+// accessors (current/range/paramValue) — the envelope and env-curve editors
+// share the drawing via their own wrappers.
+function drawFlowSegStrip(p, sel) {
+  const cur = sel.current();
+  const type = flowSegTypeOf(cur);
+  const S = flowSegStripLayout(p, type);
+  const r = sel.range();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('Segment ' + (r ? r.lo : 0), S.x + 2, S.y0 + 17);
+  for (const pill of S.pills) {
+    const active = pill.t === type;
+    drawRoundRect(pill.x, pill.y, pill.w, pill.h, 7);
+    ctx.fillStyle = active ? '#ffffff' : '#222222';
+    ctx.fill();
+    ctx.strokeStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = active ? 1.5 : 1;
+    ctx.stroke();
+    ctx.fillStyle = active ? '#000000' : '#ffffff';
+    ctx.font = '800 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(SEGMENT_TYPE_DEFS[pill.t].label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+  if (!S.params.length) {
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Line = a straight ramp — pick a shape above', S.x + S.w / 2, S.y0 + S.h - 8);
+    return;
+  }
+  for (const g of S.params) {
+    const d = SEG_PARAM_DEFS[g.key];
+    const val = sel.paramValue(g.key);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '800 11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(d.label, g.gx + g.labelW - 2, g.cy + 5);
+    for (const side of ['-', '+']) {
+      const bx = side === '-' ? g.bxMinus : g.bxPlus;
+      drawRoundRect(bx, g.cy - g.btnW / 2, g.btnW, g.btnW, 6);
+      ctx.fillStyle = '#333333';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(side === '-' ? '−' : '+', bx + g.btnW / 2, g.cy + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(g.x1, g.cy); ctx.lineTo(g.x2, g.cy);
+    ctx.stroke();
+    const tx = g.x1 + (g.x2 - g.x1) * ((val - d.min) / (d.max - d.min));
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(g.x1, g.cy); ctx.lineTo(tx, g.cy);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.arc(tx, g.cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(d.fmt(val), g.gx + g.gw - 2, g.cy + 5);
+  }
+}
+// Distance from (px,py) to the segment (x1,y1)-(x2,y2).
+function distToSeg(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t * dx, cy = y1 + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}
+// The index of the envelope segment (span i→i+1) whose drawn curve is nearest
+// (x,y), or -1. Samples the seg-aware path so stairs/spring/pulse wobbles are
+// hittable, not just the straight chords.
+function flowEnvSegHit(x, y, pl) {
+  const eb = envBoundaries();
+  if (eb.n < 1) return -1;
+  const trim = envTrim(ENVELOPE);
+  const vOf = v => clamp01(v + trim);
+  let best = -1, bd = 18;
+  for (let i = 0; i < eb.n; i++) {
+    const el = eb.env.components[i];
+    const ax = tToX(eb.tOf(eb.b[i]), pl), ay = vToY(vOf(eb.vals[i]), pl);
+    const bx = tToX(eb.tOf(eb.b[i + 1]), pl), by = vToY(vOf(eb.vals[i + 1]), pl);
+    const s = segOf(el);
+    const n = s.type === 'line' ? 2 : segDrawSamples(s);
+    for (let k = 0; k < n; k++) {
+      const f = k / n, f2 = (k + 1) / n;
+      const p1x = ax + (bx - ax) * f, p1y = vToY(segValueAt(el, vOf(eb.vals[i]), vOf(eb.vals[i + 1]), f, 1), pl);
+      const p2x = ax + (bx - ax) * f2, p2y = vToY(segValueAt(el, vOf(eb.vals[i]), vOf(eb.vals[i + 1]), f2, 1), pl);
+      const d = distToSeg(x, y, p1x, p1y, p2x, p2y);
+      if (d < bd) { bd = d; best = i; }
+    }
+  }
+  return best;
+}
 
 function drawFlowEnvEditor() {
   const p = flowEnvPanel();
-  const pl = flowEnvPlot(p);
+  const pl = flowEnvPlot(p, true);
   // Partially transparent backdrop: the flow grid shows through.
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
   ctx.fillStyle = 'rgba(14,14,16,0.74)';
@@ -1858,22 +2277,8 @@ function drawFlowEnvEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Shapes this node’s volume over its note', p.x + 86, p.y + 30);
-  // Mode toolbar.
-  for (const b of flowEnvToolbar(p)) {
-    const active = flowEnvMode === b.mode;
-    drawRoundRect(b.x, b.y, b.w, b.h, 8);
-    ctx.fillStyle = active ? '#ffffff' : '#222222';
-    ctx.fill();
-    ctx.strokeStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = active ? 1.5 : 1;
-    ctx.stroke();
-    ctx.fillStyle = active ? '#000000' : '#ffffff';
-    ctx.font = '800 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-  }
+  // Dock the line-mode strip at the top while a segment is selected.
+  if (flowEnvSegRange()) drawFlowSegStrip(p, { current: flowEnvSegCurrent, range: flowEnvSegRange, paramValue: flowEnvSegParamValue });
   // Clear pill.
   const cp = flowEnvClearPill(p);
   drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
@@ -1886,6 +2291,15 @@ function drawFlowEnvEditor() {
   ctx.font = '800 11px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText('Clear', cp.x + cp.w / 2, cp.y + cp.h / 2 + 4);
+  // Selected-segment highlight band on the graph.
+  if (flowEnvSegRange()) {
+    const eb0 = envBoundaries();
+    const sr = flowEnvSegRange();
+    const x0 = tToX(eb0.tOf(eb0.b[sr.lo]), pl);
+    const x1 = tToX(eb0.tOf(eb0.b[sr.hi]), pl);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(x0, pl.top, Math.max(1, x1 - x0), pl.ph);
+  }
   // Marker lane: grab tabs, dashed lines, and armed destinations.
   for (const tab of flowEnvMarkerTabs(p)) {
     ctx.strokeStyle = tab.color;
@@ -1983,110 +2397,37 @@ function drawFlowEnvEditor() {
   ctx.font = '700 8px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText('Trim', scx, sl.y0 - 6);
-  // Line-mode segment editor (floats over the plot when a segment is picked).
-  if (flowEnvMode === 'line' && flowEnvSegRange()) drawFlowEnvSegCard(p);
-  else if (flowEnvMode === 'line') {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '700 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Tap the graph to pick a segment, then choose a line type', pl.left + pl.pw / 2, pl.top + pl.ph / 2 - 10);
+  // Drag feedback: while dragging a boundary the dot rides the finger; once it
+  // leaves the plot a trashcan pill appears (release there deletes the point).
+  const ptr = flowEnvPtr;
+  if (ptr && ptr.kind === 'bound' && ptr.moved) {
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(ptr.px, ptr.py, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (ptr.out && ENVELOPE.components.length > 1) {
+      const bw = 46, bh = 30;
+      const bx = Math.max(pl.left, Math.min(pl.right - bw, ptr.px - bw / 2));
+      const by = Math.max(pl.top, Math.min(pl.bottom - bh, ptr.py - bh - 10));
+      drawRoundRect(bx, by, bw, bh, 8);
+      ctx.fillStyle = 'rgba(220,60,60,0.92)';
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '15px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🗑', bx + bw / 2, by + bh / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
   }
   // Hint.
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(flowEnvMode === 'line'
-    ? 'Line · tap the graph to pick a segment, then choose Line / Stairs / Spring / Pulse'
-    : flowEnvMode === 'draw'
-    ? 'Draw · drag across the graph to scribble the curve (' + drawPointCount() + ' pts) · tap Point to edit dots'
-    : flowEnvMode === 'delete'
-    ? 'Delete · tap a dot to remove it'
-    : 'Point · tap to add a point · drag a dot to move · double-tap a dot to delete · tap HOLD/CUT/REL then a dot to move it', p.x + p.w / 2, p.y + p.h - 8);
-}
-
-function drawFlowEnvSegCard(p) {
-  const R = flowEnvSegCard(p);
-  const cur = flowEnvSegCurrent();
-  const type = cur ? segOf(cur).type : 'line';
-  const r = flowEnvSegRange();
-  drawRoundRect(R.x, R.y0, R.w, R.h, 10);
-  ctx.fillStyle = 'rgba(28,28,32,0.97)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 12px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText('Segment ' + (r ? r.lo : 0) + ' · tap the graph to re-select', R.x + 12, R.y0 + 18);
-  for (const pill of R.pills) {
-    const active = pill.t === type;
-    drawRoundRect(pill.x, pill.y, pill.w, pill.h, 7);
-    ctx.fillStyle = active ? '#ffffff' : '#222222';
-    ctx.fill();
-    ctx.strokeStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = active ? 1.5 : 1;
-    ctx.stroke();
-    ctx.fillStyle = active ? '#000000' : '#ffffff';
-    ctx.font = '800 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(SEGMENT_TYPE_DEFS[pill.t].label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-  }
-  if (!R.params.length) {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '700 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Line = a straight ramp — pick a shape above', R.x + R.w / 2, R.y0 + R.h - 12);
-    return;
-  }
-  for (const g of R.params) {
-    const d = SEG_PARAM_DEFS[g.key];
-    const val = flowEnvSegParamValue(g.key);
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.font = '800 11px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(d.label, g.gx + g.labelW - 2, g.cy + 5);
-    for (const side of ['-', '+']) {
-      const bx = side === '-' ? g.bxMinus : g.bxPlus;
-      drawRoundRect(bx, g.cy - g.btnW / 2, g.btnW, g.btnW, 6);
-      ctx.fillStyle = '#333333';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '700 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(side === '-' ? '−' : '+', bx + g.btnW / 2, g.cy + 1);
-      ctx.textBaseline = 'alphabetic';
-    }
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(g.x1, g.cy); ctx.lineTo(g.x2, g.cy);
-    ctx.stroke();
-    const tx = g.x1 + (g.x2 - g.x1) * ((val - d.min) / (d.max - d.min));
-    ctx.strokeStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(g.x1, g.cy); ctx.lineTo(tx, g.cy);
-    ctx.stroke();
-    ctx.lineCap = 'butt';
-    ctx.beginPath();
-    ctx.arc(tx, g.cy, 8, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '800 12px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(d.fmt(val), g.gx + g.gw - 2, g.cy + 5);
-  }
+  ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · left-edge swipe draws · tap a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
 }
 
 // A fatter grab for boundary dots than hitTestEnv's 18px: fingers are imprecise,
@@ -2106,40 +2447,38 @@ function flowEnvHitBoundary(x, y, pl) {
 }
 function flowEnvHandleDown(x, y) {
   const p = flowEnvPanel();
-  const pl = flowEnvPlot(p);
+  const pl = flowEnvPlot(p, true);
   // Tap anywhere outside the panel to dismiss (no ✕ button).
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowEnvelopeEditor(); return; }
-  // Mode toolbar.
-  for (const b of flowEnvToolbar(p)) {
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-      flowEnvMode = b.mode;
-      flowEnvSegFrom = null;
-      flowEnvSegTo = null;
-      return;
-    }
-  }
-  // Clear pill.
+  // Clear pill: reset to a single straight line — a lone component holding the
+  // full volume across the whole note (the flat "no shaping" envelope).
   const cp = flowEnvClearPill(p);
   if (x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) {
     flowEnvMutate(() => {
-      const env = clone(DEFAULT_ENVELOPE);
+      const env = {
+        components: [{ id: newCompId(), name: 'Volume', duration: 2500, startValue: 100, endValue: 100 }],
+        beginReleaseIndex: 1, holdStartIndex: 0, holdEndIndex: 0, earlyCutIndex: -1, trim: 0,
+      };
       const n = flowNodeById(flowEnvEdit);
       if (n) n.envelope = env;
       ENVELOPE = env;
       clampEnvelopeIndexes();
     });
+    flowEnvSegFrom = null;
+    flowEnvSegTo = null;
     return;
   }
-  // Line-mode segment editor card (type pills / parameter controls).
-  if (flowEnvMode === 'line' && flowEnvSegRange()) {
-    const hit = flowEnvHitSegCard(x, y, p);
+  // Line-mode strip (docked at the top): type pills / parameter controls.
+  if (flowEnvSegRange()) {
+    const type = flowSegTypeOf(flowEnvSegCurrent());
+    const hit = flowSegHitStrip(x, y, p, type);
     if (hit) {
       if (hit.type === 'type') flowEnvSetSegType(hit.t);
       else if (hit.type === 'param') flowEnvSetSegParam(hit.key, flowEnvSegParamValue(hit.key) + hit.dir * SEG_PARAM_DEFS[hit.key].step);
       else if (hit.type === 'slider') {
-        const R = flowEnvSegCard(p);
-        const g = R.params.find(r => r.key === hit.key);
-        if (g) { flowEnvSetSegParam(hit.key, flowEnvSegParamFromX(g, x)); flowEnvPtr = { mode: 'segparam', key: hit.key }; }
+        const S = flowSegStripLayout(p, type);
+        const g = S.params.find(r => r.key === hit.key);
+        if (g) { flowEnvSetSegParam(hit.key, flowEnvSegParamFromX(g, x)); flowEnvPtr = { kind: 'segparam', key: hit.key }; }
       }
       return;
     }
@@ -2166,71 +2505,120 @@ function flowEnvHandleDown(x, y) {
   const sl = flowEnvTrimSlider(p);
   if (x >= sl.x - 4 && x <= sl.x + sl.w + 4 && y >= sl.y0 - 8 && y <= sl.y1 + 6) {
     flowEnvApplyTrimFromY(sl, y);
-    flowEnvPtr = { mode: 'trim', x0: x, y0: y };
+    flowEnvPtr = { kind: 'trim' };
     return;
   }
-  // Plot behaviour depends on the mode.
-  if (y >= pl.top && y <= pl.bottom) {
-    if (flowEnvMode === 'draw') {
-      const s0 = slotAtX(x, pl);
-      flowEnvDrawAt(s0, y, pl, null);
-      flowEnvPtr = { mode: 'draw', lastSlot: s0 };
-      return;
-    }
-    if (flowEnvMode === 'delete') {
-      const hit = hitTestEnv(x, y, pl);
-      if (hit.type === 'envbound') flowEnvMutate(() => { envDeleteAt(Math.max(0, hit.idx - 1)); });
-      return;
-    }
-    if (flowEnvMode === 'line') {
-      const i = flowEnvSegIndexAtX(x, pl);
-      if (i >= 0) { flowEnvSegFrom = i; flowEnvSegTo = i + 1; }
-      return;
-    }
-    // Point mode: grab a boundary (double-tap deletes), or split to add a point.
-    const hit = hitTestEnv(x, y, pl);
-    const bidx = hit.type === 'envbound' ? hit.idx : flowEnvHitBoundary(x, y, pl);
-    if (bidx >= 0) {
-      if (flowEnvLastTap && flowEnvLastTap.idx === bidx && performance.now() - flowEnvLastTap.t < 400 && Math.hypot(x - flowEnvLastTap.x, y - flowEnvLastTap.y) < 26) {
-        flowEnvMutate(() => { envDeleteAt(Math.max(0, bidx - 1)); });
-        flowEnvLastTap = null;
-        return;
-      }
-      flowEnvLastTap = { t: performance.now(), x, y, idx: bidx };
-      flowEnvPtr = { mode: 'bound', idx: bidx, x0: x, y0: y };
-      return;
-    }
-    if (hit.type === 'envline' || hit.type === 'empty') {
-      // Only split when the tap is actually inside the plot — a tap past the
-      // left/right border (where the end dots sit) is never a new point.
-      if (x < pl.left - 4 || x > pl.right + 4) return;
-      const eb = envBoundaries();
-      flowEnvMutate(() => { envSplitAtTime(clamp01(xToT(x, pl)) * eb.total); });
-    }
+  // Plot: the gesture decides the mode (no toolbar).
+  if (y < pl.top || y > pl.bottom) return;
+  // 1. A dot grabs a boundary to move it.
+  const bidx = flowEnvHitBoundary(x, y, pl);
+  if (bidx >= 0) {
+    flowEnvSegFrom = null; flowEnvSegTo = null;
+    flowEnvPtr = { kind: 'bound', idx: bidx, px: x, py: y, moved: false, out: false };
+    return;
   }
+  // 2. A swipe starting in the left-edge strip is draw mode.
+  if (x <= pl.left + FLOW_ENV_DRAW_ZONE) {
+    flowEnvPtr = { kind: 'drawzone', px: x, py: y, moved: false };
+    return;
+  }
+  // 3. Tapping a segment line selects it (opens the docked strip).
+  const segIdx = flowEnvSegHit(x, y, pl);
+  if (segIdx >= 0) {
+    flowEnvPtr = { kind: 'segarm', idx: segIdx, px: x, py: y, moved: false };
+    return;
+  }
+  // 4. Empty space: add a point at the tap and start dragging it.
+  if (x < pl.left - 4 || x > pl.right + 4) return;
+  const eb = envBoundaries();
+  flowEnvMutate(() => { envSplitAtTime(clamp01(xToT(x, pl)) * eb.total); });
+  flowEnvSegFrom = null; flowEnvSegTo = null;
+  const ni = flowEnvHitBoundary(x, y, pl);
+  if (ni >= 0) flowEnvPtr = { kind: 'bound', idx: ni, px: x, py: y, moved: false, out: false };
 }
 
 function flowEnvHandleMove(x, y) {
   if (!flowEnvPtr) return;
   const p = flowEnvPanel();
-  const pl = flowEnvPlot(p);
-  if (flowEnvPtr.mode === 'bound') {
+  const pl = flowEnvPlot(p, true);
+  const k = flowEnvPtr.kind;
+  if (k === 'bound') {
+    flowEnvPtr.px = x; flowEnvPtr.py = y;
+    flowEnvPtr.moved = true;
+    flowEnvPtr.out = (x < pl.left || x > pl.right || y < pl.top || y > pl.bottom);
     flowEnvMutate(() => { envDragBoundary(flowEnvPtr.idx, xToT(x, pl), yToV(y, pl) - envTrim(ENVELOPE)); });
-  } else if (flowEnvPtr.mode === 'draw') {
+    // Re-sorting can move the dragged boundary's index; re-locate it (at its
+    // clamped position) so a release off the graph deletes the right point.
+    const dv = clamp01(yToV(y, pl) - envTrim(ENVELOPE));
+    const cpx = tToX(clamp01(xToT(x, pl)), pl);
+    const cpy = vToY(clamp01(dv + envTrim(ENVELOPE)), pl);
+    const hit = flowEnvHitBoundary(cpx, cpy, pl);
+    if (hit >= 0) flowEnvPtr.idx = hit;
+  } else if (k === 'draw') {
     const s = slotAtX(x, pl);
     flowEnvDrawAt(s, y, pl, flowEnvPtr.lastSlot);
     flowEnvPtr.lastSlot = s;
-  } else if (flowEnvPtr.mode === 'trim') {
+  } else if (k === 'drawzone') {
+    if (!flowEnvPtr.moved && x - flowEnvPtr.px > FLOW_TAP_MAX) {
+      flowEnvPtr.moved = true;
+      flowEnvPtr.kind = 'draw';
+      const s0 = slotAtX(flowEnvPtr.px, pl);
+      flowEnvDrawAt(s0, flowEnvPtr.py, pl, null);
+      flowEnvPtr.lastSlot = s0;
+    }
+    if (flowEnvPtr.kind === 'draw') {
+      const s = slotAtX(x, pl);
+      flowEnvDrawAt(s, y, pl, flowEnvPtr.lastSlot);
+      flowEnvPtr.lastSlot = s;
+    }
+  } else if (k === 'segarm') {
+    if (!flowEnvPtr.moved && Math.hypot(x - flowEnvPtr.px, y - flowEnvPtr.py) > FLOW_TAP_MAX) {
+      // Dragging a line = add a point at the down spot and drag it.
+      flowEnvPtr.moved = true;
+      flowEnvPtr.kind = 'bound';
+      flowEnvPtr.out = false;
+      flowEnvPtr.px = x; flowEnvPtr.py = y;
+      const eb = envBoundaries();
+      flowEnvMutate(() => { envSplitAtTime(clamp01(xToT(flowEnvPtr.px, pl)) * eb.total); });
+      const ni = flowEnvHitBoundary(flowEnvPtr.px, flowEnvPtr.py, pl);
+      if (ni >= 0) flowEnvPtr.idx = ni;
+    }
+  } else if (k === 'trim') {
     flowEnvApplyTrimFromY(flowEnvTrimSlider(p), y);
-  } else if (flowEnvPtr.mode === 'segparam') {
-    const R = flowEnvSegCard(p);
-    const g = R.params.find(r => r.key === flowEnvPtr.key);
+  } else if (k === 'segparam') {
+    const type = flowSegTypeOf(flowEnvSegCurrent());
+    const S = flowSegStripLayout(p, type);
+    const g = S.params.find(r => r.key === flowEnvPtr.key);
     if (g) flowEnvSetSegParam(flowEnvPtr.key, flowEnvSegParamFromX(g, x));
   }
 }
 
-function flowEnvHandleUp() {
-  flowEnvPtr = null;
+function flowEnvHandleUp(x, y) {
+  const p = flowEnvPanel();
+  const pl = flowEnvPlot(p, true);
+  if (flowEnvPtr) {
+    const k = flowEnvPtr.kind;
+    if (k === 'bound') {
+      flowEnvPtr.px = x; flowEnvPtr.py = y;
+      const out = (x < pl.left || x > pl.right || y < pl.top || y > pl.bottom);
+      if (flowEnvPtr.moved && out) {
+        flowEnvMutate(() => { envDeleteAt(Math.max(0, flowEnvPtr.idx - 1)); });
+      }
+    } else if (k === 'segarm' && !flowEnvPtr.moved) {
+      // A tap on a line: select the segment — the docked strip opens.
+      flowEnvSegFrom = flowEnvPtr.idx;
+      flowEnvSegTo = flowEnvPtr.idx + 1;
+    } else if (k === 'drawzone' && !flowEnvPtr.moved) {
+      // A plain tap in the left-edge strip behaves like any other tap.
+      const segIdx = flowEnvSegHit(x, y, pl);
+      if (segIdx >= 0) { flowEnvSegFrom = segIdx; flowEnvSegTo = segIdx + 1; }
+      else if (x >= pl.left - 4 && x <= pl.right + 4) {
+        const eb = envBoundaries();
+        flowEnvMutate(() => { envSplitAtTime(clamp01(xToT(x, pl)) * eb.total); });
+      }
+    }
+    flowEnvPtr = null;
+  }
   saveFlow();
 }
 
@@ -2798,23 +3186,33 @@ function flowUnisonHandleUp() {
    editor edits the node's own points directly (no shared global to swap). */
 var flowCurveEdit = null;     // id of the env node being edited, or null
 var flowCurveDirty = false;   // any edit happened this session (coalesces undo)
-var flowCurvePtr = null;      // { mode: 'point'|'draw', idx?, lastX? } active drag
-var flowCurveLastTap = null;  // double-tap-to-delete on a curve dot
-var flowCurveMode = 'point';  // 'point' | 'draw' | 'delete'
+var flowCurvePtr = null;      // { kind: 'point'|'draw'|'drawzone'|'segarm'|'trim'|'segparam', ... } active drag
+var flowCurveSegFrom = null, flowCurveSegTo = null;   // selected segment (point indexes)
 
 function flowCurvePanel() { return flowEnvPanel(); }
-function flowCurvePlot(p) { return flowEnvPlot(p); }
+function flowCurvePlot(p) { return flowEnvPlot(p, true); }
 function flowCurveClearPill(p) { return flowEnvClearPill(p); }
-function flowCurveToolbar(p) {
-  const modes = [['point', 'Point'], ['draw', 'Draw'], ['delete', 'Delete']];
-  const w = 54, gap = 6, h = 26, y = p.y + 48, x0 = p.x + 16;
-  return modes.map((m, i) => ({ mode: m[0], label: m[1], x: x0 + i * (w + gap), y, w, h }));
-}
 function flowCurvePointsOf(node) {
   const n = flowNodeById(node);
   if (!n) return null;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
   return n.env.points;
+}
+// The env node's curve object itself (ensured a default, with a trim).
+function flowCurveEnvOf(node) {
+  const n = flowNodeById(node);
+  if (!n) return null;
+  if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
+  if (n.env.trim == null) n.env.trim = 0;
+  return n.env;
+}
+// The left-edge vertical slider that raises/lowers the curve's trim — the same
+// geometry as the volume envelope's trim slider (they share the plot layout).
+function flowCurveTrimSlider(p) { return flowEnvTrimSlider(p); }
+function flowCurveTrimApply(y) {
+  const sl = flowCurveTrimSlider(flowCurvePanel());
+  const f = Math.max(0, Math.min(1, (y - sl.y0) / (sl.y1 - sl.y0)));
+  flowCurveMutate(() => { flowCurveEnvOf(flowCurveEdit).trim = Math.max(-1, Math.min(1, 1 - 2 * f)); });
 }
 function flowCurveInsert(points, t, v) {
   t = clamp01(t); v = Math.max(-1, Math.min(1, v));
@@ -2822,9 +3220,21 @@ function flowCurveInsert(points, t, v) {
     if (Math.abs(points[i].t - t) < 0.01) { points[i].v = v; return i; }
   }
   if (points.length >= 64) return -1;
-  points.push({ t, v });
+  // A point inserted inside a span carries the span's segment config, so a
+  // stairs/spring/pulse shape keeps its wobble across the split.
+  let seg = null;
+  for (let i = 0; i < points.length - 1; i++) {
+    if (t > points[i].t && t < points[i + 1].t) {
+      const s = points[i].seg;
+      if (s && typeof s === 'object') seg = clone(s);
+      break;
+    }
+  }
+  const pt = { t, v };
+  if (seg) pt.seg = seg;
+  points.push(pt);
   points.sort((a, b) => a.t - b.t);
-  return points.findIndex(pt => pt.t === t && pt.v === v);
+  return points.findIndex(p => p === pt);
 }
 function flowCurveRemove(points, idx) {
   const pt = points[idx];
@@ -2837,13 +3247,108 @@ function flowCurveRemove(points, idx) {
   }
   points.splice(idx, 1);
 }
-function hitTestCurveDot(x, y, pl, points) {
+function hitTestCurveDot(x, y, pl, points, trim) {
   let best = -1, bd = Infinity;
   for (let j = 0; j < points.length; j++) {
-    const d = Math.hypot(x - tToX(points[j].t, pl), y - ampToY(points[j].v, pl));
+    const d = Math.hypot(x - tToX(points[j].t, pl), y - ampToY(clampSign(points[j].v + (trim || 0)), pl));
     if (d < bd) { bd = d; best = j; }
   }
   return bd <= 24 ? best : -1;
+}
+/* ---- Env-curve segment line types ----
+   Each point owns the span from itself to the next ({t,v} + optional .seg), so
+   the envelope's Line / Stairs / Spring / Pulse shapes apply to an env curve
+   the same way they do to a mix/pitch curve. Selection state is self-contained
+   (flowCurveSegFrom/To), mirroring the envelope editor's. */
+function flowCurveSegModel() {
+  const pts = flowCurvePointsOf(flowCurveEdit) || [];
+  return { elems: pts, lastPoint: pts.length };
+}
+function flowCurveSegRange() {
+  const m = flowCurveSegModel();
+  if (flowCurveSegFrom == null && flowCurveSegTo == null) return null;
+  const a = flowCurveSegFrom == null ? flowCurveSegTo : flowCurveSegFrom;
+  const b = flowCurveSegTo == null ? flowCurveSegFrom : flowCurveSegTo;
+  const lo = Math.max(0, Math.min(a, b));
+  const hi = Math.max(a, b);
+  if (lo >= m.lastPoint || hi >= m.lastPoint) return null;
+  return { m, lo, hi };
+}
+function flowCurveSegCurrent() {
+  const r = flowCurveSegRange();
+  return r ? r.m.elems[r.lo] : null;
+}
+function flowCurveForEachSeg(fn) {
+  const r = flowCurveSegRange();
+  if (!r) return;
+  const end = r.hi + (r.hi <= r.lo ? 0 : -1);
+  for (let i = r.lo; i <= end; i++) { const el = r.m.elems[i]; if (el) fn(el); }
+}
+function flowCurveSegParamValue(key) {
+  const el = flowCurveSegCurrent();
+  if (!el) return SEG_PARAM_DEFS[key].min;
+  const s = segOf(el);
+  return Math.max(SEG_PARAM_DEFS[key].min, Math.min(SEG_PARAM_DEFS[key].max, +s[key] || SEG_PARAM_DEFS[key].min));
+}
+function flowCurveSegParamFromX(g, x) {
+  const d = SEG_PARAM_DEFS[g.key];
+  let v = d.min + clamp01((x - g.x1) / (g.x2 - g.x1)) * (d.max - d.min);
+  v = Math.round(v / d.step) * d.step;
+  return Math.max(d.min, Math.min(d.max, v));
+}
+function flowCurveSetSegType(t) {
+  if (SEGMENT_TYPE_ORDER.indexOf(t) < 0) return;
+  flowCurveMutate(() => {
+    flowCurveForEachSeg(el => {
+      if (!el.seg || typeof el.seg !== 'object') el.seg = clone(DEFAULT_SEG);
+      el.seg.type = t;
+    });
+  });
+}
+function flowCurveSetSegParam(key, v) {
+  const d = SEG_PARAM_DEFS[key];
+  if (!d) return;
+  v = Math.max(d.min, Math.min(d.max, +v || d.min));
+  flowCurveMutate(() => {
+    flowCurveForEachSeg(el => {
+      if (!el.seg || typeof el.seg !== 'object') el.seg = clone(DEFAULT_SEG);
+      el.seg[key] = v;
+    });
+  });
+}
+// The index of the env-curve segment (span i→i+1) whose drawn curve is nearest
+// (x,y), or -1.
+function flowCurveSegHit(x, y, pl, points, trim) {
+  if (!points || points.length < 2) return -1;
+  let best = -1, bd = 18;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    const ax = tToX(a.t, pl), ay = ampToY(clampSign(a.v + trim), pl);
+    const bx = tToX(b.t, pl), by = ampToY(clampSign(b.v + trim), pl);
+    const s = segOf(a);
+    const n = s.type === 'line' ? 2 : segDrawSamples(s);
+    for (let k = 0; k < n; k++) {
+      const f = k / n, f2 = (k + 1) / n;
+      const p1x = ax + (bx - ax) * f, p1y = ampToY(clampSign(segValueAt(a, a.v + trim, b.v + trim, f, 1)), pl);
+      const p2x = ax + (bx - ax) * f2, p2y = ampToY(clampSign(segValueAt(a, a.v + trim, b.v + trim, f2, 1)), pl);
+      const d = distToSeg(x, y, p1x, p1y, p2x, p2y);
+      if (d < bd) { bd = d; best = i; }
+    }
+  }
+  return best;
+}
+// Screen-space sample points for a seg-aware env-curve path (ends clamped to
+// the plot edges), ready for strokeSegPath.
+function flowCurveScreenPoints(points, trim, pl) {
+  const out = [];
+  const vAt = t => clampSign(specValueAtCurve(points, t) + trim);
+  if (points[0].t > 0) out.push({ x: tToX(0, pl), y: ampToY(vAt(0), pl), v: vAt(0), el: null });
+  for (let i = 0; i < points.length; i++) {
+    out.push({ x: tToX(points[i].t, pl), y: ampToY(clampSign(points[i].v + trim), pl), v: clampSign(points[i].v + trim), el: i < points.length - 1 ? points[i] : null });
+  }
+  const last = points[points.length - 1];
+  if (last.t < 1) out.push({ x: tToX(1, pl), y: ampToY(vAt(1), pl), v: vAt(1), el: null });
+  return out;
 }
 function openFlowCurveEditor(id) {
   const n = flowNodeById(id);
@@ -2852,8 +3357,8 @@ function openFlowCurveEditor(id) {
   flowCurveEdit = id;
   flowCurveDirty = false;
   flowCurvePtr = null;
-  flowCurveLastTap = null;
-  flowCurveMode = 'point';
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
   flowAddMenu = null;
   flowMoveId = null;
   flowConnArm = null;
@@ -2864,7 +3369,8 @@ function closeFlowCurveEditor() {
   flowCurveEdit = null;
   flowCurveDirty = false;
   flowCurvePtr = null;
-  flowCurveLastTap = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
   saveFlow();
 }
 function flowCurveMutate(fn) {
@@ -2875,6 +3381,7 @@ function drawFlowCurveEditor() {
   const p = flowCurvePanel();
   const pl = flowCurvePlot(p);
   const points = flowCurvePointsOf(flowCurveEdit) || [];
+  const trim = flowCurveEnvOf(flowCurveEdit).trim || 0;
   const y0 = ampToY(0, pl);
   // Partially transparent backdrop: the flow grid shows through.
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
@@ -2892,22 +3399,8 @@ function drawFlowCurveEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Neutral curve · 0 = no change · consumers decide the meaning', p.x + 86, p.y + 30);
-  // Mode toolbar.
-  for (const b of flowCurveToolbar(p)) {
-    const active = flowCurveMode === b.mode;
-    drawRoundRect(b.x, b.y, b.w, b.h, 8);
-    ctx.fillStyle = active ? '#ffffff' : '#222222';
-    ctx.fill();
-    ctx.strokeStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = active ? 1.5 : 1;
-    ctx.stroke();
-    ctx.fillStyle = active ? '#000000' : '#ffffff';
-    ctx.font = '800 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-  }
+  // Dock the line-mode strip at the top while a segment is selected.
+  if (flowCurveSegRange()) drawFlowSegStrip(p, { current: flowCurveSegCurrent, range: flowCurveSegRange, paramValue: flowCurveSegParamValue });
   // Clear pill (row 1, right): reset to the flat neutral line.
   const cp = flowCurveClearPill(p);
   drawRoundRect(cp.x, cp.y, cp.w, cp.h, 8);
@@ -2934,6 +3427,14 @@ function drawFlowCurveEditor() {
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
   ctx.lineWidth = 1.5;
   ctx.strokeRect(pl.left, pl.top, pl.pw, pl.ph);
+  // Selected-segment highlight band on the graph.
+  if (flowCurveSegRange()) {
+    const sr = flowCurveSegRange();
+    const a = points[sr.lo], b = points[sr.hi] || points[points.length - 1];
+    const x0 = tToX(a.t, pl), x1 = tToX(b.t, pl);
+    ctx.fillStyle = 'rgba(141,211,255,0.14)';
+    ctx.fillRect(x0, pl.top, Math.max(1, x1 - x0), pl.ph);
+  }
   // Neutral (0) line highlighted.
   ctx.strokeStyle = 'rgba(255,255,255,0.6)';
   ctx.lineWidth = 2;
@@ -2949,35 +3450,83 @@ function drawFlowCurveEditor() {
   ctx.fillText('+100%', pl.left + 2, pl.top + 10);
   ctx.fillText('0', pl.left + 2, y0 + 3);
   ctx.fillText('−100%', pl.left + 2, pl.bottom - 4);
-  // Curve + dots (extend the clamped ends to the plot edges).
+  // Curve + dots: each span renders its own line type (Line/Stairs/Spring/
+  // Pulse); the trim offsets the whole curve vertically like the envelope's.
   ctx.strokeStyle = '#8dd3ff';
   ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(tToX(0, pl), ampToY(specValueAtCurve(points, 0), pl));
-  for (let j = 0; j < points.length; j++) ctx.lineTo(tToX(points[j].t, pl), ampToY(points[j].v, pl));
-  ctx.lineTo(tToX(1, pl), ampToY(specValueAtCurve(points, 1), pl));
-  ctx.stroke();
+  strokeSegPath(flowCurveScreenPoints(points, trim, pl), 1, v => ampToY(clampSign(v), pl));
   for (const pt of points) {
     ctx.fillStyle = '#8dd3ff';
     ctx.beginPath();
-    ctx.arc(tToX(pt.t, pl), ampToY(pt.v, pl), 6, 0, Math.PI * 2);
+    ctx.arc(tToX(pt.t, pl), ampToY(clampSign(pt.v + trim), pl), 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
     ctx.stroke();
   }
+  // Trim slider: raises/lowers the whole curve.
+  const sl = flowCurveTrimSlider(p);
+  const scx = sl.x + sl.w / 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(scx, sl.y0); ctx.lineTo(scx, sl.y1);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sl.x, (sl.y0 + sl.y1) / 2); ctx.lineTo(sl.x + sl.w, (sl.y0 + sl.y1) / 2);
+  ctx.stroke();
+  const tc = sl.y1 - (trim + 1) / 2 * (sl.y1 - sl.y0);
+  drawRoundRect(sl.x, tc - 7, sl.w, 14, 7);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '700 8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Trim', scx, sl.y0 - 6);
+  // Drag feedback: the dot rides the finger; once it leaves the plot a
+  // trashcan pill appears (release there deletes the point, unless it's a
+  // protected anchor).
+  const ptr = flowCurvePtr;
+  if (ptr && ptr.kind === 'point' && ptr.moved) {
+    ctx.fillStyle = '#8dd3ff';
+    ctx.beginPath();
+    ctx.arc(ptr.px, ptr.py, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const protectedAnchor = (() => {
+      const pt = points[ptr.idx];
+      return !!(pt && (pt.t === 0 || pt.t === 1));
+    })();
+    if (ptr.out && !protectedAnchor) {
+      const bw = 46, bh = 30;
+      const bx = Math.max(pl.left, Math.min(pl.right - bw, ptr.px - bw / 2));
+      const by = Math.max(pl.top, Math.min(pl.bottom - bh, ptr.py - bh - 10));
+      drawRoundRect(bx, by, bw, bh, 8);
+      ctx.fillStyle = 'rgba(220,60,60,0.92)';
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '15px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🗑', bx + bw / 2, by + bh / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
   // Hint.
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(flowCurveMode === 'draw'
-    ? 'Draw · drag across the plot to scribble the curve · tap Point to edit dots'
-    : flowCurveMode === 'delete'
-    ? 'Delete · tap a dot to remove it'
-    : 'Point · tap to add a point · drag a dot to move · double-tap a dot to delete · above 0 adds, below ducks', p.x + p.w / 2, p.y + p.h - 8);
+  ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · left-edge swipe draws · tap a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
 }
-// Curve value at t (linear between breakpoints, ends clamp) — like specValueAt
-// but with {t,v} points and a ±1 axis.
+// Curve value at t (each span applies its segment line type, ends clamp) — like
+// specValueAt but with {t,v} points and a ±1 axis.
 function specValueAtCurve(points, t) {
   if (!points || !points.length) return 0;
   t = clamp01(t);
@@ -2989,7 +3538,7 @@ function specValueAtCurve(points, t) {
     if (t >= a.t && t <= b.t) {
       const span = b.t - a.t;
       const f = span > 0 ? (t - a.t) / span : 0;
-      return clampSign(a.v + (b.v - a.v) * f);
+      return clampSign(segValueAt(a, a.v, b.v, f, 1));
     }
   }
   return clampSign(hi.v);
@@ -2998,10 +3547,18 @@ function flowCurveHandleDown(x, y) {
   const p = flowCurvePanel();
   const pl = flowCurvePlot(p);
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowCurveEditor(); return; }
-  for (const b of flowCurveToolbar(p)) {
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-      flowCurveMode = b.mode;
-      flowCurvePtr = null;
+  // Line-mode strip (docked at the top): type pills / parameter controls.
+  if (flowCurveSegRange()) {
+    const type = flowSegTypeOf(flowCurveSegCurrent());
+    const hit = flowSegHitStrip(x, y, p, type);
+    if (hit) {
+      if (hit.type === 'type') flowCurveSetSegType(hit.t);
+      else if (hit.type === 'param') flowCurveSetSegParam(hit.key, flowCurveSegParamValue(hit.key) + hit.dir * SEG_PARAM_DEFS[hit.key].step);
+      else if (hit.type === 'slider') {
+        const S = flowSegStripLayout(p, type);
+        const g = S.params.find(r => r.key === hit.key);
+        if (g) { flowCurveSetSegParam(hit.key, flowCurveSegParamFromX(g, x)); flowCurvePtr = { kind: 'segparam', key: hit.key }; }
+      }
       return;
     }
   }
@@ -3011,66 +3568,135 @@ function flowCurveHandleDown(x, y) {
       const pts = flowCurvePointsOf(flowCurveEdit);
       pts.length = 0;
       pts.push({ t: 0, v: 0 }, { t: 1, v: 0 });
+      flowCurveEnvOf(flowCurveEdit).trim = 0;
     });
+    flowCurveSegFrom = null;
+    flowCurveSegTo = null;
     return;
   }
+  // Trim slider.
+  const sl = flowCurveTrimSlider(p);
+  if (x >= sl.x - 4 && x <= sl.x + sl.w + 4 && y >= sl.y0 - 8 && y <= sl.y1 + 6) {
+    flowCurveTrimApply(y);
+    flowCurvePtr = { kind: 'trim' };
+    return;
+  }
+  // Plot: the gesture decides the mode (no toolbar).
   if (y < pl.top || y > pl.bottom) return;
   const pts = flowCurvePointsOf(flowCurveEdit);
-  if (flowCurveMode === 'delete') {
-    const idx = hitTestCurveDot(x, y, pl, pts);
-    if (idx >= 0) flowCurveMutate(() => { flowCurveRemove(pts, idx); });
-    return;
-  }
-  if (flowCurveMode === 'draw') {
-    flowCurveMutate(() => { flowCurveInsert(pts, xToT(x, pl), yToAmp(y, pl)); });
-    flowCurvePtr = { mode: 'draw', lastX: xToT(x, pl) };
-    return;
-  }
-  // Point mode: grab a dot (double-tap deletes), or add a point and drag it.
-  const idx = hitTestCurveDot(x, y, pl, pts);
+  const trim = flowCurveEnvOf(flowCurveEdit).trim || 0;
+  // 1. A dot grabs a point to move it.
+  const idx = hitTestCurveDot(x, y, pl, pts, trim);
   if (idx >= 0) {
-    if (flowCurveLastTap && flowCurveLastTap.idx === idx && performance.now() - flowCurveLastTap.t < 400 && Math.hypot(x - flowCurveLastTap.x, y - flowCurveLastTap.y) < 26) {
-      flowCurveMutate(() => { flowCurveRemove(pts, idx); });
-      flowCurveLastTap = null;
-      return;
-    }
-    flowCurveLastTap = { t: performance.now(), x, y, idx };
-    flowCurvePtr = { mode: 'point', idx, x0: x, y0: y };
+    flowCurveSegFrom = null; flowCurveSegTo = null;
+    flowCurvePtr = { kind: 'point', idx, px: x, py: y, moved: false, out: false };
     return;
   }
-  const ni = flowCurveMutate(() => {
-    // Don't add a point from a tap outside the plot (the end dots sit right on
-    // the border — a finger past it should do nothing, not add an edge point).
-    if (x < pl.left - 4 || x > pl.right + 4) return -1;
-    return flowCurveInsert(pts, xToT(x, pl), yToAmp(y, pl));
-  });
-  if (ni >= 0) flowCurvePtr = { mode: 'point', idx: ni, x0: x, y0: y };
+  // 2. A swipe starting in the left-edge strip is draw mode.
+  if (x <= pl.left + FLOW_ENV_DRAW_ZONE) {
+    flowCurvePtr = { kind: 'drawzone', px: x, py: y, moved: false };
+    return;
+  }
+  // 3. Tapping a segment line selects it (opens the docked strip).
+  const segIdx = flowCurveSegHit(x, y, pl, pts, trim);
+  if (segIdx >= 0) {
+    flowCurvePtr = { kind: 'segarm', idx: segIdx, px: x, py: y, moved: false };
+    return;
+  }
+  // 4. Empty space: add a point at the tap and start dragging it.
+  if (x < pl.left - 4 || x > pl.right + 4) return;
+  const ni = flowCurveMutate(() => flowCurveInsert(pts, xToT(x, pl), yToAmp(y, pl) - trim));
+  flowCurveSegFrom = null; flowCurveSegTo = null;
+  if (ni >= 0) flowCurvePtr = { kind: 'point', idx: ni, px: x, py: y, moved: false, out: false };
 }
 function flowCurveHandleMove(x, y) {
   if (!flowCurvePtr) return;
   const p = flowCurvePanel();
   const pl = flowCurvePlot(p);
-  if (flowCurvePtr.mode === 'point') {
+  const trim = flowCurveEnvOf(flowCurveEdit).trim || 0;
+  const k = flowCurvePtr.kind;
+  if (k === 'trim') {
+    flowCurveTrimApply(y);
+  } else if (k === 'point') {
     const pts = flowCurvePointsOf(flowCurveEdit);
     const pt = pts[flowCurvePtr.idx];
+    flowCurvePtr.px = x; flowCurvePtr.py = y;
+    flowCurvePtr.moved = true;
+    flowCurvePtr.out = (x < pl.left || x > pl.right || y < pl.top || y > pl.bottom);
     if (pt) {
       flowCurveMutate(() => {
         pt.t = clamp01(xToT(x, pl));
-        pt.v = clampSign(yToAmp(y, pl));
+        pt.v = clampSign(yToAmp(y, pl) - trim);
         pts.sort((a, b) => a.t - b.t);
         flowCurvePtr.idx = pts.indexOf(pt);
       });
     }
-  } else if (flowCurvePtr.mode === 'draw') {
+  } else if (k === 'drawzone') {
+    if (!flowCurvePtr.moved && x - flowCurvePtr.px > FLOW_TAP_MAX) {
+      flowCurvePtr.moved = true;
+      flowCurvePtr.kind = 'draw';
+      flowCurvePtr.lastX = xToT(flowCurvePtr.px, pl);
+    }
+    if (flowCurvePtr.kind === 'draw') {
+      const xf = xToT(x, pl);
+      if (Math.abs(xf - flowCurvePtr.lastX) > 0.01) {
+        flowCurveMutate(() => { flowCurveInsert(flowCurvePointsOf(flowCurveEdit), xf, yToAmp(y, pl) - trim); });
+        flowCurvePtr.lastX = xf;
+      }
+    }
+  } else if (k === 'segarm') {
+    if (!flowCurvePtr.moved && Math.hypot(x - flowCurvePtr.px, y - flowCurvePtr.py) > FLOW_TAP_MAX) {
+      // Dragging a line = add a point at the down spot and drag it.
+      flowCurvePtr.moved = true;
+      flowCurvePtr.kind = 'point';
+      flowCurvePtr.out = false;
+      flowCurvePtr.px = x; flowCurvePtr.py = y;
+      const pts = flowCurvePointsOf(flowCurveEdit);
+      const ni = flowCurveMutate(() => flowCurveInsert(pts, xToT(flowCurvePtr.px, pl), yToAmp(flowCurvePtr.py, pl) - trim));
+      if (ni >= 0) flowCurvePtr.idx = ni;
+    }
+  } else if (k === 'draw') {
     const xf = xToT(x, pl);
     if (Math.abs(xf - flowCurvePtr.lastX) > 0.01) {
-      flowCurveMutate(() => { flowCurveInsert(flowCurvePointsOf(flowCurveEdit), xf, yToAmp(y, pl)); });
+      flowCurveMutate(() => { flowCurveInsert(flowCurvePointsOf(flowCurveEdit), xf, yToAmp(y, pl) - trim); });
       flowCurvePtr.lastX = xf;
     }
+  } else if (k === 'segparam') {
+    const type = flowSegTypeOf(flowCurveSegCurrent());
+    const S = flowSegStripLayout(p, type);
+    const g = S.params.find(r => r.key === flowCurvePtr.key);
+    if (g) flowCurveSetSegParam(flowCurvePtr.key, flowCurveSegParamFromX(g, x));
   }
 }
-function flowCurveHandleUp() {
-  flowCurvePtr = null;
+function flowCurveHandleUp(x, y) {
+  const p = flowCurvePanel();
+  const pl = flowCurvePlot(p);
+  if (flowCurvePtr) {
+    const k = flowCurvePtr.kind;
+    if (k === 'point') {
+      flowCurvePtr.px = x; flowCurvePtr.py = y;
+      const out = (x < pl.left || x > pl.right || y < pl.top || y > pl.bottom);
+      if (flowCurvePtr.moved && out) {
+        const pts = flowCurvePointsOf(flowCurveEdit);
+        const pt = pts[flowCurvePtr.idx];
+        if (pt && pt.t !== 0 && pt.t !== 1) flowCurveMutate(() => { flowCurveRemove(pts, flowCurvePtr.idx); });
+      }
+    } else if (k === 'segarm' && !flowCurvePtr.moved) {
+      // A tap on a line: select the segment — the docked strip opens.
+      flowCurveSegFrom = flowCurvePtr.idx;
+      flowCurveSegTo = flowCurvePtr.idx + 1;
+    } else if (k === 'drawzone' && !flowCurvePtr.moved) {
+      // A plain tap in the left-edge strip behaves like any other tap.
+      const pts = flowCurvePointsOf(flowCurveEdit);
+      const trim = flowCurveEnvOf(flowCurveEdit).trim || 0;
+      const segIdx = flowCurveSegHit(x, y, pl, pts, trim);
+      if (segIdx >= 0) { flowCurveSegFrom = segIdx; flowCurveSegTo = segIdx + 1; }
+      else if (x >= pl.left - 4 && x <= pl.right + 4) {
+        flowCurveMutate(() => { flowCurveInsert(pts, xToT(x, pl), yToAmp(y, pl) - trim); });
+      }
+    }
+    flowCurvePtr = null;
+  }
   saveFlow();
 }
 
@@ -3097,11 +3723,18 @@ function compileFlowNote(note) {
       presetId: spec.presetId, specPoints: spec.specPoints,
       pitchEnv: null, voices: null,
     };
-    // Mix envelope: an env curve v ∈ −1..1 maps to a mix weight 0..1 (0 = full).
+    // Mix envelope: an env curve v ∈ −1..1 maps to a mix weight 0..1 (0 = full);
+    // the node's trim shifts the whole curve before that mapping, and each
+    // span's line type (Line/Stairs/Spring/Pulse) rides along to the engine.
     const mixId = note.conn.mixEnvs[i];
     const mix = mixId ? flowNodeById(mixId) : null;
     if (mix && mix.type === 'env' && mix.env && Array.isArray(mix.env.points) && mix.env.points.length >= 2) {
-      layer.curve = mix.env.points.map(pt => ({ t: clamp01(pt.t), v: clamp01(1 + (+pt.v || 0)) }));
+      const mTrim = +mix.env.trim || 0;
+      layer.curve = mix.env.points.map(pt => {
+        const c = { t: clamp01(pt.t), v: clamp01(1 + (+pt.v || 0) + mTrim) };
+        if (pt.seg && typeof pt.seg === 'object') c.seg = clone(pt.seg);
+        return c;
+      });
     } else {
       layer.curve = [{ t: 0, v: 1 }, { t: 1, v: 1 }];
     }
@@ -3126,12 +3759,17 @@ function compileUnisonEnvs(uni) {
   const mk = (id, range, scale, neutral) => {
     const n = id ? flowNodeById(id) : null;
     if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
+    const trim = +n.env.trim || 0;
     return {
       range,
-      points: n.env.points.map(pt => ({
-        t: clamp01(pt.t),
-        v: Math.max(-range, Math.min(range, neutral + (+pt.v || 0) * scale)),
-      })),
+      points: n.env.points.map(pt => {
+        const c = {
+          t: clamp01(pt.t),
+          v: Math.max(-range, Math.min(range, neutral + ((+pt.v || 0) + trim) * scale)),
+        };
+        if (pt.seg && typeof pt.seg === 'object') c.seg = clone(pt.seg);
+        return c;
+      }),
     };
   };
   out.st = mk(c.stEnv, 24, 24, 0);
@@ -3160,6 +3798,179 @@ function playFlowNote(note) {
   return true;
 }
 
+/* ---- Note play modes (tap / full length / live) ----
+   Beyond the one-shot full-length preview (playFlowNote above), a flow note can
+   also be played like a tap or held live. Both reuse the shared live-note
+   scheduler (initLivePathAudio / tickLiveHold / finishLivePathNote in audio.js)
+   driven by a minimal synthetic "gesture": a single point at the preview pitch
+   and preview base volume. Because they run the real live scheduler, every
+   connected envelope applies — volume, wave mix, and unison vol/st/ct/pitch.
+   The synthetic playback path is never drawn (gesture rendering only runs in
+   the main area), so no stray circles appear in flow mode. */
+var flowLive = null;    // { ds, nodeId } while a flow note's live button is held
+function flowSyntheticDs(savedGlobals) {
+  const y = H * 0.55;   // preview base volume, matching previewNote
+  return {
+    startX: 0, startY: y,
+    pts: [{ x: 0, y }],
+    cumTime: [0],
+    totalMs: 0,
+    pitchOverride: previewPitchName(),
+    lastMoveAt: 0,
+    finished: false,
+    playback: { pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true },
+    savedGlobals,
+  };
+}
+// Swap the shared sound globals in for the compiled flow note. They stay
+// swapped for a live note's whole life (tickLiveHold / finishLivePathNote read
+// them while scheduling), so the restore must wait until it wraps up.
+function flowGlobalsSwap(compiled) {
+  const saved = { ENVELOPE, OSC_STACK, MASTER_PITCH_ENV, MASTER_VOICE_ENVS };
+  ENVELOPE = compiled.envelope;
+  OSC_STACK = { layers: compiled.layers };
+  MASTER_PITCH_ENV = compiled.masterPitchEnv;
+  MASTER_VOICE_ENVS = compiled.masterVoiceEnvs;
+  return saved;
+}
+function flowGlobalsRestore(saved) {
+  if (!saved) return;
+  ENVELOPE = saved.ENVELOPE;
+  OSC_STACK = saved.OSC_STACK;
+  MASTER_PITCH_ENV = saved.MASTER_PITCH_ENV;
+  MASTER_VOICE_ENVS = saved.MASTER_VOICE_ENVS;
+}
+// Play a note "live": press-and-hold. Starts the note on press and sustains the
+// envelope body (tickLiveHold in flowLoop) until release, then the release tail.
+function flowLiveStart(note) {
+  const compiled = compileFlowNote(note);
+  if (!compiled) return false;
+  flowStopRepeat();   // live is press-and-hold — never layered over a repeat
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return false;
+  stopPreviewVoices();
+  if (flowLive) flowLiveEnd();
+  const saved = flowGlobalsSwap(compiled);
+  const ds = flowSyntheticDs(saved);
+  try {
+    initLivePathAudio(ds);
+  } catch (err) {
+    flowGlobalsRestore(saved);
+    return false;
+  }
+  flowLive = { ds, nodeId: note.id };
+  return true;
+}
+// End a held flow note: mark it finished, schedule its release tail, then
+// restore the shared sound globals (the tail was baked in by finishLivePathNote).
+function flowLiveEnd() {
+  const lv = flowLive;
+  flowLive = null;
+  if (!lv || !lv.ds) return;
+  const ds = lv.ds;
+  try {
+    if (ds.gain && !ds.finished) {
+      ds.finished = true;
+      finishLivePathNote(ds);
+    } else if (ds.gain) {
+      quickFadeNote(ds, 200);
+    }
+  } catch (err) {
+    try { quickFadeNote(ds, 200); } catch (e) {}
+  } finally {
+    flowGlobalsRestore(ds.savedGlobals);
+  }
+}
+// Play a note like a tap in the main area: the body plays through the early-cut
+// marker, then the release section (a zero-length live note wrapped immediately).
+function tapFlowNote(note) {
+  const compiled = compileFlowNote(note);
+  if (!compiled) return false;
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return false;
+  stopPreviewVoices();
+  if (flowLive) flowLiveEnd();
+  const saved = flowGlobalsSwap(compiled);
+  const ds = flowSyntheticDs(saved);
+  try {
+    initLivePathAudio(ds);
+    ds.finished = true;
+    finishLivePathNote(ds);
+  } catch (err) {
+    try { quickFadeNote(ds, 200); } catch (e) {}
+  } finally {
+    flowGlobalsRestore(saved);
+  }
+  return true;
+}
+
+/* ---- Note repeat (tap / full length) ----
+   A repeat toggle makes the tap and full-length options play over and over.
+   While a repeat is running, the looping button becomes a stop button (tap it
+   again to stop); live stays press-and-hold and always stops any active repeat.
+   The loop is timed by the note's own duration (body through the cut + release
+   for tap, full body + release for full length), recomputed when it starts, so
+   repeats land at the note's natural rhythm. */
+var flowRepeat = false;         // the repeat toggle (applies to tap / full)
+var flowRepeatTimer = null;     // interval handle while a repeat is active
+var flowRepeatMode = null;      // 'tap' | 'full' | null — what is currently looping
+var flowRepeatNodeId = null;    // note whose sound is looping
+function flowLoopingMode() {
+  return flowRepeatTimer ? flowRepeatMode : null;
+}
+function flowRepeatToggle() {
+  flowRepeat = !flowRepeat;
+  if (!flowRepeat) flowStopRepeat();
+}
+function flowStopRepeat() {
+  if (flowRepeatTimer) { clearInterval(flowRepeatTimer); flowRepeatTimer = null; }
+  flowRepeatMode = null;
+  flowRepeatNodeId = null;
+}
+function flowRepeatIntervalMs(mode, compiled) {
+  const env = compiled.envelope;
+  if (!env || !env.components || !env.components.length) return 1200;
+  const maxIdx = Math.max(0, env.beginReleaseIndex - 1);
+  const idx = Math.max(-1, Math.min(maxIdx, env.earlyCutIndex == null ? maxIdx : env.earlyCutIndex));
+  const cutMs = compsMs(env.components.slice(0, idx + 1));
+  const relMs = compsMs(env.components.slice(env.beginReleaseIndex));
+  const bodyMs = compsMs(env.components.slice(0, env.holdEndIndex + 1));
+  const dur = mode === 'tap'
+    ? Math.max(MIN_GESTURE_MS, cutMs) + relMs
+    : bodyMs + relMs;
+  return Math.max(300, dur) + FADE_MS + 40;   // full duration + a small gap
+}
+function flowStartRepeat(mode, note) {
+  flowStopRepeat();
+  const compiled = compileFlowNote(note);
+  if (!compiled) return false;
+  flowRepeatMode = mode;
+  flowRepeatNodeId = note.id;
+  if (mode === 'tap') tapFlowNote(note); else playFlowNote(note);
+  const dur = flowRepeatIntervalMs(mode, compiled);
+  flowRepeatTimer = setInterval(() => {
+    const n = flowNodeById(flowRepeatNodeId);
+    // Stop silently if the note vanished or is no longer playable.
+    if (!n || !flowNoteReady(n) || !compileFlowNote(n)) { flowStopRepeat(); return; }
+    if (flowRepeatMode === 'tap') tapFlowNote(n); else playFlowNote(n);
+  }, dur);
+  return true;
+}
+// The shared tap/full entry point: repeats when the toggle is on, otherwise
+// plays once. Tapping the button of an already-looping mode stops it.
+function flowPlayMode(mode, note) {
+  if (flowRepeat) {
+    if (flowRepeatMode === mode && flowRepeatNodeId === note.id) { flowStopRepeat(); return; }
+    flowStartRepeat(mode, note);
+  } else if (mode === 'tap') {
+    tapFlowNote(note);
+  } else {
+    playFlowNote(note);
+  }
+}
+
 /* ---- Pointer handling (active only in flow mode) ---- */
 canvas.addEventListener('pointerdown', e => {
   if (!flowActive) return;
@@ -3167,7 +3978,7 @@ canvas.addEventListener('pointerdown', e => {
   // When an editor dismisses itself on this tap (outside panel or ✕), fall
   // through so the tap also acts on whatever is underneath (ports / nodes /
   // grid). If it handled the tap internally, it stays open and we stop here.
-  if (flowNoteEdit) { flowNoteHandleDown(x, y); if (flowNoteEdit) return; }
+  if (flowNoteEdit) { flowNoteHandleDown(x, y); if (flowLive) { try { canvas.setPointerCapture(e.pointerId); } catch (err) {} } if (flowNoteEdit) return; }
   if (flowEnvEdit) { flowEnvHandleDown(x, y); if (flowEnvEdit) return; }
   if (flowWaveEdit) { flowWaveHandleDown(x, y); if (flowWaveEdit) return; }
   if (flowUnisonEdit) { flowUnisonHandleDown(x, y); if (flowUnisonEdit) return; }
@@ -3197,6 +4008,15 @@ canvas.addEventListener('pointerdown', e => {
       return;
     }
   }
+  // Edge jump buttons on a selected wire: tap one to pan to its off-screen node.
+  const jumpBtn = hitFlowJumpBtn(x, y);
+  if (jumpBtn) {
+    flowAddMenu = null;
+    flowPanAnim = null;
+    flowInertia = null;
+    panToNode(jumpBtn.node);
+    return;
+  }
   // On-node connection ports (arm / cancel / clear). Drawn on top of the modal
   // and the add menu, so they hit before those.
   const portHit = hitFlowPort(x, y);
@@ -3204,9 +4024,10 @@ canvas.addEventListener('pointerdown', e => {
     const pn = portHit.node, pt = portHit.pt;
     flowAddMenu = null;
     flowPanAnim = null;
+    flowSelConn = null;   // arming / clearing a port supersedes wire selection
     if (portHit.clear) {
       flowPushHistory();
-      connSlotSet(pn, pt.slot, null);
+      connSlotClearPair(pn, pt.slot);
       saveFlow();
       return;
     }
@@ -3218,17 +4039,45 @@ canvas.addEventListener('pointerdown', e => {
   // Add-node menu option (create the node).
   const opt = hitAddMenu(x, y);
   if (opt) { addFlowNode(opt.type); return; }
+  // A note widget's ▶ live button is a press-and-hold: start it on press so the
+  // note sustains until the finger lifts (the tap / full buttons act on the
+  // tap in pointerup below).
+  const wxp = x + flowCam.x, wyp = y + flowCam.y;
+  const wn = flowNodeAt(wxp, wyp);
+  if (wn && wn.type === 'note') {
+    const wr = flowWidgetRect(wn, false);
+    const btns = flowNoteWidgetButtons(wr);
+    if (x >= btns.live.x && x <= btns.live.x + btns.live.w && y >= btns.live.y && y <= btns.live.y + btns.live.h) {
+      flowSelId = wn.id;
+      flowAddMenu = null;
+      flowConnArm = null;
+      if (flowLiveStart(wn)) {
+        flowPtr = null;
+        flowHold = null;
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      return;
+    }
+  }
   // Grid: start a pan (a small movement counts as a tap on release). Pressing
-  // on a node arms a long-press move/delete hold; pressing empty space arms a
-  // long-press add-menu hold.
+  // on a node arms a long-press move/delete hold; pressing a wire selects it
+  // and arms a long-press delete hold; empty space arms the add-menu hold.
   flowAddMenu = null;
   flowInertia = null;
   flowPanAnim = null;
   const wx = x + flowCam.x, wy = y + flowCam.y;
   const node = flowNodeAt(wx, wy);
+  const conn = node ? null : flowConnAtPress(x, y);
   flowPtr = { kind: 'grid', x, y, startX: x, startY: y, lastT: e.timeStamp, vx: 0, vy: 0, moved: false };
-  if (node) flowHold = { id: node.id, kind: 'move', t0: performance.now(), stage: 0 };
-  else flowHold = { id: null, kind: 'add', x: wx, y: wy, t0: performance.now(), stage: 0 };
+  if (node) {
+    flowSelConn = null;
+    flowHold = { id: node.id, kind: 'move', t0: performance.now(), stage: 0 };
+  } else if (conn) {
+    selectFlowConn(conn);
+    flowHold = { id: null, kind: 'conn', conn: { nodeId: conn.nodeId, slot: conn.slot }, x, y, t0: performance.now(), stage: 0 };
+  } else {
+    flowHold = { id: null, kind: 'add', x: wx, y: wy, t0: performance.now(), stage: 0 };
+  }
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
 });
 
@@ -3240,6 +4089,7 @@ canvas.addEventListener('pointermove', e => {
   if (flowWaveEdit) { flowWaveHandleMove(x, y); return; }
   if (flowUnisonEdit) { flowUnisonHandleMove(x, y); return; }
   if (flowCurveEdit) { flowCurveHandleMove(x, y); return; }
+  if (flowLive) return;   // a held live button is a sustain, not a pan
   if (!flowPtr) return;
   if (!flowPtr.moved && Math.hypot(x - flowPtr.startX, y - flowPtr.startY) > FLOW_TAP_MAX) {
     flowPtr.moved = true;
@@ -3263,11 +4113,14 @@ canvas.addEventListener('pointermove', e => {
 
 canvas.addEventListener('pointerup', e => {
   if (!flowActive) return;
+  const x = stageX(e), y = stageY(e);
   if (flowNoteEdit) { flowNoteHandleUp(); return; }
-  if (flowEnvEdit) { flowEnvHandleUp(); return; }
+  if (flowEnvEdit) { flowEnvHandleUp(x, y); return; }
   if (flowWaveEdit) { flowWaveHandleUp(); return; }
   if (flowUnisonEdit) { flowUnisonHandleUp(); return; }
-  if (flowCurveEdit) { flowCurveHandleUp(); return; }
+  if (flowCurveEdit) { flowCurveHandleUp(x, y); return; }
+  // A held live button releases on finger-up: schedule the note's release tail.
+  if (flowLive) { flowLiveEnd(); return; }
   // A held press that reached its long-press action (move mode / add menu):
   // consume the release so it doesn't also select/deselect or act as a tap.
   if (flowHold) {
@@ -3315,13 +4168,24 @@ canvas.addEventListener('pointerup', e => {
     return;
   }
   if (node) {
-    // A note widget's ▶ play button is always live: tapping it previews the
-    // sound instead of entering edit mode.
+    // A note widget's four ▶ play buttons are always live: tapping the tap /
+    // full / repeat buttons acts on the tap instead of entering edit mode (the
+    // live button is handled on pointerdown as a press-and-hold).
     if (node.type === 'note') {
       const wr = flowWidgetRect(node, false);
-      const pb = flowNoteWidgetPlay(wr);
-      if (tapX >= pb.x && tapX <= pb.x + pb.w && tapY >= pb.y && tapY <= pb.y + pb.h) {
-        playFlowNote(node);
+      const btns = flowNoteWidgetButtons(wr);
+      if (tapX >= btns.tap.x && tapX <= btns.tap.x + btns.tap.w && tapY >= btns.tap.y && tapY <= btns.tap.y + btns.tap.h) {
+        flowPlayMode('tap', node);
+        flowSelId = node.id;
+        return;
+      }
+      if (tapX >= btns.full.x && tapX <= btns.full.x + btns.full.w && tapY >= btns.full.y && tapY <= btns.full.y + btns.full.h) {
+        flowPlayMode('full', node);
+        flowSelId = node.id;
+        return;
+      }
+      if (tapX >= btns.repeat.x && tapX <= btns.repeat.x + btns.repeat.w && tapY >= btns.repeat.y && tapY <= btns.repeat.y + btns.repeat.h) {
+        flowRepeatToggle();
         flowSelId = node.id;
         return;
       }
@@ -3332,13 +4196,16 @@ canvas.addEventListener('pointerup', e => {
     if (flowConnArm) { flowConnArm = null; return; }   // cancelled on an empty spot
     flowAddMenu = null;   // a plain tap never opens the add menu — long-press does
     flowSelId = null;
+    if (!hitFlowConn(tapX, tapY)) flowSelConn = null;   // an empty tap clears wire selection
   }
 });
 
 canvas.addEventListener('pointercancel', () => {
+  if (flowLive) flowLiveEnd();
   flowEnvPtr = null;
   flowWavePtr = null;
   flowUnisonDrag = null;
+  flowCurvePtr = null;
   flowPtr = null;
   flowInertia = null;
   flowPanAnim = null;
@@ -3348,34 +4215,50 @@ canvas.addEventListener('pointercancel', () => {
 
 function flowLoop(now) {
   if (flowActive) {
+    // A held live note sustains its envelope body while the finger stays down.
+    if (flowLive) tickLiveHold(flowLive.ds);
     // Long-press hold: move mode on a node (stage 1), then a longer hold on the
     // same node becomes a delete countdown (stage 2); holding empty space opens
-    // the add menu.
+    // the add menu; holding a wire flashes it, then a 3-2-1 countdown deletes
+    // the connection (release cancels).
     if (flowHold) {
       const el = performance.now() - flowHold.t0;
-      if (flowHold.stage === 0 && el >= FLOW_HOLD_MOVE) {
-        flowHold.stage = 1;
-        if (flowHold.kind === 'add') {
-          flowAddMenu = { x: flowHold.x, y: flowHold.y };   // add menu at the held spot
-          flowSelId = null;
-          flowConnArm = null;
-          flowMoveId = null;
-        } else {
-          flowMoveId = flowHold.id;   // start flashing (move mode)
-          flowSelId = flowHold.id;
-          flowAddMenu = null;
+      if (flowHold.kind === 'conn') {
+        if (flowHold.stage === 0 && el >= FLOW_HOLD_MOVE) flowHold.stage = 1;
+        else if (flowHold.stage === 1 && el >= FLOW_HOLD_DELETE) {
+          flowHold.stage = 2;
+          flowHold.del0 = performance.now();
         }
-      }
-      // Keep holding past move mode → switch to the 3-2-1 delete countdown.
-      if (flowHold.kind !== 'add' && flowHold.stage === 1 && el >= FLOW_HOLD_DELETE) {
-        flowHold.stage = 2;
-        flowHold.del0 = performance.now();
-        flowMoveId = null;   // cancel move placement
-      }
-      if (flowHold.stage === 2 && performance.now() - flowHold.del0 >= FLOW_DELETE_MS) {
-        const id = flowHold.id;
-        flowHold = null;
-        deleteFlowNode(id);
+        if (flowHold.stage === 2 && performance.now() - flowHold.del0 >= FLOW_DELETE_MS) {
+          const c = flowHold.conn;
+          flowHold = null;
+          deleteFlowConn(c.nodeId, c.slot);
+        }
+      } else {
+        if (flowHold.stage === 0 && el >= FLOW_HOLD_MOVE) {
+          flowHold.stage = 1;
+          if (flowHold.kind === 'add') {
+            flowAddMenu = { x: flowHold.x, y: flowHold.y };   // add menu at the held spot
+            flowSelId = null;
+            flowConnArm = null;
+            flowMoveId = null;
+          } else {
+            flowMoveId = flowHold.id;   // start flashing (move mode)
+            flowSelId = flowHold.id;
+            flowAddMenu = null;
+          }
+        }
+        // Keep holding past move mode → switch to the 3-2-1 delete countdown.
+        if (flowHold.kind !== 'add' && flowHold.stage === 1 && el >= FLOW_HOLD_DELETE) {
+          flowHold.stage = 2;
+          flowHold.del0 = performance.now();
+          flowMoveId = null;   // cancel move placement
+        }
+        if (flowHold.stage === 2 && performance.now() - flowHold.del0 >= FLOW_DELETE_MS) {
+          const id = flowHold.id;
+          flowHold = null;
+          deleteFlowNode(id);
+        }
       }
     }
     // Float-away separation: a newly added / moved node drifts to clear space,
