@@ -465,7 +465,7 @@ function stopPreviewVoices() {
   previewPlayhead = null;
 }
 
-function previewNote(pitch) {
+function previewNote(pitch, bodyMsOpt) {
   initAudio();
   resumeAudio();
   if (!audioCtx || !masterGain) return;
@@ -475,8 +475,10 @@ function previewNote(pitch) {
   const t0 = audioCtx.currentTime + 0.02;
   // The preview plays a held note: the body runs through the FULL design body
   // (the hold end), never cutting short at the early-cut marker, so every
-  // component of the envelope is heard before the release.
-  const bodyMs = designBodyMs();
+  // component of the envelope is heard before the release. A caller can pass a
+  // shorter body length (a tap plays through the early-cut marker) — the
+  // scheduling is identical, just a shorter body.
+  const bodyMs = bodyMsOpt == null ? designBodyMs() : Math.max(1, bodyMsOpt);
   const relMs = releaseMs();
   const base = Math.max(0.35, baseVolumeFromY(H * 0.55));
 
@@ -948,19 +950,18 @@ function finishLivePathNote(ds) {
     // the release section follows.
     if (ds.totalMs < cutMs) {
       // The line will run out before the cut: extend the body through the cut
-      // point (the remainder), then release from the level at the cut.
+      // point (the remainder), then release from the level at the cut. Bake the
+      // FULL envelope set (master volume + layer mix + voice vol/st/ct + pitch)
+      // across the remainder — a synthetic flow tap has no drawn path to feed
+      // the live scheduler's per-point bakes, so without this the mix and pitch
+      // envelopes would sit frozen at their start values instead of animating
+      // exactly like the full preview.
       const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
       const p0 = ds.totalMs;
       const t0 = Math.max(now, ds.ctx0 + p0 / 1000);
-      const N = 96;
-      const curve = new Float32Array(N);
-      curve[0] = Math.max(1e-4, ds.gainLevel || ds.gain.value);
-      for (let k = 1; k < N; k++) {
-        const t = p0 + (cutMs - p0) * k / (N - 1);
-        curve[k] = baseVol * relValueBody(ENVELOPE, t, true);
-      }
-      ds.gain.setValueCurveAtTime(curve, t0 + 0.002, (cutMs - p0) / 1000);
-      scheduleReleaseTail(ds, curve[curve.length - 1], t0 + 0.002 + (cutMs - p0) / 1000);
+      const endT = t0 + (cutMs - p0) / 1000;
+      scheduleLiveCurves(ds, t0, endT, baseVol);
+      scheduleReleaseTail(ds, baseVol * relValueBody(ENVELOPE, cutMs, true), endT);
     } else {
       // The line already reaches the cut: no cut needed — let the whole drawn
       // line play out to its end, then start the release section where the

@@ -15,8 +15,9 @@
 
    Connections are consumer-owned slots shown as emoji-labeled ports on the
    node's own edges (tap a port to arm it, tap a node on the grid to connect,
-   tap the port again to cancel, its ✕ clears); wires render as colored beziers
-   from a source to the consumer's port, colored by the source node's type (tap
+   tap the port again to cancel); wires render as colored beziers from a source
+   to the consumer's port, colored by the source node's type, and arc around
+   any node card they would otherwise pass under (tap
    a wire to select it — long-press it to delete, and off-screen endpoints get
    edge jump buttons). Every node is an always-visible widget
    card that shows its values (mini envelope / curve / spectrum / faders / play
@@ -52,6 +53,7 @@ const FLOW_WAVE_ACCENT = '#4fc3f7';      // wave-editor plot accent (cyan)
 const FLOW_UNISON_ACCENT = '#d98cff';    // unison-editor accent (violet)
 const FLOW_ENV_DRAW_ZONE = 26;           // px strip inside a plot's left border: a swipe starting here is draw mode
 const FLOW_ENV_HEADER_H = 24;            // extra header room above the graph editors' plot for the docked line-mode strip
+const FLOW_ENV_DELETE_BUFFER = 24;       // px a dot must pass the plot edge before drag-to-delete arms (the delete pill appears)
 // Wire colors: a connection line's color comes from the SOURCE ("from") node's
 // type — each type has its own accent. A filled port inherits its source's
 // color (so the port matches the wire); an empty port keeps a role-based hint
@@ -274,7 +276,7 @@ function defaultEnvCurve() {
    may feed a unison; a unison may feed up to three envs (volume / st / ct). */
 function defaultConn(type) {
   if (type === 'note') return { volumeEnv: null, waves: [null, null, null], mixEnvs: [null, null, null] };
-  if (type === 'wave') return { mixEnv: null, unison: null };
+  if (type === 'wave') return { mixEnv: null, unison: [] };
   if (type === 'unison') return { volEnv: null, stEnv: null, ctEnv: null };
   return null;
 }
@@ -321,7 +323,13 @@ function flowSlotRows(node) {
       });
     }
   } else if (node.type === 'wave') {
-    rows.push({ slot: { key: 'unison' }, label: 'Unison', y: 0 });
+    // One row per connected unison plus a trailing empty "add" row — arming it
+    // creates the next connection. Capped at MAX_LAYER_VOICES stacking voices.
+    const c = flowNodeConn(node);
+    const unis = Array.isArray(c.unison) ? c.unison : [];
+    const n = Math.min(unis.length, MAX_LAYER_VOICES);
+    for (let i = 0; i < n; i++) rows.push({ slot: { key: 'unison', idx: i }, label: 'Unison', y: 0 });
+    if (n < MAX_LAYER_VOICES) rows.push({ slot: { key: 'unison', idx: n }, label: 'Unison', y: 0 });
   } else if (node.type === 'unison') {
     rows.push({ slot: { key: 'volEnv' }, label: 'Vol env', y: 0 });
     rows.push({ slot: { key: 'stEnv' }, label: 'St env', y: 0 });
@@ -354,6 +362,17 @@ function flowConnCanAssign(consumer, slot, targetId) {
   if (consumer.type === 'note' && slot.key === 'waves' && slot.idx != null) {
     for (let i = 0; i < 3; i++) {
       if (i !== slot.idx && connSlotGet(consumer, { key: 'waves', idx: i }) === targetId) return false;
+    }
+  }
+  // A unison may not fill two of the same wave's unison slots (each stack adds
+  // one voice — the count is capped at MAX_LAYER_VOICES).
+  if (consumer.type === 'wave' && slot.key === 'unison' && slot.idx != null) {
+    const unis = flowNodeConn(consumer).unison;
+    if (Array.isArray(unis)) {
+      for (let i = 0; i < unis.length; i++) {
+        if (i !== slot.idx && unis[i] === targetId) return false;
+      }
+      if (slot.idx >= MAX_LAYER_VOICES) return false;
     }
   }
   return true;
@@ -759,7 +778,10 @@ function connFromSaved(type, c) {
     }
   } else if (type === 'wave') {
     out.mixEnv = typeof c.mixEnv === 'string' ? c.mixEnv : null;
-    out.unison = typeof c.unison === 'string' ? c.unison : null;
+    // unison is an array of stacked source ids; legacy saves hold a single string.
+    if (typeof c.unison === 'string') out.unison = c.unison ? [c.unison] : [];
+    else if (Array.isArray(c.unison)) out.unison = c.unison.filter(x => typeof x === 'string').slice(0, MAX_LAYER_VOICES);
+    else out.unison = [];
   } else if (type === 'unison') {
     out.volEnv = typeof c.volEnv === 'string' ? c.volEnv : null;
     out.stEnv = typeof c.stEnv === 'string' ? c.stEnv : null;
@@ -789,6 +811,17 @@ function flowPruneConns() {
         // A mix env rides its wave's wire — without the wave, it's orphaned.
         if (!c.waves[i]) c.mixEnvs[i] = null;
       }
+    }
+    if (n.type === 'wave' && Array.isArray(c.unison)) {
+      const seen = {};
+      for (let i = 0; i < c.unison.length; i++) {
+        const id = c.unison[i];
+        if (id && (!ids.has(id) || seen[id])) c.unison[i] = null;
+        if (id) seen[id] = true;
+      }
+      // Trim trailing empties and cap the voice stack.
+      while (c.unison.length && !c.unison[c.unison.length - 1]) c.unison.pop();
+      if (c.unison.length > MAX_LAYER_VOICES) c.unison.length = MAX_LAYER_VOICES;
     }
   }
 }
@@ -905,8 +938,10 @@ function flowSetNoteLife(node, ms) {
 /* ---- On-node connection ports ----
    Each consumer node's slots are drawn as small emoji-labeled dots around its
    cell ring. Tapping a dot arms that slot ("Connecting…"); tapping it again
-   cancels; a filled dot's ✕ clears it. While armed, tapping a valid source node
-   on the grid assigns it. Wires terminate at the consumer's port anchor. */
+   cancels. While armed, tapping a valid source node on the grid assigns it.
+   Wires terminate at the consumer's port anchor. A wave node stacks multiple
+   Unison connections (one port per stack, plus an empty port for the next);
+   connections are cleared by selecting a wire and long-pressing it to delete. */
 function flowPortEmoji(slot) {
   if (slot.key === 'volumeEnv') return '📉';
   if (slot.key === 'waves') return '🌊';
@@ -917,14 +952,15 @@ function flowPortLabel(slot) {
   if (slot.key === 'volumeEnv') return 'Vol';
   if (slot.key === 'waves') return 'W' + ((slot.idx != null ? slot.idx : 0) + 1);
   if (slot.key === 'mixEnvs' || slot.key === 'mixEnv') return (slot.key === 'mixEnvs' ? 'M' + ((slot.idx != null ? slot.idx : 0) + 1) : 'Mix');
-  if (slot.key === 'unison') return 'Uni';
+  if (slot.key === 'unison') return slot.idx != null ? 'Uni' + (slot.idx + 1) : 'Uni';
   if (slot.key === 'volEnv') return 'Vol';
   if (slot.key === 'stEnv') return 'St';
   if (slot.key === 'ctEnv') return 'Ct';
   return '';
 }
 // A connection's wire path in screen space: the cubic bezier from the source
-// node's centre to the consumer's port anchor (mirrors drawFlowWires). Returns
+// node's centre to the consumer's port anchor. The curve deflects around any
+// other node card it would otherwise pass under (see flowWirePath). Returns
 // null when the slot is empty.
 function flowConnPath(consumer, slot) {
   const tid = connSlotGet(consumer, slot);
@@ -935,13 +971,65 @@ function flowConnPath(consumer, slot) {
   const port = flowPortAnchor(consumer, slot);
   const bx = port ? port.cx : b.x;
   const by = port ? port.cy : b.y + FLOW_CELL / 2;
-  return { a: { x: a.x, y: a.y }, b: { x: bx, y: by }, mx: bx + (a.x - bx) * 0.5 };
+  return flowWirePath({ x: a.x, y: a.y }, { x: bx, y: by }, consumer, src);
+}
+// Build a wire's bezier between endpoints `a` (source centre) and `b` (consumer
+// port). Defaults to the horizontal S-curve (both control points share the
+// midpoint x, at the endpoints' heights). When a node card sits on the curve,
+// both control points are moved to arc the whole wire over (or under) the
+// blocker — one smooth single-arc deflection that keeps the wire clear of the
+// card (a dense layout may still clip, accepted tradeoff).
+function flowWirePath(a, b, consumer, src) {
+  const mx = b.x + (a.x - b.x) * 0.5;
+  const p1 = { x: mx, y: a.y }, p2 = { x: mx, y: b.y };
+  const blocker = flowWireBlocker(a, b, mx, consumer, src);
+  if (blocker) {
+    const M = 14;                       // clearance margin beyond the card
+    const t = Math.max(0.18, Math.min(0.82, (blocker.cx - a.x) / (b.x - a.x || 1)));
+    const u = 1 - t;
+    // The default wire's height at the blocker's x: which side to arc to.
+    const yAt = u * u * u * a.y + 3 * u * u * t * a.y + 3 * u * t * t * b.y + t * t * t * b.y;
+    const target = blocker.cy < yAt ? blocker.top - M : blocker.bottom + M;
+    // Solve y(t) = target for p1.y = p2.y = value (the cubic in y, kept simple
+    // by making both control points share the value).
+    const value = (target - u * u * u * a.y - t * t * t * b.y) / (3 * u * t * (u + t));
+    const span = Math.abs(b.y - a.y) + 120;
+    const v = Math.max(Math.min(a.y, b.y) - span, Math.min(Math.max(a.y, b.y) + span, value));
+    p1.y = v; p2.y = v;
+  }
+  return { a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y }, mx, p1, p2 };
+}
+// The node card (other than the wire's own endpoints) whose inflated rect the
+// default bezier passes through nearest its middle (t = 0.5), or null. Only the
+// first hit per node counts (a wire may thread a card more than once).
+function flowWireBlocker(a, b, mx, consumer, src) {
+  const path = { a, b, mx };
+  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+  let best = null, bestD = Infinity;
+  for (const n of flowNodes) {
+    if (n.id === consumer.id || n.id === src.id) continue;
+    const r = flowWidgetRect(n, false);
+    const rx = r.x - 10, ry = r.y - 10, rw = r.w + 20, rh = r.h + 20;
+    if (rx > x1 || rx + rw < x0) continue;
+    for (let i = 1; i < 24; i++) {
+      const t = i / 24;
+      const pt = flowBezierPoint(path, t);
+      if (pt.x >= rx && pt.x <= rx + rw && pt.y >= ry && pt.y <= ry + rh) {
+        const d = Math.abs(t - 0.5);
+        if (d < bestD) { bestD = d; best = { cx: rx + rw / 2, cy: ry + rh / 2, top: ry, bottom: ry + rh }; }
+        break;
+      }
+    }
+  }
+  return best;
 }
 // Point on a cubic bezier at parameter t (0 = source centre, 1 = consumer port).
+// A path may carry deflected control points p1/p2 (see flowWirePath); when
+// absent they default to the horizontal S-curve from the endpoints.
 function flowBezierPoint(path, t) {
   const u = 1 - t;
   const p0 = path.a, p3 = path.b;
-  const p1 = { x: path.mx, y: path.a.y }, p2 = { x: path.mx, y: path.b.y };
+  const p1 = path.p1 || { x: path.mx, y: path.a.y }, p2 = path.p2 || { x: path.mx, y: path.b.y };
   return {
     x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
     y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
@@ -951,7 +1039,7 @@ function flowBezierPoint(path, t) {
 function flowBezierTangent(path, t) {
   const u = 1 - t;
   const p0 = path.a, p3 = path.b;
-  const p1 = { x: path.mx, y: path.a.y }, p2 = { x: path.mx, y: path.b.y };
+  const p1 = path.p1 || { x: path.mx, y: path.a.y }, p2 = path.p2 || { x: path.mx, y: path.b.y };
   const x = 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x);
   const y = 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y);
   const len = Math.hypot(x, y) || 1;
@@ -1008,17 +1096,28 @@ function flowPorts(node) {
       const waveId = connSlotGet(node, { key: 'waves', idx: i });
       const wsrc = waveId ? flowNodeById(waveId) : null;
       if (wsrc) {
-        const path = { a: flowNodeScreen(wsrc), b: { x: wx, y }, mx: wx + (flowNodeScreen(wsrc).x - wx) * 0.5 };
-        const pt = flowBezierAtDistFromB(path, FLOW_MIX_PORT_DIST);
+        const wpath = flowWirePath({ x: flowNodeScreen(wsrc).x, y: flowNodeScreen(wsrc).y }, { x: wx, y }, node, wsrc);
+        const pt = flowBezierAtDistFromB(wpath, FLOW_MIX_PORT_DIST);
         add({ key: 'mixEnvs', idx: i }, pt.x, pt.y, 'wire', false, pt.nx, pt.ny);
       }
     }
   } else if (node.type === 'wave') {
-    add({ key: 'unison' }, cx, cy + h / 2 + 6, 'bottom');
+    // One bottom port per connected unison, plus a trailing empty port for the
+    // next connection (capped at MAX_LAYER_VOICES stacked voices).
+    const unis = flowNodeConn(node).unison;
+    const unisArr = Array.isArray(unis) ? unis : [];
+    const n = Math.min(unisArr.length, MAX_LAYER_VOICES);
+    const total = n < MAX_LAYER_VOICES ? n + 1 : n;
+    for (let i = 0; i < total; i++) {
+      const px = cx + (i - (total - 1) / 2) * 27;
+      add({ key: 'unison', idx: i }, px, cy + h / 2 + 6, 'bottom');
+    }
   } else if (node.type === 'unison') {
-    add({ key: 'volEnv' }, cx - w / 2 - 6, cy - 27, 'left');
-    add({ key: 'stEnv' }, cx - w / 2 - 6, cy, 'left');
-    add({ key: 'ctEnv' }, cx - w / 2 - 6, cy + 27, 'left');
+    // One left-edge port per animation envelope, aligned beside the fader row
+    // it drives (Semitones / Cents / Volume).
+    add({ key: 'stEnv' }, cx - w / 2 - 6, r.y + 30, 'left');
+    add({ key: 'ctEnv' }, cx - w / 2 - 6, r.y + 58, 'left');
+    add({ key: 'volEnv' }, cx - w / 2 - 6, r.y + 86, 'left');
   }
   return out;
 }
@@ -1028,31 +1127,13 @@ function flowPortAnchor(node, slot) {
   for (const pt of flowPorts(node)) if (slotKey(pt.slot) === s) return pt;
   return null;
 }
-// The ✕ clear badge on a filled port (sits just beyond the dot, outward).
-function flowPortClearPos(pt) {
-  const o = FLOW_PORT_R + 10;
-  if (pt.edge === 'wire') return { cx: pt.cx + pt.nx * o, cy: pt.cy + pt.ny * o };
-  if (pt.edge === 'right') return { cx: pt.cx + o, cy: pt.cy };
-  if (pt.edge === 'left') return { cx: pt.cx - o, cy: pt.cy };
-  if (pt.edge === 'top') return { cx: pt.cx, cy: pt.cy - o };
-  return { cx: pt.cx, cy: pt.cy + o };
-}
-// Screen-space port hit test. On a filled port the ✕ badge (radius 8) takes
-// precedence and the dot itself is a narrower target, so the rim between them
-// does nothing rather than accidentally clearing.
+// Screen-space port hit test. Tapping a port — filled or empty — arms it for a
+// connection (or cancels an armed slot); a filled port's ✕ clear is gone, so
+// wires are cleared by selecting + long-pressing them instead.
 function hitFlowPort(x, y) {
   for (const n of flowNodes) {
     for (const pt of flowPorts(n)) {
-      const dDot = Math.hypot(x - pt.cx, y - pt.cy);
-      if (dDot > FLOW_PORT_R + 6) continue;
-      const filled = !!connSlotGet(n, pt.slot);
-      if (filled) {
-        const c = flowPortClearPos(pt);
-        if (Math.hypot(x - c.cx, y - c.cy) <= 8) return { node: n, pt, clear: true };
-        if (dDot <= FLOW_PORT_R) return { node: n, pt };
-      } else {
-        return { node: n, pt };
-      }
+      if (Math.hypot(x - pt.cx, y - pt.cy) <= FLOW_PORT_R + 6) return { node: n, pt };
     }
   }
   return null;
@@ -1087,20 +1168,6 @@ function drawFlowPorts() {
       } else {
         ctx.fillText(pt.label, pt.cx, pt.edge === 'top' ? pt.cy - FLOW_PORT_R - 5 : pt.cy + FLOW_PORT_R + 6);
       }
-      // ✕ clear badge on filled ports.
-      if (filled) {
-        const c = flowPortClearPos(pt);
-        ctx.beginPath();
-        ctx.arc(c.cx, c.cy, 7, 0, Math.PI * 2);
-        ctx.fillStyle = '#c0392b';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '800 9px sans-serif';
-        ctx.fillText('✕', c.cx, c.cy + 1);
-      }
       ctx.textBaseline = 'alphabetic';
     }
   }
@@ -1129,9 +1196,10 @@ function drawFlowWires() {
         ctx.lineWidth = wireSel ? 6 : (nodeSel ? 5 : 4);
         ctx.shadowBlur = wireSel ? 12 : 0;
         ctx.shadowColor = withAlpha(flowSourceColor(src), 0.8);
+        const p1 = path.p1 || { x: path.mx, y: path.a.y }, p2 = path.p2 || { x: path.mx, y: path.b.y };
         ctx.beginPath();
         ctx.moveTo(path.a.x, path.a.y);
-        ctx.bezierCurveTo(path.mx, path.a.y, path.mx, path.b.y, path.b.x, path.b.y);
+        ctx.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, path.b.x, path.b.y);
         ctx.stroke();
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
@@ -1275,9 +1343,10 @@ function drawFlowConnHold() {
     ctx.globalAlpha = pulse;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 8;
+    const p1 = path.p1 || { x: path.mx, y: path.a.y }, p2 = path.p2 || { x: path.mx, y: path.b.y };
     ctx.beginPath();
     ctx.moveTo(path.a.x, path.a.y);
-    ctx.bezierCurveTo(path.mx, path.a.y, path.mx, path.b.y, path.b.x, path.b.y);
+    ctx.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, path.b.x, path.b.y);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
@@ -1538,6 +1607,12 @@ function drawFlowWidgetWave(n, r) {
     ctx.fill();
   }
 }
+// A unison param (st / ct / vol) is locked when its animation envelope is
+// connected to the node — the envelope drives that value, so its slider is
+// disabled until the connection is removed.
+function flowUnisonParamLocked(node, key) {
+  return !!(node && connSlotGet(node, { key: key + 'Env' }));
+}
 function drawFlowWidgetUnison(n, r) {
   const vs = (Array.isArray(n.voices) && n.voices.length) ? n.voices : null;
   if (!vs) {
@@ -1553,12 +1628,14 @@ function drawFlowWidgetUnison(n, r) {
   let y = r.y + 30;
   for (const d of VOICE_PARAM_DEFS) {
     const val = +((v && v[d.key] != null) ? v[d.key] : (d.key === 'vol' ? 1 : 0));
-    drawFlowWidgetFader(d.label, val, d.min, d.max, d.fmt, y, r);
+    const locked = flowUnisonParamLocked(n, d.key);
+    drawFlowWidgetFader(d.label, val, d.min, d.max, d.fmt, y, r, locked);
     y += 28;
   }
 }
-function drawFlowWidgetFader(label, val, min, max, fmt, y, r) {
+function drawFlowWidgetFader(label, val, min, max, fmt, y, r, locked) {
   const trackX1 = r.x + 58, trackX2 = r.x + r.w - 54;
+  ctx.globalAlpha = locked ? 0.4 : 1;
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '800 9px sans-serif';
   ctx.textAlign = 'left';
@@ -1570,21 +1647,27 @@ function drawFlowWidgetFader(label, val, min, max, fmt, y, r) {
   ctx.beginPath();
   ctx.moveTo(trackX1, y); ctx.lineTo(trackX2, y);
   ctx.stroke();
-  const f = clamp01((val - min) / (max - min));
-  const kx = trackX1 + f * (trackX2 - trackX1);
-  ctx.strokeStyle = FLOW_UNISON_ACCENT;
-  ctx.beginPath();
-  ctx.moveTo(trackX1, y); ctx.lineTo(kx, y);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(kx, y, 5, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
+  if (locked) {
+    // An envelope drives this parameter — the slider is inert (a flat hollow
+    // track, ENV in place of the value).
+  } else {
+    const f = clamp01((val - min) / (max - min));
+    const kx = trackX1 + f * (trackX2 - trackX1);
+    ctx.strokeStyle = FLOW_UNISON_ACCENT;
+    ctx.beginPath();
+    ctx.moveTo(trackX1, y); ctx.lineTo(kx, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(kx, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  }
   ctx.lineCap = 'butt';
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.font = '700 9px sans-serif';
-  ctx.fillText(fmt(val), r.x + r.w - 8, y);
+  ctx.fillText(locked ? 'ENV' : fmt(val), r.x + r.w - 8, y);
+  ctx.globalAlpha = 1;
 }
 
 /* ---- Note editor ----
@@ -2528,13 +2611,28 @@ function flowEnvHandleDown(x, y) {
     flowEnvPtr = { kind: 'segarm', idx: segIdx, px: x, py: y, moved: false };
     return;
   }
-  // 4. Empty space: add a point at the tap and start dragging it.
+  // 4. Empty space: add a point at the tap and start dragging it. The new
+  // point is placed exactly under the finger (like the wave editor), so the
+  // dot grabs cleanly and its Y follows the drag from the very first move.
   if (x < pl.left - 4 || x > pl.right + 4) return;
   const eb = envBoundaries();
-  flowEnvMutate(() => { envSplitAtTime(clamp01(xToT(x, pl)) * eb.total); });
+  const tT = clamp01(xToT(x, pl));
+  let addIdx = -1;
+  flowEnvMutate(() => {
+    envSplitAtTime(tT * eb.total);
+    // Locate the freshly-split boundary by time (it lands exactly at the tap's
+    // X), then drop it at the finger's Y.
+    const eb2 = envBoundaries();
+    let best = -1, bd = Infinity;
+    for (let i = 1; i <= eb2.n; i++) {
+      const d = Math.abs(eb2.tOf(eb2.b[i]) - tT);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best >= 0) envDragBoundary(best, tT, yToV(y, pl) - envTrim(ENVELOPE));
+    addIdx = best;
+  });
   flowEnvSegFrom = null; flowEnvSegTo = null;
-  const ni = flowEnvHitBoundary(x, y, pl);
-  if (ni >= 0) flowEnvPtr = { kind: 'bound', idx: ni, px: x, py: y, moved: false, out: false };
+  if (addIdx >= 0) flowEnvPtr = { kind: 'bound', idx: addIdx, px: x, py: y, moved: false, out: false };
 }
 
 function flowEnvHandleMove(x, y) {
@@ -2545,7 +2643,7 @@ function flowEnvHandleMove(x, y) {
   if (k === 'bound') {
     flowEnvPtr.px = x; flowEnvPtr.py = y;
     flowEnvPtr.moved = true;
-    flowEnvPtr.out = (x < pl.left || x > pl.right || y < pl.top || y > pl.bottom);
+    flowEnvPtr.out = (x < pl.left - FLOW_ENV_DELETE_BUFFER || x > pl.right + FLOW_ENV_DELETE_BUFFER || y < pl.top - FLOW_ENV_DELETE_BUFFER || y > pl.bottom + FLOW_ENV_DELETE_BUFFER);
     flowEnvMutate(() => { envDragBoundary(flowEnvPtr.idx, xToT(x, pl), yToV(y, pl) - envTrim(ENVELOPE)); });
     // Re-sorting can move the dragged boundary's index; re-locate it (at its
     // clamped position) so a release off the graph deletes the right point.
@@ -2600,7 +2698,7 @@ function flowEnvHandleUp(x, y) {
     const k = flowEnvPtr.kind;
     if (k === 'bound') {
       flowEnvPtr.px = x; flowEnvPtr.py = y;
-      const out = (x < pl.left || x > pl.right || y < pl.top || y > pl.bottom);
+      const out = (x < pl.left - FLOW_ENV_DELETE_BUFFER || x > pl.right + FLOW_ENV_DELETE_BUFFER || y < pl.top - FLOW_ENV_DELETE_BUFFER || y > pl.bottom + FLOW_ENV_DELETE_BUFFER);
       if (flowEnvPtr.moved && out) {
         flowEnvMutate(() => { envDeleteAt(Math.max(0, flowEnvPtr.idx - 1)); });
       }
@@ -2614,7 +2712,17 @@ function flowEnvHandleUp(x, y) {
       if (segIdx >= 0) { flowEnvSegFrom = segIdx; flowEnvSegTo = segIdx + 1; }
       else if (x >= pl.left - 4 && x <= pl.right + 4) {
         const eb = envBoundaries();
-        flowEnvMutate(() => { envSplitAtTime(clamp01(xToT(x, pl)) * eb.total); });
+        const tT = clamp01(xToT(x, pl));
+        flowEnvMutate(() => {
+          envSplitAtTime(tT * eb.total);
+          const eb2 = envBoundaries();
+          let best = -1, bd = Infinity;
+          for (let i = 1; i <= eb2.n; i++) {
+            const d = Math.abs(eb2.tOf(eb2.b[i]) - tT);
+            if (d < bd) { bd = d; best = i; }
+          }
+          if (best >= 0) envDragBoundary(best, tT, yToV(y, pl) - envTrim(ENVELOPE));
+        });
       }
     }
     flowEnvPtr = null;
@@ -3071,7 +3179,9 @@ function drawFlowUnisonEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('One extra voice playing the same wave', p.x + 86, p.y + 30);
-  // Interval preset chips (semitones for the single voice).
+  // Interval preset chips (semitones for the single voice) — disabled while a
+  // semitone envelope drives the voice.
+  const stLocked = flowUnisonParamLocked(flowNodeById(flowUnisonEdit), 'st');
   for (const ic of flowUnisonIntervals(p)) {
     const on = v && Math.round(+v.st || 0) === ic.st;
     drawRoundRect(ic.x, ic.y, ic.w, ic.h, 7);
@@ -3080,18 +3190,22 @@ function drawFlowUnisonEditor() {
     ctx.strokeStyle = on ? FLOW_UNISON_ACCENT : 'rgba(255,255,255,0.4)';
     ctx.lineWidth = on ? 1.5 : 1;
     ctx.stroke();
+    ctx.globalAlpha = stLocked ? 0.4 : 1;
     ctx.fillStyle = on ? '#000000' : '#ffffff';
     ctx.font = '800 10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(ic.label, ic.x + ic.w / 2, ic.y + ic.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
   }
-  // Parameter faders (st/ct/vol).
+  // Parameter faders (st/ct/vol) — a fader is locked (inert, greyed) while its
+  // animation envelope is connected.
   for (const f of flowUnisonFaders(p)) {
     const active = !!v;
+    const locked = active && flowUnisonParamLocked(flowNodeById(flowUnisonEdit), f.key);
     const cur = v ? (+v[f.key] != null ? +v[f.key] : (f.key === 'vol' ? 1 : 0)) : (f.key === 'vol' ? 1 : 0);
-    ctx.globalAlpha = active ? 1 : 0.35;
+    ctx.globalAlpha = active ? (locked ? 0.4 : 1) : 0.35;
     ctx.fillStyle = '#ffffff';
     ctx.font = '700 11px sans-serif';
     ctx.textAlign = 'left';
@@ -3102,30 +3216,32 @@ function drawFlowUnisonEditor() {
     ctx.beginPath();
     ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(f.trackX2, f.cy);
     ctx.stroke();
-    const frac = clamp01((cur - f.min) / (f.max - f.min));
-    const tx = f.trackX1 + frac * (f.trackX2 - f.trackX1);
-    ctx.strokeStyle = FLOW_UNISON_ACCENT;
-    ctx.beginPath();
-    ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(tx, f.cy);
-    ctx.stroke();
-    ctx.lineCap = 'butt';
-    ctx.beginPath();
-    ctx.arc(tx, f.cy, 8, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    if (!locked) {
+      const frac = clamp01((cur - f.min) / (f.max - f.min));
+      const tx = f.trackX1 + frac * (f.trackX2 - f.trackX1);
+      ctx.strokeStyle = FLOW_UNISON_ACCENT;
+      ctx.beginPath();
+      ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(tx, f.cy);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.arc(tx, f.cy, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
     ctx.fillStyle = '#ffffff';
     ctx.font = '800 12px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(f.fmt(cur), f.valX, f.cy + 4);
+    ctx.fillText(locked ? 'ENV' : f.fmt(cur), f.valX, f.cy + 4);
     for (const side of ['btnMinus', 'btnPlus']) {
       const bx = f[side];
       drawRoundRect(bx.x, bx.y, bx.w, bx.h, 6);
-      ctx.fillStyle = '#333333';
+      ctx.fillStyle = locked ? '#1f1f1f' : '#333333';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.strokeStyle = locked ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.4)';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = '#ffffff';
@@ -3146,9 +3262,10 @@ function drawFlowUnisonEditor() {
 function flowUnisonHandleDown(x, y) {
   const p = flowUnisonPanel();
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowUnisonEditor(); return; }
-  // Interval preset chips (semitone jumps for the single voice).
+  // Interval preset chips (semitone jumps for the single voice) — inert while a
+  // semitone envelope drives the voice.
   const v = flowUnisonSelectedVoice();
-  if (v) {
+  if (v && !flowUnisonParamLocked(flowNodeById(flowUnisonEdit), 'st')) {
     for (const ic of flowUnisonIntervals(p)) {
       if (x >= ic.x && x <= ic.x + ic.w && y >= ic.y && y <= ic.y + ic.h) {
         flowUnisonMutate(() => { v.st = ic.st; });
@@ -3156,8 +3273,10 @@ function flowUnisonHandleDown(x, y) {
       }
     }
   }
-  // Faders: nudge buttons, then the track (drag).
+  // Faders: nudge buttons, then the track (drag). A fader whose animation
+  // envelope is connected is locked — the envelope drives that value.
   for (const f of flowUnisonFaders(p)) {
+    if (flowUnisonParamLocked(flowNodeById(flowUnisonEdit), f.key)) continue;
     if (x >= f.btnMinus.x && x <= f.btnMinus.x + f.btnMinus.w && y >= f.btnMinus.y && y <= f.btnMinus.y + f.btnMinus.h) { flowUnisonNudge(f.key, -1); return; }
     if (x >= f.btnPlus.x && x <= f.btnPlus.x + f.btnPlus.w && y >= f.btnPlus.y && y <= f.btnPlus.y + f.btnPlus.h) { flowUnisonNudge(f.key, 1); return; }
     if (v && Math.abs(y - f.cy) <= 16 && x >= f.trackX1 - 6 && x <= f.trackX2 + 8) {
@@ -3171,7 +3290,7 @@ function flowUnisonHandleMove(x, y) {
   if (!flowUnisonDrag) return;
   const p = flowUnisonPanel();
   const f = flowUnisonFaders(p).find(f => f.key === flowUnisonDrag.key);
-  if (f) flowUnisonSetParam(f, x);
+  if (f && !flowUnisonParamLocked(flowNodeById(flowUnisonEdit), f.key)) flowUnisonSetParam(f, x);
 }
 function flowUnisonHandleUp() {
   flowUnisonDrag = null;
@@ -3738,13 +3857,22 @@ function compileFlowNote(note) {
     } else {
       layer.curve = [{ t: 0, v: 1 }, { t: 1, v: 1 }];
     }
-    // Unison: static voices + optional vol/st/ct animation envs (per-voice).
-    const uniId = w.conn && w.conn.unison;
-    const uni = uniId ? flowNodeById(uniId) : null;
-    if (uni && uni.type === 'unison' && Array.isArray(uni.voices) && uni.voices.length) {
-      layer.voices = voicesFromSavedFlow(uni.voices);
-      const uEnvs = compileUnisonEnvs(uni);
-      if (uEnvs) for (const v of layer.voices) v.envs = uEnvs;
+    // Unison: stack every connected unison's voices (each adds one duplicate
+    // voice with its optional vol/st/ct animation envs), capped at the engine's
+    // MAX_LAYER_VOICES.
+    const unis = (w.conn && Array.isArray(w.conn.unison) ? w.conn.unison : [])
+      .map(id => (id ? flowNodeById(id) : null))
+      .filter(u => u && u.type === 'unison');
+    if (unis.length) {
+      const voices = [];
+      for (const uni of unis) {
+        if (!Array.isArray(uni.voices) || !uni.voices.length) continue;
+        const vs = voicesFromSavedFlow(uni.voices);
+        const uEnvs = compileUnisonEnvs(uni);
+        if (uEnvs) for (const v of vs) v.envs = uEnvs;
+        voices.push.apply(voices, vs);
+      }
+      if (voices.length) layer.voices = voices.slice(0, MAX_LAYER_VOICES);
     }
     layers.push(layer);
   }
@@ -3809,7 +3937,9 @@ function playFlowNote(note) {
    the main area), so no stray circles appear in flow mode. */
 var flowLive = null;    // { ds, nodeId } while a flow note's live button is held
 function flowSyntheticDs(savedGlobals) {
-  const y = H * 0.55;   // preview base volume, matching previewNote
+  // Same base volume as the full preview (previewNote clamps its base to 0.35),
+  // so the tap / live buttons sit at exactly the same level as the full button.
+  const y = yForBaseVolume(Math.max(0.35, baseVolumeFromY(H * 0.55)));
   return {
     startX: 0, startY: y,
     pts: [{ x: 0, y }],
@@ -3883,7 +4013,9 @@ function flowLiveEnd() {
   }
 }
 // Play a note like a tap in the main area: the body plays through the early-cut
-// marker, then the release section (a zero-length live note wrapped immediately).
+// marker, then the release section. Uses the same self-contained scheduler as
+// the full button (previewNote) with a shorter body, so the tap starts exactly
+// like the full preview — same onset, level, and every connected envelope.
 function tapFlowNote(note) {
   const compiled = compileFlowNote(note);
   if (!compiled) return false;
@@ -3893,13 +4025,8 @@ function tapFlowNote(note) {
   stopPreviewVoices();
   if (flowLive) flowLiveEnd();
   const saved = flowGlobalsSwap(compiled);
-  const ds = flowSyntheticDs(saved);
   try {
-    initLivePathAudio(ds);
-    ds.finished = true;
-    finishLivePathNote(ds);
-  } catch (err) {
-    try { quickFadeNote(ds, 200); } catch (e) {}
+    previewNote(previewPitchName(), Math.max(1, earlyCutMs()));
   } finally {
     flowGlobalsRestore(saved);
   }
@@ -4017,20 +4144,14 @@ canvas.addEventListener('pointerdown', e => {
     panToNode(jumpBtn.node);
     return;
   }
-  // On-node connection ports (arm / cancel / clear). Drawn on top of the modal
+  // On-node connection ports (arm / cancel). Drawn on top of the modal
   // and the add menu, so they hit before those.
   const portHit = hitFlowPort(x, y);
   if (portHit) {
     const pn = portHit.node, pt = portHit.pt;
     flowAddMenu = null;
     flowPanAnim = null;
-    flowSelConn = null;   // arming / clearing a port supersedes wire selection
-    if (portHit.clear) {
-      flowPushHistory();
-      connSlotClearPair(pn, pt.slot);
-      saveFlow();
-      return;
-    }
+    flowSelConn = null;   // arming a port supersedes wire selection
     const k = slotKey(pt.slot);
     if (flowConnArm && flowConnArm.nodeId === pn.id && slotKey(flowConnArm.slot) === k) flowConnArm = null;
     else flowConnArm = { nodeId: pn.id, slot: pt.slot };

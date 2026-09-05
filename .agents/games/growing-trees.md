@@ -185,26 +185,35 @@ it on close):
   itself to the next, so spans carry **segment line types** (Line / Stairs /
   Spring / Pulse) that the audio engine honors (`curveValue` / `envValueAt`).
 - `wave` (🌊) — harmonic structure `{ amplitudes[32], specPoints, presetId }`;
-  on-node ports assign an optional **mix env** and **unison**. The overlay's
+  on-node ports assign an optional **mix env** and one or more **unisons**
+  (stacked up to `MAX_LAYER_VOICES`). The overlay's
   Point/Draw/**Erase**/Delete modes edit the spectrum (Erase drags flatten the
   swept harmonics to 0 via `flowWaveEraseAt`).
 - `unison` (🦄) — exactly one additional voice `[{ id, st, ct, vol, muted }]`
   (the first stored voice is kept; defaults to a single voice). Its widget shows
   mini read-only faders for the selected voice's st/ct/vol; tapping it opens the
   overlay (interval presets + st/ct/vol faders). On-node ports assign optional
-  **vol / st / ct** env connections (compiled to per-voice `envs`).
+  **vol / st / ct** env connections (compiled to per-voice `envs`), each port
+  aligned beside the fader it drives (Semitones / Cents / Volume); while an env
+  is connected, that fader (and the semitone interval chips, for st) is locked —
+  rendered greyed with an `ENV` readout and inert until the connection is
+  removed (`flowUnisonParamLocked`).
 
 Connections are consumer-owned named slots (`conn` on each node): the note has
-`{ volumeEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison }`, the
+`{ volumeEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison[] }` (a wave
+can stack up to `MAX_LAYER_VOICES` unisons, one port per stack), the
 unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
 (fan-out). Slots are type-constrained (DAG by construction); a note is
 "ready" (playable) with a volume env + ≥1 wave, shown by a warning badge
 otherwise. **No drawer**: each consumer's slots are drawn as small
 emoji-labeled **ports around the node itself** (`flowPorts` — note: Vol top +
-W1..W3 right + M1..M3 left; wave: mix top + unison bottom; unison: Vol/St/Ct
+W1..W3 right + M1..M3 left; wave: a unison port along the bottom for each
+stack plus an empty port for the next; unison: Vol/St/Ct
 left). Tap a port to arm it ("Connecting…"), tap a valid source node to assign,
-tap the port again to cancel, a filled port's ✕ clears it; wires terminate at
- the consumer's port anchor. **Every node is an always-visible widget card**
+tap the port again to cancel; wires terminate at the consumer's port anchor,
+routed as beziers that arc over/under any node card they'd otherwise cross
+(`flowWirePath`). Connections are cleared by selecting a wire and long-pressing
+it to delete (there is no ✕ on ports). **Every node is an always-visible widget card**
  (`flowWidgetRect`/`drawFlowWidget`) that shows its values read-only — a mini
  envelope/curve/spectrum plot for volumeEnv/env/wave, mini faders for unison,
  a ▶ play + Note-life slider for a note — **sized to fit exactly**
