@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.30.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.34.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -165,7 +165,10 @@ swap a layer-shaped proxy into `OSC_STACK` at `selectedLayerIdx` 0 and restore
 it on close):
 
 - `note` (🎵) — the entry point of a sound. Its on-node ports assign the
-  connections: a required **volume envelope**, up to **3 waves** (1 required),
+  connections: a required **volume envelope**, an optional **pitch envelope**
+  (an `env` 📈 curve compiled to the legacy `MASTER_PITCH_ENV` — a full-scale
+  `v ∈ −1..1` curve bends the note's pitch **±12 semitones**, `st = (v+trim)·12`,
+  and the curve's segment line types ride along), up to **3 waves** (1 required),
   and each wave's optional **mix envelope**; its widget card has a **▶ Play**
   that is always live (tapping it previews, never edits — compiles the graph
   and previews it via `compileFlowNote`/`playFlowNote`: builds `ENVELOPE`,
@@ -203,19 +206,32 @@ it on close):
   re-enables the fader/chips.
 
 Connections are consumer-owned named slots (`conn` on each node): the note has
-`{ volumeEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison[] }` (a wave
-can stack up to `MAX_LAYER_VOICES` unisons, one port per stack), the
+`{ volumeEnv, pitchEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison[] }`
+(a wave can stack up to `MAX_LAYER_VOICES` unisons, one port per stack), the
 unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
 (fan-out). Slots are type-constrained (DAG by construction); a note is
 "ready" (playable) with a volume env + ≥1 wave, shown by a warning badge
 otherwise. **No drawer**: each consumer's slots are drawn as small
 emoji-labeled **ports around the node itself** (`flowPorts` — note: Vol top +
-W1..W3 right + M1..M3 left; wave: a unison port along the bottom for each
+Pitch top-left + W1..W3 right + M1..M3 left; wave: a unison port along the
+bottom for each
 stack plus an empty port for the next; unison: Vol/St/Ct
-left). Tap a port to arm it ("Connecting…"), tap a valid source node to assign,
+left). **Ports flip to the side their source sits on** (`flowPortEdge`): a
+connected port moves to the opposite edge when its source node is on that side
+(e.g. a note's wave port moves right→left when the wave sits to the note's
+left, and the Pitch port moves top→bottom when the env node sits below),
+so wires run straight out instead of across the node's own card — the
+port keeps its cross-edge coordinate (a left/right flip keeps y; a top/bottom
+flip keeps x), so rows stay aligned to the value they drive (a unison's three
+env ports stay beside the fader they animate). Tap a port to arm it
+("Connecting…"), tap a valid source node to assign,
 tap the port again to cancel; wires terminate at the consumer's port anchor,
 routed as beziers that arc over/under any node card they'd otherwise cross
-(`flowWirePath`). Connections are cleared by selecting a wire and long-pressing
+(`flowWirePath`). A note's mix port rides its wave's wire just off the note's
+card — when the wave sits to the **left** the wire crosses the note, so the mix
+port is walked along the wire until it clears the note's card
+(`flowBezierAtDistFromB` keep-out rect) instead of landing on top of it.
+Connections are cleared by selecting a wire and long-pressing
 it to delete (there is no ✕ on ports). **Every node is an always-visible widget card**
  (`flowWidgetRect`/`drawFlowWidget`) that shows its values read-only — a mini
  envelope/curve/spectrum plot for volumeEnv/env/wave, mini faders for unison,
@@ -232,18 +248,39 @@ it to delete (there is no ✕ on ports). **Every node is an always-visible widge
   stays a modest window on an iPad). Cards are drawn on a `rgba(20,20,24,0.92)`
   background; the enlarged editor overlay uses `rgba(14,14,16,0.74)`.
 
-**Graph editors are gesture-driven (no mode toolbar).** The 📉 Envelope and 📈
-Env curve overlays have **no Point/Draw/Delete buttons** — the gesture decides
-the mode on each press inside the plot: grabbing a **dot** moves it; **tap +
-drag empty space** adds a point and drags it; a **swipe starting in the left
-edge strip** of the plot (`FLOW_ENV_DRAW_ZONE` = 26 px) scribbles draw mode;
-**tapping a line segment** selects it and opens the line-mode strip **docked at
-the top of the editor window** (Line/Stairs/Spring/Pulse pills + the active
-type's params — no floating card over the plot). **Drag a dot off the graph and
+**Graph editors are gesture-driven.** The 📉 Envelope and 📈 Env curve overlays
+have **no Point/Delete buttons** — the gesture decides the mode on each press
+inside the plot: grabbing a **dot** moves it; the **✏️ Draw pill** (beside Clear,
+top-right) arms draw mode so any press scribbles freehand points (draw mode is
+never triggered by a gesture, and the pill is hidden while the segment strip is
+open). Otherwise the Envelope editor's presses fall in a segment's horizontal
+section — **long-press** opens the line-mode strip **docked at the top of the
+editor window** (Line/Stairs/Spring/Pulse pills + the active type's params — no
+floating card over the plot), or **tap/drag** adds a point; the Env curve editor
+**taps a line** to open the same strip. **Drag a dot off the graph and
 release to delete it** — a 🗑 pill appears while it's outside the plot
 (protected anchors and the last envelope component can't be deleted; the dot's
 data stays clamped while its visual rides the finger). HOLD/CUT/REL marker tabs,
 the trim slider, and the Clear pill are unchanged.
+**Hold↔release sync**: press-and-hold a **HOLD or REL marker tab** to turn sync
+on — the release point's **Y is matched to the hold point's Y** (its time is
+untouched, only the value copies — `flowEnvSyncApply` passes the normalized time
+so the release boundary never jumps to the far right). While sync is on,
+dragging **either** paired boundary drags the **other's Y along** to match
+(`flowEnvSyncPair`/`flowEnvSetBoundaryValue` in the envelope's bound-drag
+handler); sync **stays on** (no auto-break) until the **single top-right toggle
+button** is tapped to turn it off (there is no separate indicator pill). The
+button's label reflects the **current state** — `🔗 Sync on` while paired, `✖
+Sync off` when independent — so it never reads backwards. It's hidden while the
+docked segment strip is open, so they never overlap.
+The 📉 Envelope and 📈 Env curve editors both keep a **✏️ draw-mode toggle pill**
+(beside Clear): draw mode only activates when it's armed (never by a gesture),
+and the pill is **hidden while the segment strip is open** — entering segment
+edit also cancels draw mode, so draw can't happen mid-edit. In the Envelope
+editor every other press lands in a **segment's horizontal section** — a
+**long-press** anywhere in that section (not just on the line) opens the segment
+editor, and a **quick tap** (or a drag) adds a point there. The Env curve editor
+keeps its tap-a-line-to-select gesture.
 
 **Placement & spacing.** Nodes store a world-px centre (`x,y`, no grid); a node
 "exists" at a spot when the point falls inside its widget card's bounds plus a
@@ -257,8 +294,9 @@ been deleted (mass delete or otherwise). A
  (`flowAddMenu` = `{x,y}` world coords); a **plain tap never opens it** — it only
  dismisses any open add menu (and clears selection). Long-press a **node** to
  enter move mode (it flashes); the next tap moves it anywhere. **Hold it longer
- still** (≥ `FLOW_HOLD_DELETE = 1200` ms) to start a **delete countdown** — the
- card turns red with a 3-2-1 (`FLOW_DELETE_MS = 3000`) overlay; releasing early
+ still** (≥ `FLOW_HOLD_DELETE = 1000` ms) to start a **delete countdown** — the
+ card turns red with a brief (`FLOW_DELETE_MS = 1000`) hold-to-delete overlay
+ (the whole delete is ~2 s of continuous holding); releasing early
  cancels, reaching 0 deletes the node (`deleteFlowNode`). There is **no delete
  button** anywhere. Both adds and
 moves then run **float-away separation**: the affected node is pushed out of
@@ -278,13 +316,27 @@ the panel header (`flowSideClearRect`) wipes every node and returns the camera
 to the world origin — undoable, and undo restores the camera too (history
 snapshots carry the camera, so every undo returns the view to where the action
 happened). All editing (tap a widget to edit, long-press to move, longer hold
-for the delete countdown, connect via ports) happens on the field. ↺ undo sits
-top-right and the ‹ back-to-playing-field button sits **bottom-right**
-(`flowTopButtonRects`/`flowTopHit`) — away from the editors' corners. The two
-buttons are drawn **on top of the editor overlays** and win the pointerdown
+for the delete countdown, connect via ports) happens on the field. A top-right
+**← → ↺ ↻** row walks the **recently visited notes** and undoes/redoes edits;
+the ‹ back-to-playing-field button sits **bottom-right**
+(`flowTopButtonRects`/`flowTopHit`) — away from the editors' corners. The row is
+drawn **on top of the editor overlays** and wins the pointerdown
 hit-test, so the undo button stays visible and tappable while an editor is open
 (no need to exit edit mode first — undo reverts the session's edits in place
-and leaves the editor open). The
+and leaves the editor open). Redo mirrors undo exactly (each undo pushes the
+discarded post-edit state onto `flowRedoHistory`; a new edit clears it); unlike
+undo, redo isn't gated by an editor's pending edits, so edit → undo → redo
+round-trips work — and redo is **multi-step**: redoing only drains the single
+entry it pops (`flowPushSnapshot` pushes current state onto the undo stack
+without clearing the redo trail), so you can redo all the way back to the last
+edit, exactly as far as you undid. The ←/→ arrows are a browser-style history of
+**visited notes** (`flowVisitNode` records only user-initiated jumps — tapping a
+card to edit, sidebar / wire / wire-base / filled-port / move-badge jumps; undo,
+redo and float-away drift never record); each arrow pans + highlights the target
+(`flowNavStep`, closing any open editor first) and the history resets when the
+flow closes. The ←/→ buttons are **hidden while a node editor is open**
+(`flowNavHidden` — their pan navigation would fight the anchored editor panel);
+undo/redo stay visible and tappable. The
 editor windows have **no ✕ button**; tapping anywhere outside a window closes
 it (each editor's `*HandleDown` dismisses on an outside tap).
 
@@ -300,7 +352,7 @@ is popped — `flowEditorPending` gates the pop).
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.30.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.34.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).

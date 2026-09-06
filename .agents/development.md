@@ -37,7 +37,13 @@ Launching a long-lived process directly from the opencode shell tool **blocks th
    ```
 3. Give the server a second to come up before connecting.
 
-A working headless-Chrome smoke-test script is kept in `/tmp/opencode/` (throwaway): serve the repo over HTTP, connect to the page via CDP with Node's built-in `WebSocket`, enable `Runtime`/`Page`, drive taps with `Input.dispatchMouseEvent`, assert game globals via `Runtime.evaluate`, and check for `Runtime.exceptionThrown`/`Log.entryAdded` errors. Rebuild the script fresh each session — never reuse a stale one.
+A working headless-Chrome smoke-test workflow is available as the
+**`canvas-smoke-test`** opencode skill (installation-level, in
+`~/.config/opencode/skills/canvas-smoke-test/`) — serve the repo over HTTP,
+drive taps/clicks over CDP with Node's built-in `WebSocket`, assert game
+globals via `Runtime.evaluate`, and check for `Runtime.exceptionThrown`/
+`Log.entryAdded` errors. Rebuild/adapt the script fresh each session — never
+reuse a stale one.
 
 ## Multiplayer Servers (`apps/`)
 
