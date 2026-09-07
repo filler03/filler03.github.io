@@ -125,6 +125,7 @@ const FLOW_FLICK_STOP = 0.001;  // px/ms at which inertia settles and stops
 var flowNodes = [];             // [{ id, x, y, type, noteLife }] placed sound nodes (x,y = world px centre)
 var flowSelId = null;           // id of the selected node (attribute panel shown for it)
 var flowSelConn = null;         // { nodeId, slot } the selected connection wire (edge jump buttons shown), or null
+var flowConnLastTap = null;     // { nodeId, slot, x, y, t } last tap on a wire — a quick second tap on the same wire toggles its mute
 var flowAddMenu = null;         // { x, y } open add-node menu anchor (world px), or null
 var flowSideOpen = false;       // node-list side bar open?
 var flowSideScrollY = 0;        // vertical scroll offset of the side-bar list
@@ -341,6 +342,33 @@ function connSlotSet(node, slot, val) {
 function slotKey(slot) {
   return slot.key + (slot.idx != null ? ':' + slot.idx : '');
 }
+// Port muting: a connection's incoming signal can be muted so it's ignored
+// during playback. The muted state is stored per-slot (keyed by slotKey) on the
+// consumer's conn object. Only non-required ports are muteable — a required
+// input (a note's volume env or its first wave) can't be muted, since the node
+// wouldn't play at all without it.
+function connSlotMuted(node, slot) {
+  const c = flowNodeConn(node);
+  if (!c || !c.muted || typeof c.muted !== 'object') return false;
+  return !!c.muted[slotKey(slot)];
+}
+function connSlotSetMuted(node, slot, on) {
+  const c = flowNodeConn(node);
+  if (!c) return;
+  if (!c.muted || typeof c.muted !== 'object') c.muted = {};
+  if (on) c.muted[slotKey(slot)] = true;
+  else delete c.muted[slotKey(slot)];
+}
+// Whether a port (its slot) is muteable at all: only non-required slots. A
+// row's `req` flag applies to its primary slot only — a row's pill2 (a note's
+// per-wave mix port) is always optional, so it's always muteable.
+function flowPortMuteable(node, slot) {
+  const def = flowSlotRows(node).find(r =>
+    (r.slot && slotKey(r.slot) === slotKey(slot)) || (r.pill2 && slotKey(r.pill2) === slotKey(slot)));
+  if (!def) return false;
+  if (def.pill2 && slotKey(def.pill2) === slotKey(slot)) return true;
+  return !def.req;
+}
 // The connection slots a node exposes, in modal/port order. Each row carries
 // its pills (usually one; the note's wave rows carry a second pill for the mix
 // env) — the legacy structure kept for wiring/detach/prune and the ports.
@@ -423,8 +451,10 @@ function flowNoteReady(note) {
 // port rides that wave's wire, so it must not outlive the wave connection).
 function connSlotClearPair(node, slot) {
   connSlotSet(node, slot, null);
+  connSlotSetMuted(node, slot, false);
   if (node.type === 'note' && slot.key === 'waves' && slot.idx != null) {
     connSlotSet(node, { key: 'mixEnvs', idx: slot.idx }, null);
+    connSlotSetMuted(node, { key: 'mixEnvs', idx: slot.idx }, false);
   }
 }
 // Clear every slot that references `id` (used when a node is deleted).
@@ -714,6 +744,24 @@ function flowSideRowAt(x, y) {
   if (idx < 0 || idx >= flowNodes.length) return null;
   return flowNodes[idx];
 }
+// Whether a node has any connection, to OR from: it feeds at least one consumer
+// slot, or it consumes at least one filled slot itself. Used by the side-bar list
+// to flag nodes with no connections at all.
+function flowNodeHasConnections(node) {
+  if (!node) return false;
+  for (const n of flowNodes) {
+    for (const r of flowSlotRows(n)) {
+      const pills = r.pill2 ? [r.slot, r.pill2] : [r.slot];
+      for (const slot of pills) {
+        const v = connSlotGet(n, slot);
+        if (!v) continue;
+        if (n.id === node.id) return true;          // this node consumes a slot
+        if (v === node.id) return true;             // this node feeds a slot
+      }
+    }
+  }
+  return false;
+}
 function drawFlowSide() {
   const s = flowSideRect();
   drawRoundRect(s.x, s.y, s.w, s.h, 0);
@@ -771,15 +819,28 @@ function drawFlowSide() {
     ctx.font = '20px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(FLOW_NODE_TYPES[r.node.type].emoji, r.x + 24, r.y + r.h / 2);
+    // A node with no connections (nothing feeds it, it feeds nothing) is shown
+    // dimmed with a small hollow dot after its label — an "isolated" hint.
+    const disconnected = !flowNodeHasConnections(r.node);
     ctx.font = '800 13px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.85)';
-    ctx.fillText(FLOW_NODE_TYPES[r.node.type].label, r.x + 44, r.y + r.h / 2);
+    ctx.fillStyle = sel ? '#ffffff' : (disconnected ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.85)');
+    const label = FLOW_NODE_TYPES[r.node.type].label;
+    ctx.fillText(label, r.x + 44, r.y + r.h / 2);
+    if (disconnected) {
+      const lw = ctx.measureText(label).width;
+      const dx = r.x + 46 + lw + 6;
+      ctx.beginPath();
+      ctx.arc(dx, r.y + r.h / 2, 3.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
     // World position in grid-cell units (like the old grid's scale), 2 decimals.
     const ux = r.node.x / FLOW_CELL, uy = r.node.y / FLOW_CELL;
     ctx.font = '700 11px monospace';
     ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillStyle = disconnected ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.55)';
     ctx.fillText(ux.toFixed(2) + ',' + uy.toFixed(2), r.x + r.w - 14, r.y + r.h / 2);
     ctx.textBaseline = 'alphabetic';
   }
@@ -853,6 +914,7 @@ function clearFlowAll() {
   flowNodes = [];
   flowSelId = null;
   flowSelConn = null;
+  flowConnLastTap = null;
   flowMoveId = null;
   flowConnArm = null;
   flowAddMenu = null;
@@ -1130,6 +1192,12 @@ function connFromSaved(type, c) {
     out.stEnv = typeof c.stEnv === 'string' ? c.stEnv : null;
     out.ctEnv = typeof c.ctEnv === 'string' ? c.ctEnv : null;
   }
+  // Per-slot mute flags (keyed by slotKey) survive a reload.
+  if (c.muted && typeof c.muted === 'object') {
+    const muted = {};
+    for (const k of Object.keys(c.muted)) if (c.muted[k]) muted[k] = true;
+    out.muted = muted;
+  }
   return out;
 }
 // Drop connection references to nodes that no longer exist, and dedupe a
@@ -1142,24 +1210,24 @@ function flowPruneConns() {
       const pills = r.pill2 ? [r.slot, r.pill2] : [r.slot];
       for (const slot of pills) {
         const v = connSlotGet(n, slot);
-        if (v && !ids.has(v)) connSlotSet(n, slot, null);
+        if (v && !ids.has(v)) { connSlotSet(n, slot, null); connSlotSetMuted(n, slot, false); }
       }
     }
     if (n.type === 'note') {
       const seen = {};
       for (let i = 0; i < 3; i++) {
         const w = c.waves[i];
-        if (w && seen[w]) { c.waves[i] = null; }
+        if (w && seen[w]) { c.waves[i] = null; connSlotSetMuted(n, { key: 'waves', idx: i }, false); }
         if (w) seen[w] = true;
         // A mix env rides its wave's wire — without the wave, it's orphaned.
-        if (!c.waves[i]) c.mixEnvs[i] = null;
+        if (!c.waves[i]) { c.mixEnvs[i] = null; connSlotSetMuted(n, { key: 'mixEnvs', idx: i }, false); }
       }
     }
     if (n.type === 'wave' && Array.isArray(c.unison)) {
       const seen = {};
       for (let i = 0; i < c.unison.length; i++) {
         const id = c.unison[i];
-        if (id && (!ids.has(id) || seen[id])) c.unison[i] = null;
+        if (id && (!ids.has(id) || seen[id])) { c.unison[i] = null; connSlotSetMuted(n, { key: 'unison', idx: i }, false); }
         if (id) seen[id] = true;
       }
       // Trim trailing empties and cap the voice stack.
@@ -1235,6 +1303,7 @@ function closeSoundFlow() {
   flowHold = null;
   flowMoveId = null;
   flowSelConn = null;
+  flowConnLastTap = null;
   flowSideOpen = false;
   flowSideScrollY = 0;
   flowSepAnim = null;
@@ -1643,10 +1712,27 @@ function flowWireEntries() {
 function drawFlowWires() {
   for (const w of flowWireEntries()) {
     const { consumer: n, path, src } = w;
+    const muted = connSlotMuted(n, w.slot);
     const nodeSel = n.id === flowSelId;
     const wireSel = flowSelConn && flowSelConn.nodeId === n.id && slotKey(flowSelConn.slot) === slotKey(w.slot);
     ctx.globalAlpha = (wireSel || nodeSel) ? 1 : 0.5;
     const color = flowSourceColor(src);
+    if (muted) {
+      // A muted connection: a very thin dotted line along the bezier, so it
+      // reads as "cut / not playing" at a glance.
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      for (let i = 0; i <= 40; i++) {
+        const pt = flowBezierPoint(path, i / 40);
+        if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      continue;
+    }
     const w0 = wireSel ? 8 : (nodeSel ? 7 : 5.5);
     const w1 = wireSel ? 3.5 : 3;
     const rib = flowWireRibbon(path, w0, w1);
@@ -1781,6 +1867,7 @@ function deleteFlowConn(nodeId, slot) {
   connSlotClearPair(n, slot);
   saveFlow();
   if (flowSelConn && flowSelConn.nodeId === nodeId && slotKey(flowSelConn.slot) === slotKey(slot)) flowSelConn = null;
+  if (flowConnLastTap && flowConnLastTap.nodeId === nodeId && slotKey(flowConnLastTap.slot) === slotKey(slot)) flowConnLastTap = null;
 }
 
 function flowClearSelConn() {
@@ -2698,6 +2785,27 @@ function flowEnvSetBoundaryValue(idx, v) {
   else env.components[Math.min(n - 1, idx - 1)].endValue = val;
   clampEnvelopeIndexes();
 }
+// The HOLD/CUT/REL markers ride specific envelope boundaries: HOLD sits on the
+// boundary at holdStartIndex, CUT on the boundary at earlyCutIndex + 1, and REL
+// (the release-section start) on the boundary at holdEndIndex + 1. These helpers
+// map a boundary index to the markers attached to it, and re-attach a marker to
+// a (moved) boundary index — so dragging a boundary that carries a marker moves
+// the marker with it, even when the drag re-sorts boundaries and jumps it over
+// other points. (CUT has no boundary while earlyCutIndex is -1 — no release cut.)
+function flowEnvMarkersOnBoundary(idx) {
+  const env = ENVELOPE;
+  const out = [];
+  if (env.holdStartIndex === idx) out.push('hold');
+  if (env.earlyCutIndex >= 0 && env.earlyCutIndex + 1 === idx) out.push('cut');
+  if (env.holdEndIndex + 1 === idx) out.push('rel');
+  return out;
+}
+function flowEnvSetMarkerBoundary(key, idx) {
+  const env = ENVELOPE;
+  if (key === 'hold') env.holdStartIndex = idx;
+  else if (key === 'cut') env.earlyCutIndex = idx - 1;
+  else if (key === 'rel') env.holdEndIndex = idx - 1;
+}
 // While hold↔release sync is on, dragging one of the two paired points moves
 // the other's Y to match — only the value is copied, never the time.
 function flowEnvSyncPair(idx) {
@@ -3302,6 +3410,10 @@ function flowEnvHandleMove(x, y) {
     flowEnvPtr.moved = true;
     flowEnvPtr.out = (x < pl.left - FLOW_ENV_DELETE_BUFFER || x > pl.right + FLOW_ENV_DELETE_BUFFER || y < pl.top - FLOW_ENV_DELETE_BUFFER || y > pl.bottom + FLOW_ENV_DELETE_BUFFER);
     flowEnvMutate(() => {
+      // Capture which markers ride the dragged boundary BEFORE the drag: the
+      // re-sort can shift every boundary's index, so only the pre-drag identity
+      // tells us which marker belongs to this point.
+      const markerKeys = flowEnvMarkersOnBoundary(flowEnvPtr.idx);
       envDragBoundary(flowEnvPtr.idx, xToT(x, pl), yToV(y, pl) - envTrim(ENVELOPE));
       // Re-sorting can move the dragged boundary's index; re-locate it (at its
       // clamped position) so a release off the graph deletes the right point.
@@ -3319,6 +3431,13 @@ function flowEnvHandleMove(x, y) {
       flowEnvPtr.py = vToY(clamp01(eb2.vals[i] + envTrim(ENVELOPE)), pl);
       // Hold↔release sync: moving either paired point drags the other's Y along.
       if (flowEnvSyncOn) flowEnvSyncPair(flowEnvPtr.idx);
+      // Re-attach any marker that rode the dragged boundary to its new index,
+      // then re-clamp so the HOLD/CUT/REL order stays valid (e.g. a HOLD point
+      // dragged past the release is pulled back — hold can't come after release).
+      if (markerKeys.length) {
+        for (const key of markerKeys) flowEnvSetMarkerBoundary(key, flowEnvPtr.idx);
+        clampEnvelopeIndexes();
+      }
     });
   } else if (k === 'marker') {
     // Press-and-hold on a marker tab: moving the finger cancels the long-press
@@ -4596,6 +4715,8 @@ function compileFlowNote(note) {
     const wId = note.conn.waves[i];
     const w = wId ? flowNodeById(wId) : null;
     if (!w || w.type !== 'wave') continue;
+    // A muted wave port: the wave's signal is ignored entirely in playback.
+    if (connSlotMuted(note, { key: 'waves', idx: i })) continue;
     const spec = (w.wave && w.wave.amplitudes) ? w.wave : defaultWaveSpec();
     const layer = {
       id: 'flow-' + w.id,
@@ -4609,7 +4730,9 @@ function compileFlowNote(note) {
     // span's line type (Line/Stairs/Spring/Pulse) rides along to the engine.
     const mixId = note.conn.mixEnvs[i];
     const mix = mixId ? flowNodeById(mixId) : null;
-    if (mix && mix.type === 'env' && mix.env && Array.isArray(mix.env.points) && mix.env.points.length >= 2) {
+    // A muted mix port: the wave plays at full mix (as if no mix env were hooked).
+    if (mix && mix.type === 'env' && mix.env && Array.isArray(mix.env.points) && mix.env.points.length >= 2
+        && !connSlotMuted(note, { key: 'mixEnvs', idx: i })) {
       const mTrim = +mix.env.trim || 0;
       layer.curve = mix.env.points.map(pt => {
         const c = { t: clamp01(pt.t), v: clamp01(1 + (+pt.v || 0) + mTrim) };
@@ -4621,13 +4744,15 @@ function compileFlowNote(note) {
     }
     // Unison: stack every connected unison's voices (each adds one duplicate
     // voice with its optional vol/st/ct animation envs), capped at the engine's
-    // MAX_LAYER_VOICES.
-    const unis = (w.conn && Array.isArray(w.conn.unison) ? w.conn.unison : [])
-      .map(id => (id ? flowNodeById(id) : null))
+    // MAX_LAYER_VOICES. A muted unison port drops that voice stack.
+    const unisKept = (w.conn && Array.isArray(w.conn.unison) ? w.conn.unison : [])
+      .map((id, ui) => ({ id, muted: connSlotMuted(w, { key: 'unison', idx: ui }) }))
+      .filter(x => x.id && !x.muted)
+      .map(x => flowNodeById(x.id))
       .filter(u => u && u.type === 'unison');
-    if (unis.length) {
+    if (unisKept.length) {
       const voices = [];
-      for (const uni of unis) {
+      for (const uni of unisKept) {
         if (!Array.isArray(uni.voices) || !uni.voices.length) continue;
         const vs = voicesFromSavedFlow(uni.voices);
         const uEnvs = compileUnisonEnvs(uni);
@@ -4655,6 +4780,7 @@ function compileMasterPitchEnv(note) {
   const id = note && note.conn ? note.conn.pitchEnv : null;
   const n = id ? flowNodeById(id) : null;
   if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
+  if (connSlotMuted(note, { key: 'pitchEnv' })) return null;   // muted pitch port → no bend
   const SCALE = 12;
   const trim = +n.env.trim || 0;
   const points = n.env.points.map(pt => {
@@ -4669,9 +4795,10 @@ function compileMasterPitchEnv(note) {
 function compileUnisonEnvs(uni) {
   const c = uni.conn || {};
   const out = { st: null, ct: null, vol: null };
-  const mk = (id, range, scale, neutral) => {
+  const mk = (id, range, scale, neutral, slot) => {
     const n = id ? flowNodeById(id) : null;
     if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
+    if (connSlotMuted(uni, slot)) return null;   // muted env port → parameter not animated
     const trim = +n.env.trim || 0;
     return {
       range,
@@ -4685,9 +4812,9 @@ function compileUnisonEnvs(uni) {
       }),
     };
   };
-  out.st = mk(c.stEnv, 24, 24, 0);
-  out.ct = mk(c.ctEnv, 100, 100, 0);
-  out.vol = mk(c.volEnv, 2, 1, 1);
+  out.st = mk(c.stEnv, 24, 24, 0, { key: 'stEnv' });
+  out.ct = mk(c.ctEnv, 100, 100, 0, { key: 'ctEnv' });
+  out.vol = mk(c.volEnv, 2, 1, 1, { key: 'volEnv' });
   return (out.st || out.ct || out.vol) ? out : null;
 }
 function playFlowNote(note) {
@@ -5164,13 +5291,36 @@ canvas.addEventListener('pointerup', e => {
       }
     }
     // Tap a widget = enter edit mode: it grows in place (tap outside shrinks it).
+    flowConnLastTap = null;   // a node tap breaks any wire double-tap cadence
     flowVisitNode(node.id);
     openFlowNodeEditor(node.id);
   } else {
     if (flowConnArm) { flowConnArm = null; return; }   // cancelled on an empty spot
     flowAddMenu = null;   // a plain tap never opens the add menu — long-press does
     flowSelId = null;
-    if (!hitFlowConn(tapX, tapY)) flowSelConn = null;   // an empty tap clears wire selection
+    const connHit = hitFlowConn(tapX, tapY);
+    if (!connHit) {
+      flowSelConn = null;   // an empty tap clears wire selection
+      flowConnLastTap = null;
+    } else {
+      // Double-tapping a wire toggles its mute (a quick second tap on the same
+      // connection, near the first). A muted wire renders as a thin dotted line
+      // and its signal is ignored in playback. Only muteable slots respond —
+      // a required input (a note's volume env / first wave) can't be muted.
+      const n = flowNodeById(connHit.nodeId);
+      if (flowConnLastTap && flowConnLastTap.nodeId === connHit.nodeId &&
+          slotKey(flowConnLastTap.slot) === slotKey(connHit.slot) &&
+          performance.now() - flowConnLastTap.t < 400 &&
+          Math.hypot(tapX - flowConnLastTap.x, tapY - flowConnLastTap.y) < 26 &&
+          n && flowPortMuteable(n, connHit.slot)) {
+        flowConnLastTap = null;
+        flowPushHistory();
+        connSlotSetMuted(n, connHit.slot, !connSlotMuted(n, connHit.slot));
+        saveFlow();
+      } else {
+        flowConnLastTap = { nodeId: connHit.nodeId, slot: connHit.slot, x: tapX, y: tapY, t: performance.now() };
+      }
+    }
   }
 });
 
