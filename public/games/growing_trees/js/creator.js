@@ -1447,12 +1447,15 @@ function drawPlacePointAtSlot(s, y, p, fromS) {
 // path is preserved as a continuous piecewise-linear curve. While the envelope
 // carries more components than the chosen point count, interior boundaries that
 // fall inside the swept corridor [loT..hiT] are merged away first — so a
-// low-density sweep thins the shape only where it actually passes.
-function envDrawAt(t, v, p, loT, hiT, erase) {
+// low-density sweep thins the shape only where it actually passes. `points` is
+// the slot-grid density (defaults to the creator's drawPointCount), so the flow
+// envelope editor can pass its own granularity slider value.
+function envDrawAt(t, v, p, loT, hiT, erase, points) {
   const comps = ENVELOPE.components;
   const lo = loT == null ? t : Math.min(loT, hiT);
   const hi = loT == null ? t : Math.max(loT, hiT);
-  while (comps.length > drawPointCount() - 1) {
+  const cnt = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+points || drawPointCount())));
+  while (comps.length > cnt - 1) {
     const eb0 = envBoundaries();
     let best = -1, bd = Infinity;
     for (let i = 1; i < eb0.n; i++) {
@@ -1475,7 +1478,7 @@ function envDrawAt(t, v, p, loT, hiT, erase) {
   const eb = envBoundaries();
   const total = eb.total;
   const ms = clamp01(t) * total;
-  const dedupeMs = total / (2 * (drawPointCount() - 1));
+  const dedupeMs = total / (2 * (cnt - 1));
   let best = -1, bd = dedupeMs;
   for (let i = 0; i <= eb.n; i++) {
     const d = Math.abs(eb.b[i] - ms);
