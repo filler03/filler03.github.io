@@ -7,11 +7,12 @@
    readable.
 
    Node types: Note (🎵, the entry point — aggregates a required
-   Volume envelope + an optional Pitch envelope + up to 3 Waves, each with
-   an optional mix Env), Volume (📉, the ADSR envelope with HOLD/CUT/REL
-   markers), Env (📈, a kind-agnostic neutral curve), Wave (🌊, harmonic
-   spectrum), and Unison (🦄, one additional voice with optional
-   vol/st/ct animation envelopes).
+   Volume envelope + up to 3 Layers), Layer (🧅, one oscillator: a required
+   Wave + an optional mix Env and pitch Env, plus static Mix/Pitch faders
+   that take over while no env is hooked), Volume (📉, the ADSR envelope
+   with HOLD/CUT/REL markers), Env (📈, a kind-agnostic neutral curve),
+   Wave (🌊, harmonic spectrum), and Unison (🦄, one additional voice with
+   optional vol/st/ct animation envelopes).
 
    Connections are consumer-owned slots shown as emoji-labeled ports on the
    node's own edges (tap an empty port to arm it, tap a node on the grid to
@@ -55,8 +56,6 @@ const FLOW_SEP_MS = 250;        // duration of the float-away separation animati
 const FLOW_BACK_R = 22;         // round button radius (sidebar / undo / back)
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
 const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
-const FLOW_MIX_PORT_DIST = 55;  // a note's mix port sits this far (px) along its wave's wire, close to the note
-const FLOW_MIX_PORT_MARGIN = 24;  // extra clearance: a mix port is pushed along the wire until it clears the note's card by this much
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
 const FLOW_HOLD_DELETE = 1000;  // ms of a continued hold (past move mode) before the delete countdown starts
 const FLOW_DELETE_MS = 1000;    // delete countdown duration: a 1-second hold before the node is deleted (total ≈ 2 s)
@@ -78,17 +77,20 @@ const FLOW_ENV_DELETE_BUFFER = 24;       // px a dot must pass the plot edge bef
 // type — each type has its own accent. A filled port inherits its source's
 // color (so the port matches the wire); an empty port keeps a role-based hint
 // (FLOW_ROLE_COLORS) for what could connect there.
+const FLOW_LAYER_ACCENT = '#f06292';      // layer-editor accent (pink)
 const FLOW_SOURCE_COLORS = {
   wave: FLOW_WAVE_ACCENT,      // 🌊 → cyan
+  layer: FLOW_LAYER_ACCENT,    // 🧅 → pink
   volumeEnv: '#4caf50',        // 📉 → green
   env: '#ffb74d',              // 📈 → orange
   unison: '#ba68c8',           // 🦄 → violet
 };
 const FLOW_ROLE_COLORS = {
   volumeEnv: '#4caf50',
-  waves: FLOW_WAVE_ACCENT,
-  mixEnvs: '#ffb74d',
+  layers: FLOW_LAYER_ACCENT,
+  wave: FLOW_WAVE_ACCENT,
   mixEnv: '#ffb74d',
+  pitchEnv: '#64b5f6',
   unison: '#ba68c8',
   volEnv: '#9ccc65',
   stEnv: '#64b5f6',
@@ -110,6 +112,7 @@ const FLOW_NODE_TYPES = {
   volumeEnv: { label: 'Volume', emoji: '📉' },
   env: { label: 'Env', emoji: '📈' },
   wave: { label: 'Wave', emoji: '🌊' },
+  layer: { label: 'Layer', emoji: '🧅' },
   unison: { label: 'Unison', emoji: '🦄' },
 };
 const FLOW_NOTE_LIFE_MIN = 300;    // ms
@@ -233,6 +236,7 @@ function flowNodeAt(x, y) {
 function flowWidgetSize(node) {
   switch (node.type) {
     case 'note': return { w: 176, h: 128 };
+    case 'layer': return { w: 176, h: 112 };
     case 'unison': return { w: 176, h: 128 };
     default: return { w: 176, h: 116 };   // volumeEnv / env / wave mini plots
   }
@@ -240,7 +244,11 @@ function flowWidgetSize(node) {
 // The node's widget rect in screen space. When the node is being edited, its
 // widget IS the enlarged editor panel (grows in place at the node's position).
 function flowWidgetRect(node, editing) {
-  if (editing) return (node.type === 'note') ? flowNotePanel() : flowEnvPanel();
+  if (editing) {
+    if (node.type === 'note') return flowNotePanel();
+    if (node.type === 'layer') return flowLayerPanel();
+    return flowEnvPanel();
+  }
   const s = flowWidgetSize(node);
   const p = flowNodeScreen(node);
   const sw = s.w * FLOW_CARD_SCALE, sh = s.h * FLOW_CARD_SCALE;
@@ -249,7 +257,7 @@ function flowWidgetRect(node, editing) {
 // The id of whichever node is currently being edited (its widget is enlarged),
 // or null when nothing is being edited.
 function flowActiveEditId() {
-  return flowNoteEdit || flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit || null;
+  return flowNoteEdit || flowEnvEdit || flowWaveEdit || flowUnisonEdit || flowCurveEdit || flowLayerEdit || null;
 }
 // A note widget's four ▶ play buttons (tap / full / live / repeat) and its
 // note-life slider track, laid out for whatever rect they are drawn in (idle
@@ -321,11 +329,13 @@ function defaultEnvCurve() {
    the source nodes feeding it (fan-out is free — any node can be referenced by
    many consumers). Slots are type-constrained, so the graph is a DAG by
    construction (no cycles). A note is the aggregator: it consumes a required
-   volume envelope + 1..3 waves, each wave with an optional mix envelope; a wave
+   volume envelope + 1..3 layers, each layer a required wave + optional mix/pitch
+   envs (its own static Mix/Pitch faders take over when an env is absent); a wave
    may feed a unison; a unison may feed up to three envs (volume / st / ct). */
 function defaultConn(type) {
-  if (type === 'note') return { volumeEnv: null, pitchEnv: null, waves: [null, null, null], mixEnvs: [null, null, null] };
-  if (type === 'wave') return { mixEnv: null, unison: [] };
+  if (type === 'note') return { volumeEnv: null, pitchEnv: null, layers: [null, null, null] };
+  if (type === 'layer') return { wave: null, mixEnv: null, pitchEnv: null };
+  if (type === 'wave') return { unison: [] };
   if (type === 'unison') return { volEnv: null, stEnv: null, ctEnv: null };
   return null;
 }
@@ -383,22 +393,21 @@ function flowPortMuteable(node, slot) {
   return !def.req;
 }
 // The connection slots a node exposes, in modal/port order. Each row carries
-// its pills (usually one; the note's wave rows carry a second pill for the mix
-// env) — the legacy structure kept for wiring/detach/prune and the ports.
+// one slot (the structure kept for wiring/detach/prune and the ports).
 function flowSlotRows(node) {
   const rows = [];
   if (node.type === 'note') {
     rows.push({ slot: { key: 'volumeEnv' }, label: 'Vol env', req: true, y: 0 });
     rows.push({ slot: { key: 'pitchEnv' }, label: 'Pitch env', y: 0 });
+    // Every layer slot is optional/muteable: a muted layer connection silences
+    // that layer without touching it.
     for (let i = 0; i < 3; i++) {
-      rows.push({
-        slot: { key: 'waves', idx: i },
-        pill2: { key: 'mixEnvs', idx: i },
-        label: 'Wave ' + (i + 1),
-        req: i === 0,
-        y: 0,
-      });
+      rows.push({ slot: { key: 'layers', idx: i }, label: 'Layer ' + (i + 1), y: 0 });
     }
+  } else if (node.type === 'layer') {
+    rows.push({ slot: { key: 'wave' }, label: 'Wave', req: true, y: 0 });
+    rows.push({ slot: { key: 'mixEnv' }, label: 'Mix env', y: 0 });
+    rows.push({ slot: { key: 'pitchEnv' }, label: 'Pitch env', y: 0 });
   } else if (node.type === 'wave') {
     // One row per connected unison plus a trailing empty "add" row — arming it
     // creates the next connection. Capped at MAX_LAYER_VOICES stacking voices.
@@ -424,21 +433,21 @@ function flowConnCanAssign(consumer, slot, targetId) {
   if (!def) return false;
   if (def.accepts) {
     if (def.accepts.indexOf(target.type) < 0) return false;
-  } else if (slot.key === 'mixEnvs' || slot.key === 'mixEnv') {
-    if (target.type !== 'env') return false;
+  } else if (slot.key === 'wave') {
+    if (target.type !== 'wave') return false;
   } else if (slot.key === 'volumeEnv') {
     if (target.type !== 'volumeEnv') return false;
+  } else if (slot.key === 'layers') {
+    if (target.type !== 'layer') return false;
   } else if (slot.key === 'unison') {
     if (target.type !== 'unison') return false;
-  } else if (slot.key === 'waves') {
-    if (target.type !== 'wave') return false;
   } else {
-    if (target.type !== 'env') return false;
+    if (target.type !== 'env') return false;   // mixEnv / pitchEnv / volEnv / stEnv / ctEnv
   }
-  // A wave may not fill two of the same note's wave slots.
-  if (consumer.type === 'note' && slot.key === 'waves' && slot.idx != null) {
+  // A layer may not fill two of the same note's layer slots.
+  if (consumer.type === 'note' && slot.key === 'layers' && slot.idx != null) {
     for (let i = 0; i < 3; i++) {
-      if (i !== slot.idx && connSlotGet(consumer, { key: 'waves', idx: i }) === targetId) return false;
+      if (i !== slot.idx && connSlotGet(consumer, { key: 'layers', idx: i }) === targetId) return false;
     }
   }
   // A unison may not fill two of the same wave's unison slots (each stack adds
@@ -454,21 +463,27 @@ function flowConnCanAssign(consumer, slot, targetId) {
   }
   return true;
 }
-// Is a note playable (volume env + at least one wave connected)?
+// Is a note playable (volume env + at least one connected, unmuted layer with a
+// wave)? A muted layer connection contributes nothing to the note.
 function flowNoteReady(note) {
   if (!note || note.type !== 'note') return false;
   const c = flowNodeConn(note);
-  return !!c.volumeEnv && !!c.waves.some(Boolean);
+  if (!c.volumeEnv) return false;
+  for (let i = 0; i < 3; i++) {
+    const lid = c.layers[i];
+    if (!lid) continue;
+    if (connSlotMuted(note, { key: 'layers', idx: i })) continue;
+    const ln = flowNodeById(lid);
+    if (!ln || ln.type !== 'layer') continue;
+    const wid = connSlotGet(ln, { key: 'wave' });
+    if (wid && flowNodeById(wid)) return true;
+  }
+  return false;
 }
-// Clear a slot and, for a note's wave slot, its paired mix-env slot (the mix
-// port rides that wave's wire, so it must not outlive the wave connection).
+// Clear a slot and its mute flag.
 function connSlotClearPair(node, slot) {
   connSlotSet(node, slot, null);
   connSlotSetMuted(node, slot, false);
-  if (node.type === 'note' && slot.key === 'waves' && slot.idx != null) {
-    connSlotSet(node, { key: 'mixEnvs', idx: slot.idx }, null);
-    connSlotSetMuted(node, { key: 'mixEnvs', idx: slot.idx }, false);
-  }
 }
 // Clear every slot that references `id` (used when a node is deleted).
 function flowDetachNode(id) {
@@ -517,6 +532,7 @@ function addFlowNode(type) {
   else if (type === 'volumeEnv') n.envelope = clone(DEFAULT_ENVELOPE);
   else if (type === 'env') n.env = defaultEnvCurve();
   else if (type === 'wave') n.wave = defaultWaveSpec();
+  else if (type === 'layer') { n.mix = 100; n.pitch = 0; n.pitchScale = FLOW_PITCH_SCALE_DEFAULT; }
   else if (type === 'unison') { n.voices = defaultUnisonVoices(); n.stScale = FLOW_UNISON_ST_SCALE_DEFAULT; n.ctScale = FLOW_UNISON_CT_SCALE_DEFAULT; }
   n.conn = defaultConn(type);
   // The very first node (no nodes existed before this) becomes the world
@@ -542,9 +558,10 @@ function addFlowNode(type) {
 function flowNodeTypeForSlot(slot) {
   if (!slot) return null;
   if (slot.key === 'volumeEnv') return 'volumeEnv';
-  if (slot.key === 'waves') return 'wave';
+  if (slot.key === 'layers') return 'layer';
+  if (slot.key === 'wave') return 'wave';
   if (slot.key === 'unison') return 'unison';
-  return 'env';   // mixEnvs / mixEnv / volEnv / stEnv / ctEnv
+  return 'env';   // mixEnv / pitchEnv / volEnv / stEnv / ctEnv
 }
 // Connection-mode quick-create: long-pressing a blank spot while a slot is
 // armed drops a fresh node of the slot's type there and completes the
@@ -605,6 +622,7 @@ function undoFlow() {
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
   if (flowCurveEdit) closeFlowCurveEditor();
+  if (flowLayerEdit) closeFlowLayerEditor();
   if (!entry) { saveFlow(); return; }
   // Push the discarded post-edit state onto the redo stack so redo can restore
   // it (captured after the editors wrote back any pending proxy edits).
@@ -631,6 +649,7 @@ function redoFlow() {
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
   if (flowCurveEdit) closeFlowCurveEditor();
+  if (flowLayerEdit) closeFlowLayerEditor();
   if (!entry) { saveFlow(); return; }
   // Current state → undo stack (a redo is a reversible edit). Pushed via the
   // bare snapshot helper so the REMAINING redo entries aren't cleared — redo
@@ -651,7 +670,7 @@ function redoFlow() {
 function flowEditorPending() {
   return (flowEnvEdit && flowEnvDirty) || (flowWaveEdit && flowWaveDirty) ||
          (flowUnisonEdit && flowUnisonDirty) || (flowCurveEdit && flowCurveDirty) ||
-         (flowNoteEdit && flowNoteDirty);
+         (flowNoteEdit && flowNoteDirty) || (flowLayerEdit && flowLayerDirty);
 }
 // Whether the ↺ undo button would actually do something right now: there must
 // be history, and an open editor with no pending edits has nothing to undo.
@@ -711,6 +730,7 @@ function flowNavStep(dir) {
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
   if (flowCurveEdit) closeFlowCurveEditor();
+  if (flowLayerEdit) closeFlowLayerEditor();
   flowAddMenu = null;
   flowConnArm = null;
   const n = flowNodeById(id);
@@ -896,6 +916,7 @@ function deleteFlowNode(id) {
   if (flowWaveEdit === id) closeFlowWaveEditor();
   if (flowUnisonEdit === id) closeFlowUnisonEditor();
   if (flowCurveEdit === id) closeFlowCurveEditor();
+  if (flowLayerEdit === id) closeFlowLayerEditor();
   if (flowSelId === id) flowSelId = null;
   flowClearSelConn();   // this node may be a selected wire's source/consumer
   if (flowMoveId === id) flowMoveId = null;
@@ -921,6 +942,7 @@ function clearFlowAll() {
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
   if (flowCurveEdit) closeFlowCurveEditor();
+  if (flowLayerEdit) closeFlowLayerEditor();
   flowNavCur = null;
   flowNavBack = [];
   flowNavFwd = [];
@@ -1192,11 +1214,13 @@ function connFromSaved(type, c) {
     out.volumeEnv = typeof c.volumeEnv === 'string' ? c.volumeEnv : null;
     out.pitchEnv = typeof c.pitchEnv === 'string' ? c.pitchEnv : null;
     for (let i = 0; i < 3; i++) {
-      out.waves[i] = (Array.isArray(c.waves) && typeof c.waves[i] === 'string') ? c.waves[i] : null;
-      out.mixEnvs[i] = (Array.isArray(c.mixEnvs) && typeof c.mixEnvs[i] === 'string') ? c.mixEnvs[i] : null;
+      out.layers[i] = (Array.isArray(c.layers) && typeof c.layers[i] === 'string') ? c.layers[i] : null;
     }
-  } else if (type === 'wave') {
+  } else if (type === 'layer') {
+    out.wave = typeof c.wave === 'string' ? c.wave : null;
     out.mixEnv = typeof c.mixEnv === 'string' ? c.mixEnv : null;
+    out.pitchEnv = typeof c.pitchEnv === 'string' ? c.pitchEnv : null;
+  } else if (type === 'wave') {
     // unison is an array of stacked source ids; legacy saves hold a single string.
     if (typeof c.unison === 'string') out.unison = c.unison ? [c.unison] : [];
     else if (Array.isArray(c.unison)) out.unison = c.unison.filter(x => typeof x === 'string').slice(0, MAX_LAYER_VOICES);
@@ -1215,7 +1239,7 @@ function connFromSaved(type, c) {
   return out;
 }
 // Drop connection references to nodes that no longer exist, and dedupe a
-// note's wave slots (a wave may fill only one).
+// note's layer slots (a layer may fill only one).
 function flowPruneConns() {
   const ids = new Set(flowNodes.map(n => n.id));
   for (const n of flowNodes) {
@@ -1230,11 +1254,9 @@ function flowPruneConns() {
     if (n.type === 'note') {
       const seen = {};
       for (let i = 0; i < 3; i++) {
-        const w = c.waves[i];
-        if (w && seen[w]) { c.waves[i] = null; connSlotSetMuted(n, { key: 'waves', idx: i }, false); }
-        if (w) seen[w] = true;
-        // A mix env rides its wave's wire — without the wave, it's orphaned.
-        if (!c.waves[i]) { c.mixEnvs[i] = null; connSlotSetMuted(n, { key: 'mixEnvs', idx: i }, false); }
+        const l = c.layers[i];
+        if (l && seen[l]) { c.layers[i] = null; connSlotSetMuted(n, { key: 'layers', idx: i }, false); }
+        if (l) seen[l] = true;
       }
     }
     if (n.type === 'wave' && Array.isArray(c.unison)) {
@@ -1250,6 +1272,42 @@ function flowPruneConns() {
     }
   }
 }
+// Rewrite a raw saved node array for the Layer node model (v1.35). Notes saved
+// before it connected waves directly ({ waves[3], mixEnvs[3], pitchEnv }); each
+// connected wave becomes a synthetic Layer node owning the wave + its mix env.
+// The note keeps its own master pitch env + scale (still the overall-note
+// fallback for layers without a pitch env of their own), so those stay put.
+// Nodes already saved in the new shape ({ layers[3] }) pass through untouched.
+function flowMigrateOldWaveConns(arr) {
+  const extra = [];
+  for (const n of arr) {
+    if (!n || n.type !== 'note') continue;
+    const c = n.conn;
+    if (!c || typeof c !== 'object' || !Array.isArray(c.waves)) continue;
+    const px = (typeof n.x === 'number') ? n.x : (Math.round(n.gx) * FLOW_CELL + FLOW_CELL / 2);
+    const py = (typeof n.y === 'number') ? n.y : (Math.round(n.gy) * FLOW_CELL + FLOW_CELL / 2);
+    const layers = [null, null, null];
+    for (let i = 0; i < 3; i++) {
+      const wId = (Array.isArray(c.waves) && typeof c.waves[i] === 'string') ? c.waves[i] : null;
+      if (!wId) continue;
+      const mixId = (Array.isArray(c.mixEnvs) && typeof c.mixEnvs[i] === 'string') ? c.mixEnvs[i] : null;
+      const lid = 'layer-' + (n.id || 'note') + '-' + i + '-' + Math.random().toString(36).slice(2, 8);
+      extra.push({
+        id: lid,
+        type: 'layer',
+        x: px + FLOW_CELL * 2.4,
+        y: py + (i - 1) * FLOW_CELL * 1.5,
+        mix: 100, pitch: 0,
+        pitchScale: FLOW_PITCH_SCALE_DEFAULT,
+        conn: { wave: wId, mixEnv: mixId, pitchEnv: null },
+      });
+      layers[i] = lid;
+    }
+    n.conn = { volumeEnv: typeof c.volumeEnv === 'string' ? c.volumeEnv : null, pitchEnv: typeof c.pitchEnv === 'string' ? c.pitchEnv : null, layers };
+  }
+  return arr.concat(extra);
+}
+
 function loadFlow() {
   try {
     const raw = localStorage.getItem(FLOW_SAVE_KEY);
@@ -1258,7 +1316,14 @@ function loadFlow() {
     if (d.envDrawPoints != null) flowEnvDrawPoints = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+d.envDrawPoints || 8)));
     const arr = Array.isArray(d.nodes) ? d.nodes : [];
     flowNodes = [];
-    for (const n of arr) {
+    // Old saves wired waves (with per-wave mix envs and a master pitch env)
+    // straight into the note. v1.35 introduces the Layer node: each connected
+    // wave + its mix env become a Layer, and the note's master pitch env feeds
+    // every migrated layer (preserving the old apply-to-all behaviour). The
+    // synthetic Layer nodes are inserted into the raw array so they load like
+    // any saved node.
+    const migrated = flowMigrateOldWaveConns(arr);
+    for (const n of migrated) {
       if (!n || typeof n.type !== 'string') continue;
       const hasPos = (typeof n.x === 'number' && typeof n.y === 'number') || (typeof n.gx === 'number' && typeof n.gy === 'number');
       if (!hasPos) continue;
@@ -1283,6 +1348,11 @@ function loadFlow() {
       }
       if (node.type === 'env') node.env = envCurveFromSaved(n.env);
       if (node.type === 'wave') node.wave = waveSpecFromSaved(n.wave);
+      if (node.type === 'layer') {
+        node.mix = Math.max(0, Math.min(100, Math.round(+n.mix) || 100));
+        node.pitch = Math.max(-24, Math.min(24, Math.round(+n.pitch) || 0));
+        node.pitchScale = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+n.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
+      }
       if (node.type === 'unison') {
         node.voices = voicesFromSavedFlow(n.voices);
         node.stScale = Math.max(1, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+n.stScale) || FLOW_UNISON_ST_SCALE_DEFAULT));
@@ -1322,6 +1392,7 @@ function closeSoundFlow() {
   if (flowWaveEdit) closeFlowWaveEditor();
   if (flowUnisonEdit) closeFlowUnisonEditor();
   if (flowCurveEdit) closeFlowCurveEditor();
+  if (flowLayerEdit) closeFlowLayerEditor();
   flowPtr = null;
   flowInertia = null;
   flowAddMenu = null;
@@ -1376,8 +1447,8 @@ function flowSetNoteLife(node, ms) {
   ENVELOPE = env.envelope;
   try { setNoteLifetime(ms); } finally { ENVELOPE = saved; }
 }
-// The note's pitch-envelope scale (whole semitones a full-strength pitch env
-// bends the note), loaded/clamped from the node — or the default when unset.
+// A node's pitch-envelope scale (whole semitones a full-strength pitch env
+// bends it) — a note's overall (master) or a layer's own. Clamped, defaulted.
 function flowPitchScale(node) {
   return Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+node.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
 }
@@ -1398,15 +1469,17 @@ function flowSetPitchScale(node, st) {
    connections are cleared by selecting a wire and long-pressing it to delete. */
 function flowPortEmoji(slot) {
   if (slot.key === 'volumeEnv') return '📉';
-  if (slot.key === 'waves') return '🌊';
+  if (slot.key === 'layers') return '🧅';
+  if (slot.key === 'wave') return '🌊';
   if (slot.key === 'unison') return '🦄';
-  return '📈';   // mixEnv(s), volEnv, stEnv, ctEnv
+  return '📈';   // mixEnv, pitchEnv, volEnv, stEnv, ctEnv
 }
 function flowPortLabel(slot) {
   if (slot.key === 'volumeEnv') return 'Vol';
   if (slot.key === 'pitchEnv') return 'Pitch';
-  if (slot.key === 'waves') return 'W' + ((slot.idx != null ? slot.idx : 0) + 1);
-  if (slot.key === 'mixEnvs' || slot.key === 'mixEnv') return (slot.key === 'mixEnvs' ? 'M' + ((slot.idx != null ? slot.idx : 0) + 1) : 'Mix');
+  if (slot.key === 'layers') return 'L' + ((slot.idx != null ? slot.idx : 0) + 1);
+  if (slot.key === 'wave') return 'Wave';
+  if (slot.key === 'mixEnv') return 'Mix';
   if (slot.key === 'unison') return slot.idx != null ? 'Uni' + (slot.idx + 1) : 'Uni';
   if (slot.key === 'volEnv') return 'Vol';
   if (slot.key === 'stEnv') return 'St';
@@ -1599,28 +1672,36 @@ function flowPorts(node) {
     add({ key: 'pitchEnv' }, cx - 34, pitchY, pitchEdge);
     for (let i = 0; i < 3; i++) {
       const y = cy + (i - 1) * 27;
-      // Wave port (right by default; flips to the left when the wave node sits
-      // to the note's left). The y stays fixed so the row keeps its identity.
-      const waveId = connSlotGet(node, { key: 'waves', idx: i });
-      const wsrc = waveId ? flowNodeById(waveId) : null;
-      const waveEdge = flowPortEdge('right', wsrc, node);
-      const wx = waveEdge === 'left' ? cx - w / 2 - 6 : cx + w / 2 + 6;
-      add({ key: 'waves', idx: i }, wx, y, waveEdge, i === 0);
-      // The per-wave mix port rides its wave's wire, close to the note — it only
-      // exists while that wave is connected (no wave, no mix port).
-      if (wsrc) {
-        const wpath = flowWirePath(flowWireSourceAnchor(flowNodeScreen(wsrc), { x: wx, y }, wsrc), { x: wx, y }, node, wsrc);
-        // Keep the mix port off the note's own card: when the wave sits to the
-        // left, the wire crosses the card near the port, so a fixed-distance
-        // point would land on top of the note. Walk the wire until it clears
-        // the (inflated) card rect instead.
-        const keepOut = {
-          x: r.x - FLOW_MIX_PORT_MARGIN, y: r.y - FLOW_MIX_PORT_MARGIN,
-          w: r.w + 2 * FLOW_MIX_PORT_MARGIN, h: r.h + 2 * FLOW_MIX_PORT_MARGIN,
-        };
-        const pt = flowBezierAtDistFromB(wpath, FLOW_MIX_PORT_DIST, keepOut);
-        add({ key: 'mixEnvs', idx: i }, pt.x, pt.y, 'wire', false, pt.nx, pt.ny);
-      }
+      // Layer port (right by default; flips to the left when the layer node
+      // sits to the note's left). The y stays fixed so the row keeps its
+      // identity.
+      const layerId = connSlotGet(node, { key: 'layers', idx: i });
+      const lsrc = layerId ? flowNodeById(layerId) : null;
+      const layerEdge = flowPortEdge('right', lsrc, node);
+      const lx = layerEdge === 'left' ? cx - w / 2 - 6 : cx + w / 2 + 6;
+      add({ key: 'layers', idx: i }, lx, y, layerEdge);
+    }
+  } else if (node.type === 'layer') {
+    // Wave port (right by default; flips to the left when the wave node sits
+    // to the layer's left).
+    const waveId = connSlotGet(node, { key: 'wave' });
+    const wsrc = waveId ? flowNodeById(waveId) : null;
+    const waveEdge = flowPortEdge('right', wsrc, node);
+    const wx = waveEdge === 'left' ? cx - w / 2 - 6 : cx + w / 2 + 6;
+    add({ key: 'wave' }, wx, cy, waveEdge, true);
+    // Mix + pitch env ports on the left edge, aligned beside the fader row
+    // each drives (Mix / Pitch). A connected port flips to the right edge when
+    // its env node sits to the right — the y stays aligned either way.
+    const envDefs = [
+      ['mixEnv', r.y + 30],
+      ['pitchEnv', r.y + 58],
+    ];
+    for (const [key, py] of envDefs) {
+      const sid = connSlotGet(node, { key });
+      const ssrc = sid ? flowNodeById(sid) : null;
+      const edge = flowPortEdge('left', ssrc, node);
+      const x = edge === 'right' ? cx + w / 2 + 6 : cx - w / 2 - 6;
+      add({ key }, x, py, edge);
     }
   } else if (node.type === 'wave') {
     // One bottom port per connected unison, plus a trailing empty port for the
@@ -2081,6 +2162,7 @@ function drawFlowWidgetBody(n, r) {
   else if (n.type === 'volumeEnv') drawFlowWidgetEnv(n, r);
   else if (n.type === 'env') drawFlowWidgetCurve(n, r);
   else if (n.type === 'wave') drawFlowWidgetWave(n, r);
+  else if (n.type === 'layer') drawFlowWidgetLayer(n, r);
   else if (n.type === 'unison') drawFlowWidgetUnison(n, r);
   // Warning badge on a note whose required connections are missing.
   if (n.type === 'note' && !flowNoteReady(n)) {
@@ -2345,7 +2427,7 @@ function drawFlowWidgetUnison(n, r) {
     y += 28;
   }
 }
-function drawFlowWidgetFader(label, val, min, max, fmt, y, r, locked) {
+function drawFlowWidgetFader(label, val, min, max, fmt, y, r, locked, accent) {
   const trackX1 = r.x + 58, trackX2 = r.x + r.w - 54;
   ctx.globalAlpha = locked ? 0.4 : 1;
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
@@ -2365,7 +2447,7 @@ function drawFlowWidgetFader(label, val, min, max, fmt, y, r, locked) {
   } else {
     const f = clamp01((val - min) / (max - min));
     const kx = trackX1 + f * (trackX2 - trackX1);
-    ctx.strokeStyle = FLOW_UNISON_ACCENT;
+    ctx.strokeStyle = accent || FLOW_UNISON_ACCENT;
     ctx.beginPath();
     ctx.moveTo(trackX1, y); ctx.lineTo(kx, y);
     ctx.stroke();
@@ -2384,7 +2466,7 @@ function drawFlowWidgetFader(label, val, min, max, fmt, y, r, locked) {
 // A unison env-scale row on the idle widget: the fader layout (same track
 // geometry), but a scale track + knob + value — shown in a row's place while
 // its animation env is connected.
-function drawFlowWidgetScale(label, val, max, fmt, y, r) {
+function drawFlowWidgetScale(label, val, max, fmt, y, r, accent) {
   const trackX1 = r.x + 62, trackX2 = r.x + r.w - 54;
   ctx.globalAlpha = 1;
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
@@ -2400,7 +2482,7 @@ function drawFlowWidgetScale(label, val, max, fmt, y, r) {
   ctx.stroke();
   const f = clamp01((val - 1) / (max - 1));
   const kx = trackX1 + f * (trackX2 - trackX1);
-  ctx.strokeStyle = FLOW_UNISON_ACCENT;
+  ctx.strokeStyle = accent || FLOW_UNISON_ACCENT;
   ctx.beginPath();
   ctx.moveTo(trackX1, y); ctx.lineTo(kx, y);
   ctx.stroke();
@@ -2414,6 +2496,428 @@ function drawFlowWidgetScale(label, val, max, fmt, y, r) {
   ctx.font = '700 9px sans-serif';
   ctx.fillText(fmt(val), r.x + r.w - 8, y);
   ctx.globalAlpha = 1;
+}
+
+/* ---- Layer widget ----
+   A layer node IS its own editor: two always-visible fader rows on the card —
+   Mix (0..100%) and Pitch (−24..24 st) — that are directly draggable while no
+   envelope drives them (the unison-style lock: a connected mix env takes over
+   Mix, a connected pitch env replaces the Pitch row with its env-scale slider).
+   The required Wave, and the optional mix/pitch envs, arrive as wires. */
+var flowLayerDrag = null;    // { nodeId, key } active layer-fader drag, or null
+var flowLayerDirty = false;  // any edit happened this drag session (coalesces undo)
+function flowLayerParamLocked(node, key) {
+  return !!(node && connSlotGet(node, { key: key + 'Env' }));
+}
+function drawFlowWidgetLayer(n, r) {
+  const mixLocked = flowLayerParamLocked(n, 'mix');
+  const pitchLocked = flowLayerParamLocked(n, 'pitch');
+  // Mix row: a static fader by default; while a mix env is connected it locks
+  // to ENV (a mix env has no scale setting — it just takes over the weight).
+  const mixVal = Math.max(0, Math.min(100, Math.round(+n.mix || 0)));
+  drawFlowWidgetFader('Mix', mixVal, 0, 100, v => v + '%', r.y + 30, r, mixLocked, FLOW_LAYER_ACCENT);
+  // Pitch row: a static fader by default; while a pitch env is connected it
+  // becomes the env's scale slider (how far a full-strength env bends).
+  if (pitchLocked) {
+    drawFlowWidgetScale('Pitch scale', flowPitchScale(n), FLOW_PITCH_SCALE_MAX, v => '±' + v + ' st', r.y + 58, r, FLOW_LAYER_ACCENT);
+  } else {
+    const pitchVal = Math.max(-24, Math.min(24, Math.round(+n.pitch || 0)));
+    drawFlowWidgetFader('Pitch', pitchVal, -24, 24, v => (v > 0 ? '+' : '') + v + ' st', r.y + 58, r, false, FLOW_LAYER_ACCENT);
+  }
+}
+// The fader row under the screen point (x,y), mapped into the layer's full-size
+// card coords (the idle card renders scaled about its centre). Returns the
+// draggable key — 'mix' | 'pitch' | 'pitchScale' — or null.
+function flowLayerWidgetRowAt(n, x, y) {
+  const p = flowNodeScreen(n);
+  const s = flowWidgetSize(n);
+  const fx = p.x + (x - p.x) / FLOW_CARD_SCALE;
+  const fy = p.y + (y - p.y) / FLOW_CARD_SCALE;
+  const r = { x: p.x - s.w / 2, y: p.y - s.h / 2, w: s.w, h: s.h };
+  const t1 = r.x + 58, t2 = r.x + r.w - 54;
+  const rowAt = rowY => Math.abs(fy - rowY) <= 18 && fx >= t1 - 12 && fx <= t2 + 12;
+  if (rowAt(r.y + 30) && !flowLayerParamLocked(n, 'mix')) return 'mix';
+  if (rowAt(r.y + 58)) return flowLayerParamLocked(n, 'pitch') ? 'pitchScale' : 'pitch';
+  return null;
+}
+function flowSetLayerParam(n, key, x) {
+  const p = flowNodeScreen(n);
+  const s = flowWidgetSize(n);
+  const r = { x: p.x - s.w / 2, y: p.y - s.h / 2, w: s.w, h: s.h };
+  const t1 = r.x + 58, t2 = r.x + r.w - 54;
+  const fx = p.x + (x - p.x) / FLOW_CARD_SCALE;
+  const f = clamp01((fx - t1) / (t2 - t1));
+  if (key === 'mix') n.mix = Math.round(f * 100);
+  else if (key === 'pitch') n.pitch = Math.round(-24 + f * 48);
+  else if (key === 'pitchScale') n.pitchScale = Math.round(FLOW_PITCH_SCALE_MIN + f * (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
+}
+function flowLayerMutate(fn) {
+  if (!flowLayerDirty) { flowPushHistory(); flowLayerDirty = true; }
+  fn();
+}
+// Start a fader drag on a layer widget (pointerdown on its track): set the value
+// once, then the finger's move updates it live (flowSetLayerParam via pointermove).
+function flowLayerDragStart(n, key, x) {
+  flowLayerMutate(() => flowSetLayerParam(n, key, x));
+  flowLayerDrag = { nodeId: n.id, key };
+}
+function flowLayerDragMove(x) {
+  const n = flowLayerDrag ? flowNodeById(flowLayerDrag.nodeId) : null;
+  if (!n) return;
+  flowSetLayerParam(n, flowLayerDrag.key, x);
+}
+function flowLayerDragEnd() {
+  if (!flowLayerDrag) return;
+  flowLayerDrag = null;
+  flowLayerDirty = false;
+  saveFlow();
+}
+
+/* ---- Layer editor overlay ----
+   Tapping a layer card grows it in place into a full editor (like every other
+   node type): the connected wave's spectrum up top, then the Mix / Pitch
+   faders with −/+ nudge buttons — or, while an env drives a row, the pitch
+   env's scale slider / the mix ENV lock, each with a Disconnect button that
+   severs the connection. The card's own faders stay draggable for quick edits
+   without opening the editor. */
+var flowLayerEdit = null;    // id of the layer node being edited, or null
+var flowLayerPtr = null;     // { key } active editor fader drag, or null
+function flowLayerPanel() {
+  const w = Math.min(520, W - 24);
+  const h = Math.min(380, H - 24);
+  const n = flowLayerEdit ? flowNodeById(flowLayerEdit) : null;
+  if (!n) return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  const p = flowNodeScreen(n);
+  const x = Math.max(12, Math.min(W - 12 - w, p.x - w / 2));
+  const y = Math.max(12, Math.min(H - 12 - h, p.y - h / 2));
+  return { x, y, w, h };
+}
+// The editor's read-only plot of the layer's connected wave spectrum.
+function flowLayerWavePlot(p) {
+  return { left: p.x + 16, right: p.x + p.w - 16, top: p.y + 52, bottom: p.y + 118, pw: p.w - 32, ph: 66 };
+}
+// Two parameter faders (Mix / Pitch): a track to drag + −/+ nudge buttons.
+function flowLayerFaders(p) {
+  const top = p.y + 136, h = 42;
+  const defs = [
+    { key: 'mix', label: 'Mix', fmt: v => v + '%', min: 0, max: 100, step: 1 },
+    { key: 'pitch', label: 'Pitch', fmt: v => (v > 0 ? '+' : '') + v + ' st', min: -24, max: 24, step: 1 },
+  ];
+  return defs.map((d, i) => {
+    const cy = top + i * h;
+    return {
+      key: d.key, label: d.label, fmt: d.fmt, min: d.min, max: d.max, step: d.step,
+      labelX: p.x + 16, cy,
+      trackX1: p.x + 84, trackX2: p.x + p.w - 118,
+      btnMinus: { x: p.x + p.w - 108, y: cy - 11, w: 22, h: 22 },
+      btnPlus: { x: p.x + p.w - 80, y: cy - 11, w: 22, h: 22 },
+      valX: p.x + p.w - 18,
+      btnDisconn: { x: p.x + p.w - 118, y: cy - 11, w: 102, h: 22 },
+    };
+  });
+}
+// The pitch row becomes a scale slider while its pitch env is connected (same y
+// position as the static fader, so the rows never move).
+function flowLayerScaleRow(p) {
+  const f = flowLayerFaders(p).find(x => x.key === 'pitch');
+  if (!f) return null;
+  return Object.assign({ key: 'pitchScale', slot: 'pitchEnv', max: FLOW_PITCH_SCALE_MAX, label: 'Pitch env scale', fmt: v => '±' + v + ' st' }, {
+    labelX: f.labelX, cy: f.cy,
+    trackX1: p.x + 100, trackX2: p.x + p.w - 150,
+    valX: p.x + p.w - 160,
+    btnDisconn: f.btnDisconn,
+  });
+}
+function openFlowLayerEditor(id) {
+  const n = flowNodeById(id);
+  if (!n || n.type !== 'layer') return;
+  flowLayerEdit = id;
+  flowLayerDirty = false;
+  flowLayerPtr = null;
+  flowLayerDrag = null;
+  flowAddMenu = null;
+  flowMoveId = null;
+  flowConnArm = null;
+  flowSelId = id;
+}
+function closeFlowLayerEditor() {
+  if (!flowLayerEdit) return;
+  flowLayerEdit = null;
+  flowLayerDirty = false;
+  flowLayerPtr = null;
+  flowLayerDrag = null;
+  saveFlow();
+}
+function flowLayerSetParam(f, x) {
+  const n = flowNodeById(flowLayerEdit);
+  if (!n) return;
+  let val = f.min + clamp01((x - f.trackX1) / (f.trackX2 - f.trackX1)) * (f.max - f.min);
+  val = Math.round(val / f.step) * f.step;
+  val = Math.max(f.min, Math.min(f.max, val));
+  flowLayerMutate(() => { n[f.key] = val; });
+}
+function flowLayerNudge(key, dir) {
+  const n = flowNodeById(flowLayerEdit);
+  if (!n) return;
+  const d = key === 'mix' ? { min: 0, max: 100, step: 1 } : { min: -24, max: 24, step: 1 };
+  const cur = +(n[key] != null ? n[key] : 0);
+  const val = Math.max(d.min, Math.min(d.max, cur + dir * d.step));
+  flowLayerMutate(() => { n[key] = val; });
+}
+function flowLayerSetEnvScale(x, row) {
+  const n = flowNodeById(flowLayerEdit);
+  if (!n) return;
+  const f = clamp01((x - row.trackX1) / (row.trackX2 - row.trackX1));
+  const val = Math.round(FLOW_PITCH_SCALE_MIN + f * (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
+  flowLayerMutate(() => { n.pitchScale = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, val)); });
+}
+function drawFlowLayerEditor() {
+  const p = flowLayerPanel();
+  const n = flowNodeById(flowLayerEdit);
+  if (!n) return;
+  drawRoundRect(p.x, p.y, p.w, p.h, 14);
+  ctx.fillStyle = 'rgba(14,14,16,0.74)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Header.
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('🧅  Layer', p.x + 16, p.y + 30);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '700 11px sans-serif';
+  ctx.fillText('One oscillator: a wave + mix/pitch', p.x + 104, p.y + 30);
+  // The connected wave's spectrum, read-only (tap the wave node to edit it).
+  drawFlowLayerWavePlotEditor(n, p);
+  // Parameter rows (Mix / Pitch): a static fader by default. While a row's env
+  // is connected the row is taken over — pitch shows its env-scale slider, mix
+  // locks to ENV — each with a Disconnect button where the −/+ buttons were.
+  const scale = flowLayerScaleRow(p);
+  for (const f of flowLayerFaders(p)) {
+    const locked = flowLayerParamLocked(n, f.key);
+    if (locked && f.key === 'pitch' && scale) { drawFlowLayerScaleRow(scale, n); continue; }
+    const cur = +(n[f.key] != null ? n[f.key] : 0);
+    ctx.globalAlpha = locked ? 0.4 : 1;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(f.label, f.labelX, f.cy + 4);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(f.trackX2, f.cy);
+    ctx.stroke();
+    if (!locked) {
+      const frac = clamp01((cur - f.min) / (f.max - f.min));
+      const tx = f.trackX1 + frac * (f.trackX2 - f.trackX1);
+      ctx.strokeStyle = FLOW_LAYER_ACCENT;
+      ctx.beginPath();
+      ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(tx, f.cy);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.arc(tx, f.cy, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(locked ? 'ENV' : f.fmt(cur), locked ? p.x + p.w - 124 : f.valX, f.cy + 4);
+    if (locked) {
+      // An envelope drives this parameter — offer a Disconnect button (the −/+
+      // buttons are inert): severing the env re-enables the fader.
+      const bx = f.btnDisconn;
+      drawRoundRect(bx.x, bx.y, bx.w, bx.h, 7);
+      ctx.fillStyle = '#3a243f';
+      ctx.fill();
+      ctx.strokeStyle = FLOW_LAYER_ACCENT;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Disconnect', bx.x + bx.w / 2, bx.y + bx.h / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'left';
+    } else {
+      for (const side of ['btnMinus', 'btnPlus']) {
+        const bx = f[side];
+        drawRoundRect(bx.x, bx.y, bx.w, bx.h, 6);
+        ctx.fillStyle = '#333333';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(side === 'btnMinus' ? '−' : '+', bx.x + bx.w / 2, bx.y + bx.h / 2 + 1);
+        ctx.textBaseline = 'alphabetic';
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  // Hint.
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '700 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText("The note's pitch env also bends this layer on top of its own", p.x + p.w / 2, p.y + p.h - 8);
+}
+// The editor's read-only wave plot: the connected wave's harmonic spectrum.
+function drawFlowLayerWavePlotEditor(n, p) {
+  const pl = flowLayerWavePlot(p);
+  drawMiniPlotFrame(pl);
+  const wid = connSlotGet(n, { key: 'wave' });
+  const w = wid ? flowNodeById(wid) : null;
+  if (!w || w.type !== 'wave') {
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '700 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No wave connected', pl.left + pl.pw / 2, pl.top + pl.ph / 2);
+    ctx.textBaseline = 'alphabetic';
+    return;
+  }
+  const l = flowWaveLayer(w);
+  initLayerSpecPoints(l);
+  const pts = l.specPoints || [];
+  const harmN = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+(w.wave && w.wave.harmonics) || HARMONIC_COUNT)));
+  const lastT = harmN >= HARMONIC_COUNT ? 1 : (harmN - 1) / (HARMONIC_COUNT - 1);
+  const vPts = pts.filter(pt => pt.x <= lastT + 1e-6);
+  ctx.strokeStyle = FLOW_WAVE_ACCENT;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(flowWaveHarmStToX(0, harmN, pl), ampToY(specValueAt(pts, 0), pl));
+  for (let j = 0; j < vPts.length; j++) ctx.lineTo(flowWaveHarmStToX(vPts[j].x, harmN, pl), ampToY(vPts[j].a, pl));
+  ctx.lineTo(flowWaveHarmStToX(lastT, harmN, pl), ampToY(specValueAt(pts, lastT), pl));
+  ctx.stroke();
+  for (const pt of vPts) {
+    ctx.fillStyle = FLOW_WAVE_ACCENT;
+    ctx.beginPath();
+    ctx.arc(flowWaveHarmStToX(pt.x, harmN, pl), ampToY(pt.a, pl), 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+// The envelope-scale slider that replaces the static pitch fader while its env
+// is connected: label, scale track + knob, value, and a Disconnect button.
+function drawFlowLayerScaleRow(f, node) {
+  const val = flowPitchScale(node);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(f.label, f.labelX, f.cy + 4);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(f.trackX2, f.cy);
+  ctx.stroke();
+  const frac = clamp01((val - FLOW_PITCH_SCALE_MIN) / (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
+  const tx = f.trackX1 + frac * (f.trackX2 - f.trackX1);
+  ctx.strokeStyle = FLOW_LAYER_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(tx, f.cy);
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.arc(tx, f.cy, 8, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(f.fmt(val), f.valX, f.cy + 4);
+  // Disconnect button (same slot as the locked fader's): sever the env
+  // connection to restore the static fader.
+  const bx = f.btnDisconn;
+  drawRoundRect(bx.x, bx.y, bx.w, bx.h, 7);
+  ctx.fillStyle = '#3a243f';
+  ctx.fill();
+  ctx.strokeStyle = FLOW_LAYER_ACCENT;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Disconnect', bx.x + bx.w / 2, bx.y + bx.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+}
+function flowLayerHandleDown(x, y) {
+  const p = flowLayerPanel();
+  if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowLayerEditor(); return; }
+  const n = flowNodeById(flowLayerEdit);
+  const scale = flowLayerScaleRow(p);
+  for (const f of flowLayerFaders(p)) {
+    const locked = flowLayerParamLocked(n, f.key);
+    if (locked && f.key === 'pitch' && scale) {
+      const bx = scale.btnDisconn;
+      if (x >= bx.x && x <= bx.x + bx.w && y >= bx.y && y <= bx.y + bx.h) { flowLayerDisconnectEnv(f.key); return; }
+      if (Math.abs(y - scale.cy) <= 16 && x >= scale.trackX1 - 6 && x <= scale.trackX2 + 8) {
+        flowLayerSetEnvScale(x, scale);
+        flowLayerPtr = { key: 'pitchScale' };
+        return;
+      }
+      continue;
+    }
+    if (locked) {
+      const bx = f.btnDisconn;
+      if (x >= bx.x && x <= bx.x + bx.w && y >= bx.y && y <= bx.y + bx.h) { flowLayerDisconnectEnv(f.key); return; }
+      continue;
+    }
+    if (x >= f.btnMinus.x && x <= f.btnMinus.x + f.btnMinus.w && y >= f.btnMinus.y && y <= f.btnMinus.y + f.btnMinus.h) { flowLayerNudge(f.key, -1); return; }
+    if (x >= f.btnPlus.x && x <= f.btnPlus.x + f.btnPlus.w && y >= f.btnPlus.y && y <= f.btnPlus.y + f.btnPlus.h) { flowLayerNudge(f.key, 1); return; }
+    if (Math.abs(y - f.cy) <= 16 && x >= f.trackX1 - 6 && x <= f.trackX2 + 8) {
+      flowLayerSetParam(f, x);
+      flowLayerPtr = { key: f.key };
+      return;
+    }
+  }
+}
+// Sever a locked row's animation-envelope connection: the fader (and the pitch
+// env's scale row) re-enables once the env is removed. Coalesced into this
+// session's single undo entry (flowLayerMutate).
+function flowLayerDisconnectEnv(key) {
+  const id = flowLayerEdit;
+  if (!id) return;
+  const n = flowNodeById(id);
+  const slot = { key: key + 'Env' };
+  if (!n || !connSlotGet(n, slot)) return;
+  flowLayerMutate(() => { connSlotClearPair(n, slot); });
+  if (flowSelConn && flowSelConn.nodeId === id && slotKey(flowSelConn.slot) === slotKey(slot)) flowSelConn = null;
+  saveFlow();
+  flowLayerPtr = null;
+}
+function flowLayerHandleMove(x, y) {
+  if (!flowLayerPtr) return;
+  const p = flowLayerPanel();
+  const n = flowNodeById(flowLayerEdit);
+  if (flowLayerPtr.key === 'pitchScale') {
+    const f = flowLayerScaleRow(p);
+    if (f && n && connSlotGet(n, { key: f.slot })) flowLayerSetEnvScale(x, f);
+    return;
+  }
+  const f = flowLayerFaders(p).find(f => f.key === flowLayerPtr.key);
+  if (f && n && !flowLayerParamLocked(n, f.key)) flowLayerSetParam(f, x);
+}
+function flowLayerHandleUp() {
+  flowLayerPtr = null;
+  saveFlow();
 }
 
 /* ---- Note editor ----
@@ -2471,7 +2975,7 @@ function drawFlowNoteEditor() {
   ctx.fillText('🎵  Note', p.x + 16, p.y + 30);
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
-  ctx.fillText('Aggregates volume + up to 3 waves', p.x + 96, p.y + 30);
+  ctx.fillText('Aggregates volume + up to 3 layers', p.x + 96, p.y + 30);
   // Four play buttons: tap, full length, live (hold), repeat (tap/full loop).
   const ready = flowNoteReady(n);
   const btns = flowNoteEditorButtons(p);
@@ -2517,8 +3021,9 @@ function drawFlowNoteEditor() {
   }
   ctx.lineCap = 'butt';
   ctx.globalAlpha = 1;
-  // Pitch-scale slider (editable here): how many semitones a full-strength pitch
-  // env bends the note. Disabled while no pitch env is connected to the note.
+  // Pitch-scale slider (editable here): how many semitones a full-strength
+  // pitch env bends the note (the overall, master bend applied to every layer
+  // without a pitch env of its own). Disabled while no pitch env is connected.
   const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
   const st = flowPitchScale(n);
   ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
@@ -2620,6 +3125,7 @@ function openFlowNodeEditor(id) {
   else if (n.type === 'volumeEnv') openFlowEnvelopeEditor(id);
   else if (n.type === 'env') openFlowCurveEditor(id);
   else if (n.type === 'wave') openFlowWaveEditor(id);
+  else if (n.type === 'layer') openFlowLayerEditor(id);
   else if (n.type === 'unison') openFlowUnisonEditor(id);
 }
 
@@ -2772,6 +3278,7 @@ function drawFlow(now) {
   else if (flowWaveEdit) drawFlowWaveEditor();
   else if (flowUnisonEdit) drawFlowUnisonEditor();
   else if (flowCurveEdit) drawFlowCurveEditor();
+  else if (flowLayerEdit) drawFlowLayerEditor();
 
   // ---- Move-mode indicator: which node is latched (visible even when scrolled
   // away) — tap the badge to pan back to it, tap the ✕ to cancel the move. ----
@@ -5311,21 +5818,29 @@ function flowCurveHandleUp(x, y) {
 
 /* ---- Playback compile ----
    A note is the entry point of a sound: it aggregates its volume envelope, up
-   to three waves, and each wave's optional mix envelope, unison, and the
-   unison's optional vol/st/ct animation envelopes. compileFlowNote() builds the
-   legacy globals (ENVELOPE, OSC_STACK, per-voice envs) from the connected
-   graph; playFlowNote() swaps them in, previews the note, and restores. */
+   to three Layers (each a wave + optional mix/pitch envs + static Mix/Pitch
+   offsets), and the unison stacks hanging off each layer's wave. The note keeps
+   its own overall pitch env (the master, applied to any layer without a pitch
+   env of its own). compileFlowNote() builds the legacy globals (ENVELOPE,
+   OSC_STACK, per-layer pitch envs, per-voice envs) from the connected graph;
+   playFlowNote() swaps them in, previews the note, and restores. */
 function compileFlowNote(note) {
   if (!note || note.type !== 'note' || !flowNoteReady(note)) return null;
   const envNode = flowNodeById(note.conn.volumeEnv);
   if (!envNode || !envNode.envelope) return null;
+  const master = compileMasterPitchEnv(note);
   const layers = [];
   for (let i = 0; i < 3; i++) {
-    const wId = note.conn.waves[i];
+    const lId = note.conn.layers[i];
+    const ln = lId ? flowNodeById(lId) : null;
+    if (!ln || ln.type !== 'layer') continue;
+    // A muted layer port: the layer's signal is ignored entirely in playback.
+    if (connSlotMuted(note, { key: 'layers', idx: i })) continue;
+    // The layer's required wave: its harmonic structure IS the sound.
+    const wId = connSlotGet(ln, { key: 'wave' });
     const w = wId ? flowNodeById(wId) : null;
     if (!w || w.type !== 'wave') continue;
-    // A muted wave port: the wave's signal is ignored entirely in playback.
-    if (connSlotMuted(note, { key: 'waves', idx: i })) continue;
+    if (connSlotMuted(ln, { key: 'wave' })) continue;   // muted wave port → no sound
     const spec = (w.wave && w.wave.amplitudes) ? w.wave : defaultWaveSpec();
     // The node's harmonic count is the wave's hard limit: harmonics beyond it
     // are erased from the node itself, and the compiled layer uses the
@@ -5333,7 +5848,7 @@ function compileFlowNote(note) {
     // truncated at a lower count never leaks phantom harmonics into playback.
     const harmN = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+(spec.harmonics) || HARMONIC_COUNT)));
     const amps = spec.amplitudes.slice(0, HARMONIC_COUNT);
-    for (let i = harmN; i < HARMONIC_COUNT; i++) amps[i] = 0;
+    for (let k = harmN; k < HARMONIC_COUNT; k++) amps[k] = 0;
     const layer = {
       id: 'flow-' + w.id,
       amplitudes: amps,
@@ -5342,14 +5857,14 @@ function compileFlowNote(note) {
       specPoints: null,
       pitchEnv: null, voices: null,
     };
-    // Mix envelope: an env curve v ∈ −1..1 maps to a mix weight 0..1 (0 = full);
-    // the node's trim shifts the whole curve before that mapping, and each
-    // span's line type (Line/Stairs/Spring/Pulse) rides along to the engine.
-    const mixId = note.conn.mixEnvs[i];
+    // Mix: a connected mix env's curve v ∈ −1..1 maps to a mix weight 0..1
+    // (0 = full); the env's trim shifts the whole curve first, and each span's
+    // line type (Line/Stairs/Spring/Pulse) rides along to the engine. With no
+    // env, the layer's static Mix fader (0..100%) is the constant weight.
+    const mixId = connSlotGet(ln, { key: 'mixEnv' });
     const mix = mixId ? flowNodeById(mixId) : null;
-    // A muted mix port: the wave plays at full mix (as if no mix env were hooked).
     if (mix && mix.type === 'env' && mix.env && Array.isArray(mix.env.points) && mix.env.points.length >= 2
-        && !connSlotMuted(note, { key: 'mixEnvs', idx: i })) {
+        && !connSlotMuted(ln, { key: 'mixEnv' })) {
       const mTrim = +mix.env.trim || 0;
       layer.curve = mix.env.points.map(pt => {
         const c = { t: clamp01(pt.t), v: clamp01(1 + (+pt.v || 0) + mTrim) };
@@ -5357,8 +5872,15 @@ function compileFlowNote(note) {
         return c;
       });
     } else {
-      layer.curve = [{ t: 0, v: 1 }, { t: 1, v: 1 }];
+      const m = clamp01(Math.round(+ln.mix || 0) / 100);
+      layer.curve = [{ t: 0, v: m }, { t: 1, v: m }];
     }
+    // Pitch: the layer's own pitch env bends this layer alone (full deflection =
+    // ±its pitch-scale slider); with no env, its static Pitch fader is a
+    // constant semitone offset. The note's own (master) pitch env — compiled
+    // once below — bends the layer ON TOP of whichever of those is active, so
+    // configuring pitch at the layer level and the note level both apply.
+    layer.pitchEnv = compileLayerPitchEnv(ln, master);
     // Unison: stack every connected unison's voices (each adds one duplicate
     // voice with its optional vol/st/ct animation envs), capped at the engine's
     // MAX_LAYER_VOICES. A muted unison port drops that voice stack.
@@ -5392,24 +5914,79 @@ function compileFlowNote(note) {
     layers.push(layer);
   }
   if (!layers.length) return null;
+  const masterPitchEnv = master;
   return {
     envelope: clone(envNode.envelope),
     layers,
-    masterPitchEnv: compileMasterPitchEnv(note),
+    masterPitchEnv,
     masterVoiceEnvs: { st: null, ct: null, vol: null },
   };
+}
+// A layer's pitch bend: its own pitch-env connection (compiled to the legacy
+// per-layer pitch-env shape { range, points: [{ t, st }] }, full deflection =
+// ±its pitch-scale slider; the trim shifts the whole curve first, and each
+// span's line type rides along), or — with no env — its static Pitch fader
+// (−24..24 st) as a constant bend. The note's own (master) pitch env bends the
+// layer ON TOP of that: both curves are summed at the union of their knot times
+// (each is piecewise linear, so sampling at the union reproduces the sum
+// exactly), and the layer's own env keeps its seg line types on any span that
+// wasn't subdivided. A layer with neither plays at the note's base pitch.
+function compileLayerPitchEnv(ln, master) {
+  if (!ln || ln.type !== 'layer') return null;
+  const SCALE = flowPitchScale(ln);
+  const id = ln.conn ? ln.conn.pitchEnv : null;
+  const n = id ? flowNodeById(id) : null;
+  // The layer's own bend: its pitch-env curve, else its static Pitch fader.
+  let own = null;   // [{ t, st, seg? }]
+  if (n && n.type === 'env' && n.env && Array.isArray(n.env.points) && n.env.points.length >= 2
+      && !connSlotMuted(ln, { key: 'pitchEnv' })) {
+    const trim = +n.env.trim || 0;
+    own = n.env.points.map(pt => {
+      const p = { t: clamp01(pt.t), st: ((+pt.v || 0) + trim) * SCALE };
+      if (pt.seg && typeof pt.seg === 'object') p.seg = clone(pt.seg);
+      return p;
+    });
+  } else {
+    const st = Math.max(-24, Math.min(24, Math.round(+ln.pitch || 0)));
+    if (st) own = [{ t: 0, st }, { t: 1, st }];
+  }
+  if (!own) return null;
+  if (!master || !master.points || master.points.length < 2) return { range: SCALE, points: own };
+  // Sum the note's master bend on top of the layer's own at the union of their
+  // knot times (a layer with only a static pitch still follows the master's
+  // whole shape, with the offset added everywhere).
+  const ownObj = { range: SCALE, points: own };
+  const ts = new Set();
+  own.forEach(p => ts.add(p.t));
+  master.points.forEach(p => ts.add(clamp01(p.t)));
+  const times = Array.from(ts).sort((a, b) => a - b);
+  const pts = times.map(t => ({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) }));
+  // Carry the layer's own seg line types onto spans that still stretch between
+  // two consecutive own points (an undivided piece of its curve).
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i].t, b = pts[i + 1].t;
+    for (let k = 0; k < own.length - 1; k++) {
+      if (own[k].seg && Math.abs(own[k].t - a) < 1e-6 && Math.abs(own[k + 1].t - b) < 1e-6) {
+        pts[i].seg = clone(own[k].seg);
+        break;
+      }
+    }
+  }
+  return { range: SCALE, points: pts };
 }
 // The note's optional pitch-env connection, compiled to the legacy MASTER_PITCH_ENV
 // shape ({ range, points: [{ t, st }] }): an env curve's v ∈ −1..1 maps to a
 // semitone bend, full deflection = ±the note's pitch scale (default ±12 st, one
 // octave); the trim shifts the whole curve first, and each span's line type
 // rides along. Disconnected or missing → null (the note plays at its base pitch).
+// This is the OVERALL-note bend: it applies to every layer that has no pitch env
+// of its own (the layer's own env wins when both are connected).
 function compileMasterPitchEnv(note) {
   const id = note && note.conn ? note.conn.pitchEnv : null;
   const n = id ? flowNodeById(id) : null;
   if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
   if (connSlotMuted(note, { key: 'pitchEnv' })) return null;   // muted pitch port → no bend
-  const SCALE = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+note.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
+  const SCALE = flowPitchScale(note);
   const trim = +n.env.trim || 0;
   const points = n.env.points.map(pt => {
     const p = { t: clamp01(pt.t), st: ((+pt.v || 0) + trim) * SCALE };
@@ -5667,6 +6244,7 @@ canvas.addEventListener('pointerdown', e => {
   if (flowWaveEdit) { flowWaveHandleDown(x, y); if (flowWaveEdit) return; }
   if (flowUnisonEdit) { flowUnisonHandleDown(x, y); if (flowUnisonEdit) return; }
   if (flowCurveEdit) { flowCurveHandleDown(x, y); if (flowCurveEdit) return; }
+  if (flowLayerEdit) { flowLayerHandleDown(x, y); if (flowLayerEdit) return; }
   // Top-left side-bar expand/collapse button.
   if (flowSideBtnHit(x, y)) {
     flowSideOpen = !flowSideOpen;
@@ -5780,6 +6358,21 @@ canvas.addEventListener('pointerdown', e => {
       return;
     }
   }
+  // A layer widget's Mix / Pitch faders are directly draggable on the card:
+  // pressing a track starts a drag that updates the value live (an envelope
+  // driving that row locks it, so the press falls through to the grid).
+  if (wn && wn.type === 'layer') {
+    const key = flowLayerWidgetRowAt(wn, x, y);
+    if (key) {
+      flowSelId = wn.id;
+      flowAddMenu = null;
+      flowConnArm = null;
+      flowLayerDirty = false;
+      flowLayerDragStart(wn, key, x);
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+      return;
+    }
+  }
   // Grid: start a pan (a small movement counts as a tap on release). Pressing
   // on a node arms a long-press move/delete hold; pressing a wire selects it
   // and arms a long-press delete hold; empty space arms the add-menu hold.
@@ -5810,6 +6403,8 @@ canvas.addEventListener('pointermove', e => {
   if (flowWaveEdit) { flowWaveHandleMove(x, y); return; }
   if (flowUnisonEdit) { flowUnisonHandleMove(x, y); return; }
   if (flowCurveEdit) { flowCurveHandleMove(x, y); return; }
+  if (flowLayerEdit) { flowLayerHandleMove(x, y); return; }
+  if (flowLayerDrag) { flowLayerDragMove(x); return; }
   if (flowLive) return;   // a held live button is a sustain, not a pan
   if (!flowPtr) return;
   if (!flowPtr.moved && Math.hypot(x - flowPtr.startX, y - flowPtr.startY) > FLOW_TAP_MAX) {
@@ -5842,6 +6437,8 @@ canvas.addEventListener('pointerup', e => {
   if (flowWaveEdit) { flowWaveHandleUp(); return; }
   if (flowUnisonEdit) { flowUnisonHandleUp(); return; }
   if (flowCurveEdit) { flowCurveHandleUp(x, y); return; }
+  if (flowLayerEdit) { flowLayerHandleUp(); return; }
+  if (flowLayerDrag) { flowLayerDragEnd(); return; }
   // A held live button releases on finger-up: schedule the note's release tail.
   if (flowLive) { flowLiveEnd(); return; }
   // A held press that reached its long-press action (move mode / add menu /
@@ -5963,6 +6560,8 @@ canvas.addEventListener('pointercancel', () => {
   flowEnvSegHold = null;
   flowWavePtr = null;
   flowUnisonDrag = null;
+  flowLayerDrag = null;
+  flowLayerPtr = null;
   flowCurvePtr = null;
   flowPtr = null;
   flowInertia = null;

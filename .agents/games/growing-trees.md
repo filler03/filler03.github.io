@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.34.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.36.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -168,30 +168,53 @@ it on close):
   connections: a required **volume envelope**, an optional **pitch envelope**
   (an `env` 📈 curve compiled to the legacy `MASTER_PITCH_ENV` — a full-scale
   `v ∈ −1..1` curve bends the note's pitch **±12 semitones**, `st = (v+trim)·12`,
-  and the curve's segment line types ride along), up to **3 waves** (1 required),
-  and each wave's optional **mix envelope**; its widget card has a **▶ Play**
+  and the curve's segment line types ride along), and up to **3 layers** (1
+  required). This overall note-level pitch env is the **master** bend and is
+  applied **on top of** each layer's own pitch (see Layer). Every layer
+  connection is **muteable** (double-tap its wire): a muted layer is silenced
+  without touching the layer node, and the note stays ready while ≥1 unmuted
+  layer plays. Its widget card has a **▶ Play**
   that is always live (tapping it previews, never edits — compiles the graph
   and previews it via `compileFlowNote`/`playFlowNote`: builds `ENVELOPE`,
-  `OSC_STACK` layers + per-voice envs, swaps the globals in around
-  `previewNote`, restores), plus a **Note life** slider that scales the
+  `OSC_STACK` layers + per-layer pitch envs + per-voice envs, swaps the globals
+  in around `previewNote`, restores), plus a **Note life** slider that scales the
   connected volume-envelope node's component durations (the legacy
   `setNoteLifetime`). Tapping the note card enters its **note editor**
-  (`flowNoteEdit`, `flowNotePanel`) — a big play button + editable Note-life
-  slider.
+  (`flowNoteEdit`, `flowNotePanel`) — a big play button + editable Note-life and
+  **Pitch scale** sliders.
 - `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
   the old `envelope` node type (migrated on load). Overlay reuses the legacy
   envelope editor helpers.
 - `env` (📈) — kind-agnostic breakpoint curve `{ points: [{t, v, seg?}], trim }`,
-  v ∈ −1..1 with **0 = neutral**. Consumers decide the meaning: a wave's mix
-  envelope maps v → mix weight `1+v` (0 = full), a unison's st/ct/vol animation
+  v ∈ −1..1 with **0 = neutral**. Consumers decide the meaning: a layer's mix
+  envelope maps v → mix weight `1+v` (0 = full), a layer's pitch envelope maps to
+  a semitone bend, a unison's st/ct/vol animation
   envelopes map to `v·24` / `v·100` / `1+v`. Each point owns the span from
   itself to the next, so spans carry **segment line types** (Line / Stairs /
   Spring / Pulse) that the audio engine honors (`curveValue` / `envValueAt`).
 - `wave` (🌊) — harmonic structure `{ amplitudes[32], specPoints, presetId }`;
-  on-node ports assign an optional **mix env** and one or more **unisons**
+  on-node ports assign one or more **unisons**
   (stacked up to `MAX_LAYER_VOICES`). The overlay's
   Point/Draw/**Erase**/Delete modes edit the spectrum (Erase drags flatten the
-  swept harmonics to 0 via `flowWaveEraseAt`).
+  swept harmonics to 0 via `flowWaveEraseAt`). A wave feeds layers (fan-out is
+  free — several layers can share one spectrum); the mix env now lives on the
+  layer, not here.
+- `layer` (🧅) — one oscillator of a note's sound. Its on-node ports assign a
+  required **wave** (the harmonic structure) plus optional **mix** and **pitch**
+  envs, each aligned beside the fader it drives. The card itself has two
+  always-visible faders — **Mix** (0..100%) and **Pitch** (−24..24 st) — that
+  are **directly draggable** for quick edits while no envelope drives them; a
+  connected mix env locks Mix to `ENV`, and a connected pitch env replaces the
+  Pitch row with its **Pitch scale** slider. **Tapping the card opens its full
+  editor** (`flowLayerEdit`, `flowLayerPanel`), grown in place like every other
+  node type: the connected wave's spectrum up top, then the same Mix/Pitch
+  faders full-size with −/+ nudge buttons — or the pitch env's scale slider / the
+  mix `ENV` lock — each with a **Disconnect** button that severs the env
+  connection and re-enables the fader. The layer's own pitch env bends **only
+  that layer** (its static Pitch fader is a constant semitone offset when no env
+  is hooked); the note's master pitch env is then applied **on top** — both are
+  summed (at the union of their knot times), so layer-level and note-level pitch
+  configuration stack (`compileLayerPitchEnv`).
 - `unison` (🦄) — exactly one additional voice `[{ id, st, ct, vol, muted }]`
   (the first stored voice is kept; defaults to a single voice). Its widget shows
   mini read-only faders for the selected voice's st/ct/vol; tapping it opens the
@@ -206,36 +229,37 @@ it on close):
   re-enables the fader/chips.
 
 Connections are consumer-owned named slots (`conn` on each node): the note has
-`{ volumeEnv, pitchEnv, waves[3], mixEnvs[3] }`, the wave `{ mixEnv, unison[] }`
+`{ volumeEnv, pitchEnv, layers[3] }`, the layer `{ wave, mixEnv, pitchEnv }`, the
+wave `{ unison[] }`
 (a wave can stack up to `MAX_LAYER_VOICES` unisons, one port per stack), the
 unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
 (fan-out). Slots are type-constrained (DAG by construction); a note is
-"ready" (playable) with a volume env + ≥1 wave, shown by a warning badge
-otherwise. **No drawer**: each consumer's slots are drawn as small
+"ready" (playable) with a volume env + ≥1 layer connected to a wave, shown by a
+warning badge otherwise. **No drawer**: each consumer's slots are drawn as small
 emoji-labeled **ports around the node itself** (`flowPorts` — note: Vol top +
-Pitch top-left + W1..W3 right + M1..M3 left; wave: a unison port along the
+Pitch top-left + L1..L3 right; layer: Wave right + Mix/Pitch env left, aligned
+beside the fader each drives; wave: a unison port along the
 bottom for each
 stack plus an empty port for the next; unison: Vol/St/Ct
 left). **Ports flip to the side their source sits on** (`flowPortEdge`): a
 connected port moves to the opposite edge when its source node is on that side
-(e.g. a note's wave port moves right→left when the wave sits to the note's
+(e.g. a note's layer port moves right→left when the layer sits to the note's
 left, and the Pitch port moves top→bottom when the env node sits below),
 so wires run straight out instead of across the node's own card — the
 port keeps its cross-edge coordinate (a left/right flip keeps y; a top/bottom
-flip keeps x), so rows stay aligned to the value they drive (a unison's three
-env ports stay beside the fader they animate). Tap a port to arm it
+flip keeps x), so rows stay aligned to the value they drive (a layer's env
+ports stay beside the fader they animate). Tap a port to arm it
 ("Connecting…"), tap a valid source node to assign,
 tap the port again to cancel; wires terminate at the consumer's port anchor,
 routed as beziers that arc over/under any node card they'd otherwise cross
-(`flowWirePath`). A note's mix port rides its wave's wire just off the note's
-card — when the wave sits to the **left** the wire crosses the note, so the mix
-port is walked along the wire until it clears the note's card
-(`flowBezierAtDistFromB` keep-out rect) instead of landing on top of it.
+(`flowWirePath`). (The old per-wave mix port no longer rides a wire — the mix
+env is a proper port on the layer now.)
 Connections are cleared by selecting a wire and long-pressing
 it to delete (there is no ✕ on ports). **Every node is an always-visible widget card**
  (`flowWidgetRect`/`drawFlowWidget`) that shows its values read-only — a mini
  envelope/curve/spectrum plot for volumeEnv/env/wave, mini faders for unison,
- a ▶ play + Note-life slider for a note — **sized to fit exactly**
+ a ▶ play + Note-life + Pitch-scale for a note, and **draggable Mix/Pitch
+ faders** on a layer — **sized to fit exactly**
 (`flowWidgetSize`; the single place to tune sizes, where a future per-node
   scale factor can fold in). **Tapping a card enters edit mode**: the node grows
   **in place** into its full editor (the panel is centered on the node's
@@ -343,7 +367,11 @@ it (each editor's `*HandleDown` dismisses on an outside tap).
 Persistence: nodes save under the same `growingTrees.flow.v1` key, storing their
 world-px `x,y`; `loadFlow` migrates old `gx,gy` grid saves to cell centres,
 migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
-`envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Edits are
+`envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Pre-v1.35 saves
+(the note wired `waves[3]` + per-wave `mixEnvs[3]` straight in) are rewritten by
+`flowMigrateOldWaveConns`: each connected wave + its mix env become a synthetic
+`layer` node (spawned just off the note), while the note keeps its own master
+`pitchEnv` + `pitchScale`. Edits are
 coalesced into one undo entry per overlay session; undo **never leaves edit
 mode** — it pops the session's snapshot, restores, and reopens the same editor
 (`flowActiveEditId` + `openFlowNodeEditor`). If an open editor has **not**
@@ -352,7 +380,7 @@ is popped — `flowEditorPending` gates the pop).
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.34.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.36.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
