@@ -114,6 +114,14 @@ const FLOW_NODE_TYPES = {
 };
 const FLOW_NOTE_LIFE_MIN = 300;    // ms
 const FLOW_NOTE_LIFE_MAX = 10000;  // ms
+// A note's pitch-envelope scale: how many semitones a full-strength pitch env
+// bends the note (whole numbers; default 12 = one octave). A unison's st/ct
+// animation-envelope scales mirror this per voice (st = semitones, ct = cents).
+const FLOW_PITCH_SCALE_MIN = 1;
+const FLOW_PITCH_SCALE_MAX = 24;
+const FLOW_PITCH_SCALE_DEFAULT = 12;    // one octave at full deflection
+const FLOW_UNISON_ST_SCALE_DEFAULT = 24; // full deflection = 24 st (voice range)
+const FLOW_UNISON_CT_SCALE_DEFAULT = 100; // full deflection = 100 ¢ (voice range)
 
 var flowCam = { x: 0, y: 0 };   // grid pan offset (px): world = screen + cam
 var flowPtr = null;             // { x, y, startX, startY, lastT, vx, vy, moved } active pan drag, or null
@@ -224,7 +232,7 @@ function flowNodeAt(x, y) {
 // note shows its play button and note-life slider.
 function flowWidgetSize(node) {
   switch (node.type) {
-    case 'note': return { w: 176, h: 96 };
+    case 'note': return { w: 176, h: 128 };
     case 'unison': return { w: 176, h: 128 };
     default: return { w: 176, h: 116 };   // volumeEnv / env / wave mini plots
   }
@@ -259,7 +267,10 @@ function flowNoteWidgetButtons(r) {
   };
 }
 function flowNoteWidgetLife(r) {
-  return { x: r.x + 62, x2: r.x + r.w - 10, y: r.y + 74 };
+  return { x: r.x + 62, x2: r.x + r.w - 10, y: r.y + 76 };
+}
+function flowNoteWidgetPitch(r) {
+  return { x: r.x + 84, x2: r.x + r.w - 48, y: r.y + 104 };
 }
 // The add-menu option buttons, laid out around the anchored point (clamped to
 // stay inside the grid area). One per node type for now.
@@ -284,10 +295,12 @@ function hitAddMenu(x, y) {
 }
 // A wave node's default spectrum: a plain sine (fundamental only). Mirrors the
 // shape of a legacy layer's spectrum fields so the shared helpers can edit it.
+// `harmonics` is how many of the 32 harmonics the wave editor's graph includes
+// (4..32); excluded harmonics are zeroed, so the sound only uses the included ones.
 function defaultWaveSpec() {
   const amplitudes = new Array(HARMONIC_COUNT).fill(0);
   amplitudes[0] = 1;
-  return { amplitudes, specPoints: null, presetId: null };
+  return { amplitudes, specPoints: null, presetId: null, harmonics: HARMONIC_COUNT };
 }
 // A unison node is exactly one additional voice (like the legacy Voices tab's
 // default voice). The near-twin chorus sound comes from stacking unison nodes
@@ -500,11 +513,11 @@ function addFlowNode(type) {
   flowPushHistory();
   const id = 'node-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
   const n = { id, x: flowAddMenu.x, y: flowAddMenu.y, type };
-  if (type === 'note') n.noteLife = 2500;
+  if (type === 'note') { n.noteLife = 2500; n.pitchScale = FLOW_PITCH_SCALE_DEFAULT; }
   else if (type === 'volumeEnv') n.envelope = clone(DEFAULT_ENVELOPE);
   else if (type === 'env') n.env = defaultEnvCurve();
   else if (type === 'wave') n.wave = defaultWaveSpec();
-  else if (type === 'unison') n.voices = defaultUnisonVoices();
+  else if (type === 'unison') { n.voices = defaultUnisonVoices(); n.stScale = FLOW_UNISON_ST_SCALE_DEFAULT; n.ctScale = FLOW_UNISON_CT_SCALE_DEFAULT; }
   n.conn = defaultConn(type);
   // The very first node (no nodes existed before this) becomes the world
   // origin: shift the camera by the node's position so the node is stored at
@@ -1118,7 +1131,7 @@ function drawFlowStop() {
 
 /* ---- Persistence ---- */
 function saveFlow() {
-  try { localStorage.setItem(FLOW_SAVE_KEY, JSON.stringify({ nodes: flowNodes })); } catch (err) {}
+  try { localStorage.setItem(FLOW_SAVE_KEY, JSON.stringify({ nodes: flowNodes, envDrawPoints: flowEnvDrawPoints })); } catch (err) {}
 }
 // A wave node's spectrum, loaded and clamped from storage: specPoints sorted by
 // x with clamped x (0..1) / a (−1..1), amplitudes clamped; falls back to the
@@ -1136,6 +1149,7 @@ function waveSpecFromSaved(w) {
     out.specPoints.sort((a, b) => a.x - b.x);
   }
   out.presetId = (w.presetId && HARMONIC_PRESETS[w.presetId]) ? w.presetId : null;
+  out.harmonics = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+w.harmonics || HARMONIC_COUNT)));
   return out;
 }
 // A unison node's voices, loaded and clamped from storage: at most
@@ -1241,6 +1255,7 @@ function loadFlow() {
     const raw = localStorage.getItem(FLOW_SAVE_KEY);
     if (!raw) return;
     const d = JSON.parse(raw);
+    if (d.envDrawPoints != null) flowEnvDrawPoints = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+d.envDrawPoints || 8)));
     const arr = Array.isArray(d.nodes) ? d.nodes : [];
     flowNodes = [];
     for (const n of arr) {
@@ -1268,11 +1283,23 @@ function loadFlow() {
       }
       if (node.type === 'env') node.env = envCurveFromSaved(n.env);
       if (node.type === 'wave') node.wave = waveSpecFromSaved(n.wave);
-      if (node.type === 'unison') node.voices = voicesFromSavedFlow(n.voices);
+      if (node.type === 'unison') {
+        node.voices = voicesFromSavedFlow(n.voices);
+        node.stScale = Math.max(1, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+n.stScale) || FLOW_UNISON_ST_SCALE_DEFAULT));
+        node.ctScale = Math.max(1, Math.min(100, Math.round(+n.ctScale) || FLOW_UNISON_CT_SCALE_DEFAULT));
+      }
+      if (node.type === 'note') {
+        node.pitchScale = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+n.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
+      }
       node.conn = connFromSaved(node.type, n.conn);
       flowNodes.push(node);
     }
     flowPruneConns();
+    // Restore the camera to wherever it was pointing when the flow editor was
+    // last used (so re-entering the mode starts on the same spot).
+    if (d.cam && typeof d.cam.x === 'number' && typeof d.cam.y === 'number') {
+      flowCam = { x: d.cam.x, y: d.cam.y };
+    }
   } catch (err) {}
 }
 loadFlow();
@@ -1348,6 +1375,18 @@ function flowSetNoteLife(node, ms) {
   const saved = ENVELOPE;
   ENVELOPE = env.envelope;
   try { setNoteLifetime(ms); } finally { ENVELOPE = saved; }
+}
+// The note's pitch-envelope scale (whole semitones a full-strength pitch env
+// bends the note), loaded/clamped from the node — or the default when unset.
+function flowPitchScale(node) {
+  return Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+node.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
+}
+function flowPitchScaleFromX(s, x) {
+  const f = clamp01((x - s.x) / (s.x2 - s.x));
+  return Math.round(FLOW_PITCH_SCALE_MIN + f * (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
+}
+function flowSetPitchScale(node, st) {
+  node.pitchScale = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(st)));
 }
 
 /* ---- On-node connection ports ----
@@ -2120,9 +2159,9 @@ function drawFlowWidgetNote(n, r) {
   ctx.font = '800 10px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Note life', r.x + 12, r.y + 74);
+  ctx.fillText('Note life', r.x + 12, r.y + 76);
   ctx.textAlign = 'right';
-  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', r.x + r.w - 10, r.y + 74);
+  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', r.x + r.w - 10, r.y + 76);
   ctx.textBaseline = 'alphabetic';
   const s = flowNoteWidgetLife(r);
   ctx.globalAlpha = env ? 1 : 0.4;
@@ -2141,6 +2180,43 @@ function drawFlowWidgetNote(n, r) {
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(tx, s.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+  ctx.globalAlpha = 1;
+  // Pitch-scale slider (read-only): a full-strength pitch env bends the note
+  // ±N semitones, or the track sits empty while no pitch env is connected.
+  const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
+  const st = flowPitchScale(n);
+  ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
+  ctx.font = '800 10px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Pitch scale', r.x + 12, r.y + 104);
+  ctx.textAlign = 'right';
+  ctx.fillText(hasPitch ? '±' + st + ' st' : '—', r.x + r.w - 10, r.y + 104);
+  ctx.textBaseline = 'alphabetic';
+  const ps = flowNoteWidgetPitch(r);
+  ctx.globalAlpha = hasPitch ? 1 : 0.4;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(ps.x, ps.y); ctx.lineTo(ps.x2, ps.y);
+  ctx.stroke();
+  if (hasPitch) {
+    const frac = clamp01((st - FLOW_PITCH_SCALE_MIN) / (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
+    const tx = ps.x + frac * (ps.x2 - ps.x);
+    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.beginPath();
+    ctx.moveTo(ps.x, ps.y); ctx.lineTo(tx, ps.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, ps.y, 6, 0, Math.PI * 2);
     ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.strokeStyle = '#000000';
@@ -2211,17 +2287,23 @@ function drawFlowWidgetWave(n, r) {
   initLayerSpecPoints(l);
   const pts = l.specPoints || [];
   drawMiniPlotFrame(pl);
+  // The widget mirrors the editor's harmonic-count view: when the node includes
+  // fewer than all 32 harmonics, the kept ones are rescaled across the mini plot
+  // and the hidden ones aren't drawn (their data is preserved on the node).
+  const harmN = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+(n.wave && n.wave.harmonics) || HARMONIC_COUNT)));
+  const lastT = harmN >= HARMONIC_COUNT ? 1 : (harmN - 1) / (HARMONIC_COUNT - 1);
+  const vPts = pts.filter(pt => pt.x <= lastT + 1e-6);
   ctx.strokeStyle = FLOW_WAVE_ACCENT;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(tToX(0, pl), ampToY(specValueAt(pts, 0), pl));
-  for (let j = 0; j < pts.length; j++) ctx.lineTo(tToX(pts[j].x, pl), ampToY(pts[j].a, pl));
-  ctx.lineTo(tToX(1, pl), ampToY(specValueAt(pts, 1), pl));
+  ctx.moveTo(flowWaveHarmStToX(0, harmN, pl), ampToY(specValueAt(pts, 0), pl));
+  for (let j = 0; j < vPts.length; j++) ctx.lineTo(flowWaveHarmStToX(vPts[j].x, harmN, pl), ampToY(vPts[j].a, pl));
+  ctx.lineTo(flowWaveHarmStToX(lastT, harmN, pl), ampToY(specValueAt(pts, lastT), pl));
   ctx.stroke();
-  for (const pt of pts) {
+  for (const pt of vPts) {
     ctx.fillStyle = FLOW_WAVE_ACCENT;
     ctx.beginPath();
-    ctx.arc(tToX(pt.x, pl), ampToY(pt.a, pl), 3, 0, Math.PI * 2);
+    ctx.arc(flowWaveHarmStToX(pt.x, harmN, pl), ampToY(pt.a, pl), 3, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -2243,11 +2325,23 @@ function drawFlowWidgetUnison(n, r) {
     return;
   }
   const v = vs[Math.min(flowUnisonSel, vs.length - 1)];
+  // Parameter rows: a static fader by default; while a row's env is connected,
+  // it's taken over — st/ct rows become their envelope's scale slider, vol
+  // locks to ENV (it has no scale setting).
   let y = r.y + 30;
   for (const d of VOICE_PARAM_DEFS) {
-    const val = +((v && v[d.key] != null) ? v[d.key] : (d.key === 'vol' ? 1 : 0));
     const locked = flowUnisonParamLocked(n, d.key);
-    drawFlowWidgetFader(d.label, val, d.min, d.max, d.fmt, y, r, locked);
+    const isScale = (d.key === 'st' || d.key === 'ct') && locked;
+    if (isScale) {
+      const key = d.key === 'st' ? 'stScale' : 'ctScale';
+      const max = d.key === 'st' ? FLOW_PITCH_SCALE_MAX : 100;
+      const def = d.key === 'st' ? FLOW_UNISON_ST_SCALE_DEFAULT : FLOW_UNISON_CT_SCALE_DEFAULT;
+      const fmt = d.key === 'st' ? v => v + ' st' : v => v + ' ¢';
+      drawFlowWidgetScale(d.key === 'st' ? 'St scale' : 'Ct scale', flowUnisonEnvScale(n, key, def), max, fmt, y, r);
+    } else {
+      const val = +((v && v[d.key] != null) ? v[d.key] : (d.key === 'vol' ? 1 : 0));
+      drawFlowWidgetFader(d.label, val, d.min, d.max, d.fmt, y, r, locked);
+    }
     y += 28;
   }
 }
@@ -2287,6 +2381,40 @@ function drawFlowWidgetFader(label, val, min, max, fmt, y, r, locked) {
   ctx.fillText(locked ? 'ENV' : fmt(val), r.x + r.w - 8, y);
   ctx.globalAlpha = 1;
 }
+// A unison env-scale row on the idle widget: the fader layout (same track
+// geometry), but a scale track + knob + value — shown in a row's place while
+// its animation env is connected.
+function drawFlowWidgetScale(label, val, max, fmt, y, r) {
+  const trackX1 = r.x + 62, trackX2 = r.x + r.w - 54;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '800 9px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, r.x + 10, y);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(trackX1, y); ctx.lineTo(trackX2, y);
+  ctx.stroke();
+  const f = clamp01((val - 1) / (max - 1));
+  const kx = trackX1 + f * (trackX2 - trackX1);
+  ctx.strokeStyle = FLOW_UNISON_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(trackX1, y); ctx.lineTo(kx, y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(kx, y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineCap = 'butt';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '700 9px sans-serif';
+  ctx.fillText(fmt(val), r.x + r.w - 8, y);
+  ctx.globalAlpha = 1;
+}
 
 /* ---- Note editor ----
    A note's editing surface is just its widget grown in place: four ▶ play
@@ -2306,6 +2434,9 @@ function flowNoteEditorButtons(p) {
 }
 function flowNoteEditorLife(p) {
   return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 190 };
+}
+function flowNoteEditorPitch(p) {
+  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 224 };
 }
 function openFlowNoteEditor(id) {
   const n = flowNodeById(id);
@@ -2386,6 +2517,43 @@ function drawFlowNoteEditor() {
   }
   ctx.lineCap = 'butt';
   ctx.globalAlpha = 1;
+  // Pitch-scale slider (editable here): how many semitones a full-strength pitch
+  // env bends the note. Disabled while no pitch env is connected to the note.
+  const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
+  const st = flowPitchScale(n);
+  ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Pitch scale', p.x + 16, p.y + 224);
+  ctx.textAlign = 'right';
+  ctx.fillText(hasPitch ? '±' + st + ' st' : '—', p.x + p.w - 16, p.y + 224);
+  ctx.textBaseline = 'alphabetic';
+  const ps = flowNoteEditorPitch(p);
+  ctx.globalAlpha = hasPitch ? 1 : 0.4;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(ps.x, ps.y); ctx.lineTo(ps.x2, ps.y);
+  ctx.stroke();
+  if (hasPitch) {
+    const frac = clamp01((st - FLOW_PITCH_SCALE_MIN) / (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
+    const tx = ps.x + frac * (ps.x2 - ps.x);
+    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.beginPath();
+    ctx.moveTo(ps.x, ps.y); ctx.lineTo(tx, ps.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, ps.y, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+  ctx.globalAlpha = 1;
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
@@ -2419,14 +2587,24 @@ function flowNoteHandleDown(x, y) {
       flowPtr = { kind: 'noteLife', nodeId: n.id };
     }
   }
+  // Pitch-scale slider — editable only while a pitch env is connected.
+  const ps = flowNoteEditorPitch(p);
+  if (n && connSlotGet(n, { key: 'pitchEnv' }) && y >= ps.y - 18 && y <= ps.y + 18 && x >= ps.x - 12 && x <= ps.x2 + 12) {
+    flowPushHistory();
+    flowNoteDirty = true;
+    flowSetPitchScale(n, flowPitchScaleFromX(ps, x));
+    flowPtr = { kind: 'pitchScale', nodeId: n.id };
+  }
 }
 function flowNoteHandleMove(x, y) {
-  if (!flowPtr || flowPtr.kind !== 'noteLife') return;
+  if (!flowPtr) return;
   const n = flowNodeById(flowPtr.nodeId);
-  if (n) flowSetNoteLife(n, flowNoteLifeFromX(flowNoteEditorLife(flowNotePanel()), x));
+  if (!n) return;
+  if (flowPtr.kind === 'noteLife') flowSetNoteLife(n, flowNoteLifeFromX(flowNoteEditorLife(flowNotePanel()), x));
+  else if (flowPtr.kind === 'pitchScale') flowSetPitchScale(n, flowPitchScaleFromX(flowNoteEditorPitch(flowNotePanel()), x));
 }
 function flowNoteHandleUp() {
-  if (flowPtr && flowPtr.kind === 'noteLife') saveFlow();
+  if (flowPtr && (flowPtr.kind === 'noteLife' || flowPtr.kind === 'pitchScale')) saveFlow();
   flowPtr = null;
   if (flowLive) flowLiveEnd();
 }
@@ -2665,7 +2843,7 @@ function flowEnvPanel() {
 // The note editor's enlarged panel: a more compact card than the graph editors.
 function flowNotePanel() {
   const w = Math.min(420, W - 24);
-  const h = Math.min(240, H - 24);
+  const h = Math.min(300, H - 24);
   const n = flowNoteEdit ? flowNodeById(flowNoteEdit) : null;
   if (!n) return { x: (W - w) / 2, y: (H - h) / 2, w, h };
   const p = flowNodeScreen(n);
@@ -2830,12 +3008,36 @@ function flowEnvApplyTrimFromY(sl, y) {
   const f = Math.max(0, Math.min(1, (y - sl.y0) / (sl.y1 - sl.y0)));
   flowEnvMutate(() => { ENVELOPE.trim = Math.max(-1, Math.min(1, 1 - 2 * f)); });
 }
+// Draw-mode granularity: how many evenly-spaced breakpoints a full-width sweep
+// places across the graph. Mirrors the sound creator's points dropdown — 4..32,
+// default 8 — but scoped to the flow envelope editor (persisted with the flow).
+var flowEnvDrawPoints = 8;
+function flowEnvDrawCount() { return Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+flowEnvDrawPoints || 8))); }
+function flowEnvSlotT(s) { const n = flowEnvDrawCount(); return n > 1 ? s / (n - 1) : 0; }
+function flowEnvSlotAtX(x, pl) {
+  const n = flowEnvDrawCount();
+  if (n <= 1) return 0;
+  return Math.max(0, Math.min(n - 1, Math.round((x - pl.left) / (pl.pw / (n - 1)))));
+}
+// The draw-points slider, docked on the left of the sync row (hidden while the
+// segment strip is open, like the sync button).
+function flowEnvGranSlider(p) {
+  const sy = flowEnvSyncBtn(p);
+  return { x: p.x + 16, w: sy.x - p.x - 32, y: p.y + 44, h: 24 };
+}
+function flowGranFromX(g, x) {
+  const x1 = g.x + 72, x2 = g.x + g.w - 66;
+  return Math.max(4, Math.min(HARMONIC_COUNT, Math.round(4 + clamp01((x - x1) / (x2 - x1)) * (HARMONIC_COUNT - 4))));
+}
+function flowEnvGranApply(g, x) {
+  flowEnvMutate(() => { flowEnvDrawPoints = flowGranFromX(g, x); });
+}
 // Draw mode: scribble breakpoints along the finger's path, reusing the legacy
-// envDrawAt (slot grid from drawPointCount/slotT/slotAtX).
+// envDrawAt (slot grid from this editor's draw-points count).
 function flowEnvDrawAt(slotX, y, pl, fromS) {
   const loS = Math.min(slotX, fromS == null ? slotX : fromS);
   const hiS = Math.max(slotX, fromS == null ? slotX : fromS);
-  flowEnvMutate(() => { envDrawAt(slotT(slotX), yToV(y, pl) - envTrim(ENVELOPE), pl, slotT(loS), slotT(hiS), false); });
+  flowEnvMutate(() => { envDrawAt(flowEnvSlotT(slotX), yToV(y, pl) - envTrim(ENVELOPE), pl, flowEnvSlotT(loS), flowEnvSlotT(hiS), false, flowEnvDrawCount()); });
 }
 
 /* ---- Segment line types (Line mode) ----
@@ -3150,6 +3352,43 @@ function drawFlowEnvEditor() {
       ctx.stroke();
     }
   }
+  // Draw-points slider (hidden while the segment strip is open, like Sync):
+  // how many breakpoints a full-width draw sweep places across the graph.
+  if (!flowEnvSegRange()) {
+    const g = flowEnvGranSlider(p);
+    const n = flowEnvDrawCount();
+    const x1 = g.x + 72, x2 = g.x + g.w - 66, cy = g.y + g.h / 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '800 10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Draw pts', g.x, cy);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x1, cy); ctx.lineTo(x2, cy);
+    ctx.stroke();
+    const frac = clamp01((n - 4) / (HARMONIC_COUNT - 4));
+    const kx = x1 + frac * (x2 - x1);
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(x1, cy); ctx.lineTo(kx, cy);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.arc(kx, cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = '800 10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(n + ' pts', g.x + g.w - 8, cy);
+    ctx.textBaseline = 'alphabetic';
+  }
   // Hold↔release sync: a single toggle button — tap to turn it on (the release
   // point's Y matches the hold point's Y) or off. Press-and-hold a HOLD/REL
   // marker tab also turns it on. Hidden while the docked segment strip is open
@@ -3262,7 +3501,7 @@ function drawFlowEnvEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · ✏️ draws · long-press a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
+  ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · ✏️ draws (' + flowEnvDrawCount() + ' pts · slider) · long-press a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
 }
 
 // A fatter grab for boundary dots than hitTestEnv's 18px: fingers are imprecise,
@@ -3309,6 +3548,16 @@ function flowEnvHandleDown(x, y) {
     const db = flowEnvDrawBtn(p);
     if (x >= db.x && x <= db.x + db.w && y >= db.y && y <= db.y + db.h) {
       flowEnvDrawArmed = !flowEnvDrawArmed;
+      return;
+    }
+  }
+  // Draw-points slider (hidden while a segment is selected): sets how many
+  // evenly-spaced breakpoints a full-width draw sweep places across the graph.
+  if (!flowEnvSegRange()) {
+    const g = flowEnvGranSlider(p);
+    if (x >= g.x && x <= g.x + g.w && y >= g.y - 4 && y <= g.y + g.h + 4) {
+      flowEnvGranApply(g, x);
+      flowEnvPtr = { kind: 'gran' };
       return;
     }
   }
@@ -3453,13 +3702,15 @@ function flowEnvHandleMove(x, y) {
     // the finger's path. A still press stays a tap (adds a point on release).
     if (!flowEnvPtr.moved) {
       flowEnvPtr.moved = true;
-      const s0 = slotAtX(flowEnvPtr.px, pl);
+      const s0 = flowEnvSlotAtX(flowEnvPtr.px, pl);
       flowEnvDrawAt(s0, flowEnvPtr.py, pl, null);
       flowEnvPtr.lastSlot = s0;
     }
-    const s = slotAtX(x, pl);
+    const s = flowEnvSlotAtX(x, pl);
     flowEnvDrawAt(s, y, pl, flowEnvPtr.lastSlot);
     flowEnvPtr.lastSlot = s;
+  } else if (k === 'gran') {
+    flowEnvGranApply(flowEnvGranSlider(p), x);
   } else if (k === 'space') {
     flowEnvSegHold = null;   // a drag cancels the long-press-to-edit
     if (!flowEnvPtr.moved && Math.hypot(x - flowEnvPtr.px, y - flowEnvPtr.py) > FLOW_TAP_MAX) {
@@ -3562,6 +3813,106 @@ var flowWaveMode = 'point';  // 'point' | 'draw' | 'erase' | 'delete'
 function flowWavePanel() { return flowEnvPanel(); }
 function flowWavePlot(p) { return flowEnvPlot(p); }
 function flowWaveClearPill(p) { return flowEnvClearPill(p); }
+/* ---- Harmonic-count slider ----
+   How many harmonics the wave node actually uses. Sliding all the way left keeps
+   only the first 4; all the way right includes every harmonic (whatever the
+   node currently carries, up to 32). Only the harmonics visible on the graph
+   are part of the sound: when the count is set below 32 the higher harmonics
+   are ERASED from the node (amplitudes zeroed, breakpoints dropped), so the
+   wave is permanently limited to the visible ones. During the drag itself only
+   the graph's view updates; the erase commits when the slider is released (or
+   the editor closes), so one sweep left-then-right back to the full count
+   doesn't destroy anything. The graph rescales the kept harmonics across its
+   full width while the count is below 32. */
+var flowWaveHarmonics = HARMONIC_COUNT;
+function flowWaveHarmCount() {
+  return Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+flowWaveHarmonics || HARMONIC_COUNT)));
+}
+// The stored-spectrum position (t = 0..1 over harmonics 1..32) of the last
+// included harmonic — the graph's right edge when fewer than all are shown.
+function flowWaveMaxHarmT() {
+  const n = flowWaveHarmCount();
+  return n >= HARMONIC_COUNT ? 1 : (n - 1) / (HARMONIC_COUNT - 1);
+}
+// The spectrum breakpoints that lie within the included harmonics (the graph
+// draws / hit-tests only these; any stragglers beyond are erased on commit).
+function flowWaveVisiblePts(pts) {
+  if (!pts) return [];
+  const xN = flowWaveMaxHarmT();
+  return pts.filter(pt => pt.x <= xN + 1e-6);
+}
+// Display x for a stored-spectrum position, given a harmonic count and plot:
+// mapped to the nearest included harmonic's column (with the full 32-harmonic
+// x-axis when every harmonic is included).
+function flowWaveHarmStToX(st, harmN, pl) {
+  const n = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+harmN || HARMONIC_COUNT)));
+  const h = Math.round(Math.max(0, Math.min(1, st)) * (HARMONIC_COUNT - 1));
+  if (n >= HARMONIC_COUNT) return tToX(st, pl);
+  const f = n > 1 ? Math.max(0, Math.min(n - 1, h)) / (n - 1) : 0;
+  return pl.left + f * pl.pw;
+}
+// Display x for a harmonic index (0-based) within the included set.
+function flowWaveHarmX(h, pl) {
+  const n = flowWaveHarmCount();
+  if (n >= HARMONIC_COUNT) return tToX(Math.max(0, Math.min(n - 1, h)) / (HARMONIC_COUNT - 1), pl);
+  const f = n > 1 ? Math.max(0, Math.min(n - 1, h)) / (n - 1) : 0;
+  return pl.left + f * pl.pw;
+}
+// The editor's display x for a stored-spectrum position (current harmonic count).
+function flowWaveHarmTToX(st, pl) {
+  return flowWaveHarmStToX(st, flowWaveHarmCount(), pl);
+}
+// Stored-spectrum position for a plot x: the finger's nearest included harmonic
+// (exact position when every harmonic is included, so taps stay freeform).
+function flowWaveXToHarmT(x, pl) {
+  const t = clamp01((x - pl.left) / pl.pw);
+  const n = flowWaveHarmCount();
+  if (n >= HARMONIC_COUNT) return t;
+  const h = Math.round(t * (n - 1));
+  return Math.min(flowWaveMaxHarmT(), h / (HARMONIC_COUNT - 1));
+}
+// The slider row between the preset buttons and the plot.
+function flowWaveHarmSlider(p) {
+  return { x: p.x + 16, w: p.w - 32, y: p.y + 112, h: 22 };
+}
+function flowWaveHarmFromX(hs, x) {
+  const x1 = hs.x + 78, x2 = hs.x + hs.w - 72;
+  return Math.max(4, Math.min(HARMONIC_COUNT, Math.round(4 + clamp01((x - x1) / (x2 - x1)) * (HARMONIC_COUNT - 4))));
+}
+function flowWaveSetHarmonics(N) {
+  N = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(N)));
+  flowWaveMutate(() => {
+    flowWaveHarmonics = N;
+    // Mirror the live count onto the node so any running playback (a repeat
+    // loop) truncates to the visible harmonics even mid-drag; the erase of the
+    // data beyond the count still commits on release / editor close.
+    const n = flowNodeById(flowWaveEdit);
+    if (n && n.wave) n.wave.harmonics = N;
+  });
+}
+// Erase every harmonic beyond the current count from a spectrum: rebuild the
+// breakpoints from the kept amplitudes only and zero the rest, so the node's
+// wave is permanently limited to the harmonics visible on the graph.
+function flowWaveApplyHarmCount(l) {
+  const n = flowWaveHarmCount();
+  const pts = [];
+  let last = null;
+  for (let i = 0; i < n; i++) {
+    const x = i / (HARMONIC_COUNT - 1);
+    const a = clampSign(+l.amplitudes[i] || 0);
+    if (i === 0 || i === n - 1 || a !== last) pts.push({ x, a });
+    last = a;
+  }
+  l.specPoints = pts;
+  syncLayerAmplitudes(l);
+  for (let i = n; i < HARMONIC_COUNT; i++) l.amplitudes[i] = 0;
+}
+// Commit the slider's erase: called when the slider drag ends (and on editor
+// close, to finalize any un-released move). A no-op at the full 32-harmonic count.
+function flowWaveCommitHarmonics() {
+  if (flowWaveHarmCount() >= HARMONIC_COUNT) return;
+  flowWaveMutate(() => { flowWaveApplyHarmCount(selectedLayer()); });
+}
 function flowWaveToolbar(p) {
   const modes = [['point', 'Point'], ['draw', 'Draw'], ['erase', 'Erase'], ['delete', 'Delete']];
   const w = 54, gap = 6, h = 26, y = p.y + 48, x0 = p.x + 16;
@@ -3578,9 +3929,11 @@ function flowWavePresetButtons(p) {
 function hitTestWaveDot(x, y, pl) {
   const pts = selectedLayer().specPoints;
   if (!pts) return -1;
+  const xN = flowWaveMaxHarmT();
   let best = -1, bd = Infinity;
   for (let j = 0; j < pts.length; j++) {
-    const d = Math.hypot(x - tToX(pts[j].x, pl), y - ampToY(pts[j].a, pl));
+    if (pts[j].x > xN + 1e-6) continue;   // hidden harmonics aren't hittable
+    const d = Math.hypot(x - flowWaveHarmTToX(pts[j].x, pl), y - ampToY(pts[j].a, pl));
     if (d < bd) { bd = d; best = j; }
   }
   return bd <= 18 ? best : -1;
@@ -3594,6 +3947,10 @@ function openFlowWaveEditor(id) {
   OSC_STACK = { layers: [temp] };
   selectedLayerIdx = 0;
   initLayerSpecPoints(temp);   // derive the dots from the amplitudes (or keep drawn)
+  flowWaveHarmonics = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+(n.wave.harmonics) || HARMONIC_COUNT)));
+  // A saved spectrum limited to fewer than all harmonics is normalized to match
+  // (anything beyond the count is erased), so old saves read back consistently.
+  if (flowWaveHarmonics < HARMONIC_COUNT) flowWaveApplyHarmCount(temp);
   flowWaveEdit = id;
   flowWaveDirty = false;
   flowWavePtr = null;
@@ -3608,7 +3965,10 @@ function closeFlowWaveEditor() {
   if (!flowWaveEdit) return;
   const n = flowNodeById(flowWaveEdit);
   const l = selectedLayer();   // the temp proxy layer
-  if (n) n.wave = { amplitudes: l.amplitudes, specPoints: l.specPoints, presetId: l.presetId };
+  // Finalize any slider move that wasn't released inside the editor (e.g. the
+  // editor was dismissed mid-drag): harmonics beyond the count are erased.
+  if (flowWaveHarmCount() < HARMONIC_COUNT) flowWaveApplyHarmCount(l);
+  if (n) n.wave = { amplitudes: l.amplitudes, specPoints: l.specPoints, presetId: l.presetId, harmonics: flowWaveHarmonics };
   OSC_STACK = flowWaveSaved.stack;
   selectedLayerIdx = flowWaveSaved.layerIdx;
   flowWaveSaved = null;
@@ -3625,18 +3985,20 @@ function flowWaveMutate(fn) {
   return fn();
 }
 // Erase mode: flatten the spectrum to 0 across the swept corridor. Breakpoints
-// inside the swept span are absorbed (anchors at x 0/1 kept), then zero points
-// are placed at the span edges and the finger so the region between them
-// interpolates to silence; a single tap zeroes just that harmonic.
-function flowWaveEraseAt(l, t, fromT) {
+// inside the swept span are absorbed (anchors at x 0/1 kept), then just two
+// zero breakpoints — one at each outer edge of the whole sweep — replace them,
+// so a drag leaves a single straight zero line across the erased region instead
+// of a scattering of dots at every finger position. `lo`/`hi` are the stored
+// positions of the full sweep (not the last segment), so the result stays minimal.
+function flowWaveErase(l, lo, hi) {
   let pts = l.specPoints;
   if (!pts || !pts.length) { initLayerSpecPoints(l); pts = l.specPoints; }
-  const lo = fromT == null ? t : Math.min(t, fromT);
-  const hi = fromT == null ? t : Math.max(t, fromT);
+  lo = Math.max(0, Math.min(1, lo));
+  hi = Math.max(lo, Math.min(1, hi));
   for (let i = pts.length - 1; i >= 0; i--) {
     const x = pts[i].x;
     if (x === 0 || x === 1) continue;
-    if (x >= lo && x <= hi) pts.splice(i, 1);
+    if (x >= lo - 1e-6 && x <= hi + 1e-6) pts.splice(i, 1);
   }
   const zeroAt = x => {
     for (let i = 0; i < pts.length; i++) {
@@ -3645,7 +4007,7 @@ function flowWaveEraseAt(l, t, fromT) {
     if (pts.length < 64) pts.push({ x, a: 0 });
   };
   zeroAt(lo);
-  zeroAt(hi);
+  if (hi > lo + 1e-6) zeroAt(hi);
   pts.sort((a, b) => a.x - b.x);
   syncLayerAmplitudes(l);
 }
@@ -3671,7 +4033,7 @@ function drawFlowWaveEditor() {
   ctx.fillText('Wave', p.x + 16, p.y + 30);
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
-  ctx.fillText('Harmonic structure · overtones 1–32', p.x + 86, p.y + 30);
+  ctx.fillText('Harmonic structure · overtones 1–' + flowWaveHarmCount(), p.x + 86, p.y + 30);
   // Mode toolbar.
   for (const b of flowWaveToolbar(p)) {
     const active = flowWaveMode === b.mode;
@@ -3716,6 +4078,42 @@ function drawFlowWaveEditor() {
     ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
   }
+  // Harmonics slider (row 3, between the presets and the plot): how many of the
+  // 32 harmonics the graph includes — all the way left = 4, all the way right =
+  // whatever is currently included.
+  const hs = flowWaveHarmSlider(p);
+  const hN = flowWaveHarmCount();
+  const hx1 = hs.x + 78, hx2 = hs.x + hs.w - 72, hcy = hs.y + hs.h / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '800 10px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Harmonics', hs.x, hcy);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(hx1, hcy); ctx.lineTo(hx2, hcy);
+  ctx.stroke();
+  const hfrac = clamp01((hN - 4) / (HARMONIC_COUNT - 4));
+  const hkx = hx1 + hfrac * (hx2 - hx1);
+  ctx.strokeStyle = FLOW_WAVE_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(hx1, hcy); ctx.lineTo(hkx, hcy);
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.arc(hkx, hcy, 8, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '800 10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(hN + ' / 32', hs.x + hs.w - 8, hcy);
+  ctx.textBaseline = 'alphabetic';
   // Plot grid.
   ctx.strokeStyle = 'rgba(255,255,255,0.14)';
   ctx.lineWidth = 1;
@@ -3730,12 +4128,12 @@ function drawFlowWaveEditor() {
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
   ctx.lineWidth = 1.5;
   ctx.strokeRect(pl.left, pl.top, pl.pw, pl.ph);
-  // Harmonic labels (1..32) + guide lines every 4th harmonic.
+  // Harmonic labels (1..N) + guide lines every 4th included harmonic.
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '700 8px sans-serif';
   ctx.textAlign = 'center';
-  for (let i = 0; i < HARMONIC_COUNT; i++) {
-    const x = tToX(i / (HARMONIC_COUNT - 1), pl);
+  for (let i = 0; i < flowWaveHarmCount(); i++) {
+    const x = flowWaveHarmX(i, pl);
     if (i >= 4 && i % 4 === 0) {
       ctx.strokeStyle = 'rgba(255,255,255,0.08)';
       ctx.beginPath();
@@ -3756,18 +4154,20 @@ function drawFlowWaveEditor() {
   ctx.fillText('+100%', pl.left + 2, pl.top + 10);
   ctx.fillText('0', pl.left + 2, y0 + 3);
   ctx.fillText('−100%', pl.left + 2, pl.bottom - 4);
-  // Spectrum curve + dots (extend the clamped ends to the plot edges).
+  // Spectrum curve + dots (extend the clamped ends to the included harmonics'
+  // edges; the hidden harmonics beyond the count are preserved but not drawn).
+  const vPts = flowWaveVisiblePts(pts);
   ctx.strokeStyle = FLOW_WAVE_ACCENT;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(tToX(0, pl), ampToY(specValueAt(pts, 0), pl));
-  for (let j = 0; j < pts.length; j++) ctx.lineTo(tToX(pts[j].x, pl), ampToY(pts[j].a, pl));
-  ctx.lineTo(tToX(1, pl), ampToY(specValueAt(pts, 1), pl));
+  ctx.moveTo(flowWaveHarmTToX(0, pl), ampToY(specValueAt(pts, 0), pl));
+  for (let j = 0; j < vPts.length; j++) ctx.lineTo(flowWaveHarmTToX(vPts[j].x, pl), ampToY(vPts[j].a, pl));
+  ctx.lineTo(flowWaveHarmTToX(flowWaveMaxHarmT(), pl), ampToY(specValueAt(pts, flowWaveMaxHarmT()), pl));
   ctx.stroke();
-  for (const pt of pts) {
+  for (const pt of vPts) {
     ctx.fillStyle = FLOW_WAVE_ACCENT;
     ctx.beginPath();
-    ctx.arc(tToX(pt.x, pl), ampToY(pt.a, pl), 6, 0, Math.PI * 2);
+    ctx.arc(flowWaveHarmTToX(pt.x, pl), ampToY(pt.a, pl), 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
@@ -3780,7 +4180,7 @@ function drawFlowWaveEditor() {
   ctx.fillText(flowWaveMode === 'draw'
     ? 'Draw · drag across the plot to scribble the spectrum · tap Point to edit dots'
     : flowWaveMode === 'erase'
-    ? 'Erase · drag across the plot to zero out those harmonics · tap Point to edit dots'
+    ? 'Erase · drag across the plot to flatten those harmonics to a straight zero line · tap Point to edit dots'
     : flowWaveMode === 'delete'
     ? 'Delete · tap a dot to remove it'
     : 'Point · tap to add a harmonic · drag a dot to move · double-tap a dot to delete · presets above replace the curve', p.x + p.w / 2, p.y + p.h - 8);
@@ -3797,18 +4197,27 @@ function flowWaveHandleDown(x, y) {
       return;
     }
   }
-  // Clear pill: reset to a plain sine.
+  // Clear pill: reset to a plain sine (kept within the included harmonics).
   const cp = flowWaveClearPill(p);
   if (x >= cp.x && x <= cp.x + cp.w && y >= cp.y && y <= cp.y + cp.h) {
     flowWaveMutate(() => { const l = selectedLayer(); applyPresetToLayer(l, 'sine'); initLayerSpecPoints(l); });
+    if (flowWaveHarmCount() < HARMONIC_COUNT) flowWaveApplyHarmCount(selectedLayer());
     return;
   }
-  // Waveform preset buttons.
+  // Waveform preset buttons (kept within the included harmonics).
   for (const b of flowWavePresetButtons(p)) {
     if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
       flowWaveMutate(() => { const l = selectedLayer(); applyPresetToLayer(l, b.name); initLayerSpecPoints(l); });
+      if (flowWaveHarmCount() < HARMONIC_COUNT) flowWaveApplyHarmCount(selectedLayer());
       return;
     }
+  }
+  // Harmonics slider: drag to include fewer/more harmonics in the graph.
+  const hs = flowWaveHarmSlider(p);
+  if (x >= hs.x && x <= hs.x + hs.w && y >= hs.y - 4 && y <= hs.y + hs.h + 4) {
+    flowWaveSetHarmonics(flowWaveHarmFromX(hs, x));
+    flowWavePtr = { mode: 'harmSlider' };
+    return;
   }
   // Plot behaviour depends on the mode.
   if (y >= pl.top && y <= pl.bottom) {
@@ -3818,14 +4227,14 @@ function flowWaveHandleDown(x, y) {
       return;
     }
     if (flowWaveMode === 'draw') {
-      flowWaveMutate(() => { insertSpecPoint(selectedLayer(), xToT(x, pl), yToAmp(y, pl)); });
-      flowWavePtr = { mode: 'draw', lastX: xToT(x, pl) };
+      flowWaveMutate(() => { insertSpecPoint(selectedLayer(), flowWaveXToHarmT(x, pl), yToAmp(y, pl)); });
+      flowWavePtr = { mode: 'draw', lastX: flowWaveXToHarmT(x, pl) };
       return;
     }
     if (flowWaveMode === 'erase') {
-      const xf = xToT(x, pl);
-      flowWaveMutate(() => { flowWaveEraseAt(selectedLayer(), xf, null); });
-      flowWavePtr = { mode: 'erase', lastX: xf };
+      const xf = flowWaveXToHarmT(x, pl);
+      flowWaveMutate(() => { flowWaveErase(selectedLayer(), xf, xf); });
+      flowWavePtr = { mode: 'erase', lastX: xf, lo: xf, hi: xf };
       return;
     }
     // Point mode: grab a dot (double-tap deletes), or add a point and drag it.
@@ -3840,7 +4249,7 @@ function flowWaveHandleDown(x, y) {
       flowWavePtr = { mode: 'point', idx, x0: x, y0: y };
       return;
     }
-    const ni = flowWaveMutate(() => insertSpecPoint(selectedLayer(), xToT(x, pl), yToAmp(y, pl)));
+    const ni = flowWaveMutate(() => insertSpecPoint(selectedLayer(), flowWaveXToHarmT(x, pl), yToAmp(y, pl)));
     if (ni >= 0) flowWavePtr = { mode: 'point', idx: ni, x0: x, y0: y };
   }
 }
@@ -3848,13 +4257,15 @@ function flowWaveHandleMove(x, y) {
   if (!flowWavePtr) return;
   const p = flowWavePanel();
   const pl = flowWavePlot(p);
-  if (flowWavePtr.mode === 'point') {
+  if (flowWavePtr.mode === 'harmSlider') {
+    flowWaveSetHarmonics(flowWaveHarmFromX(flowWaveHarmSlider(p), x));
+  } else if (flowWavePtr.mode === 'point') {
     const l = selectedLayer();
     const pts = l.specPoints;
     const pt = pts[flowWavePtr.idx];
     if (pt) {
       flowWaveMutate(() => {
-        pt.x = clamp01(xToT(x, pl));
+        pt.x = flowWaveXToHarmT(x, pl);
         pt.a = clampSign(yToAmp(y, pl));
         pts.sort((a, b) => a.x - b.x);
         flowWavePtr.idx = pts.indexOf(pt);
@@ -3862,20 +4273,24 @@ function flowWaveHandleMove(x, y) {
       });
     }
   } else if (flowWavePtr.mode === 'draw') {
-    const xf = xToT(x, pl);
+    const xf = flowWaveXToHarmT(x, pl);
     if (Math.abs(xf - flowWavePtr.lastX) > 0.01) {
       flowWaveMutate(() => { insertSpecPoint(selectedLayer(), xf, yToAmp(y, pl)); });
       flowWavePtr.lastX = xf;
     }
   } else if (flowWavePtr.mode === 'erase') {
-    const xf = xToT(x, pl);
+    const xf = flowWaveXToHarmT(x, pl);
     if (Math.abs(xf - flowWavePtr.lastX) > 0.01) {
-      flowWaveMutate(() => { flowWaveEraseAt(selectedLayer(), xf, flowWavePtr.lastX); });
+      const lo = Math.min(flowWavePtr.lo, xf);
+      const hi = Math.max(flowWavePtr.hi, xf);
+      flowWaveMutate(() => { flowWaveErase(selectedLayer(), lo, hi); });
+      flowWavePtr.lo = lo; flowWavePtr.hi = hi;
       flowWavePtr.lastX = xf;
     }
   }
 }
 function flowWaveHandleUp() {
+  if (flowWavePtr && flowWavePtr.mode === 'harmSlider') flowWaveCommitHarmonics();
   flowWavePtr = null;
   saveFlow();
 }
@@ -3894,7 +4309,16 @@ var flowUnisonDirty = false;  // any edit happened this session (coalesces into 
 var flowUnisonSel = 0;        // index of the selected voice
 var flowUnisonDrag = null;    // { key } active fader drag, or null
 
-function flowUnisonPanel() { return flowEnvPanel(); }
+function flowUnisonPanel() {
+  const w = Math.min(520, W - 24);
+  const h = Math.min(360, H - 24);
+  const n = flowUnisonEdit ? flowNodeById(flowUnisonEdit) : null;
+  if (!n) return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  const p = flowNodeScreen(n);
+  const x = Math.max(12, Math.min(W - 12 - w, p.x - w / 2));
+  const y = Math.max(12, Math.min(H - 12 - h, p.y - h / 2));
+  return { x, y, w, h };
+}
 function flowUnisonSelectedVoice() {
   const vs = layerVoices(selectedLayer());
   return (flowUnisonSel >= 0 && vs[flowUnisonSel]) ? vs[flowUnisonSel] : null;
@@ -3923,6 +4347,35 @@ function flowUnisonFaders(p) {
       btnDisconn: { x: p.x + p.w - 118, y: cy - 11, w: 102, h: 22 },
     };
   });
+}
+// A scale slider row: while an animation env drives a parameter, it takes over
+// that parameter's static fader row — same y position (so the rows never move),
+// but a scale track + knob + value and a Disconnect button in the fader's
+// button slot. Only st and ct have scale settings (vol's env maps fixed).
+function flowUnisonScaleRow(p, param) {
+  const f = flowUnisonFaders(p).find(x => x.key === param);
+  if (!f || (param !== 'st' && param !== 'ct')) return null;
+  const def = param === 'st'
+    ? { key: 'stScale', slot: 'stEnv', max: FLOW_PITCH_SCALE_MAX, def: FLOW_UNISON_ST_SCALE_DEFAULT, label: 'St env scale', fmt: v => v + ' st' }
+    : { key: 'ctScale', slot: 'ctEnv', max: 100, def: FLOW_UNISON_CT_SCALE_DEFAULT, label: 'Ct env scale', fmt: v => v + ' ¢' };
+  return Object.assign({}, def, {
+    labelX: f.labelX, cy: f.cy,
+    trackX1: p.x + 100, trackX2: p.x + p.w - 150,
+    valX: p.x + p.w - 160,
+    btnDisconn: f.btnDisconn,
+  });
+}
+// The unison node's env-scale value (whole st / ¢), clamped and defaulted.
+function flowUnisonEnvScale(node, key, def) {
+  const val = node ? +node[key] : NaN;
+  return isNaN(val) ? def : Math.max(1, Math.min(100, Math.round(val)));
+}
+function flowUnisonSetEnvScale(key, x, row) {
+  const n = flowNodeById(flowUnisonEdit);
+  if (!n) return;
+  const f = clamp01((x - row.trackX1) / (row.trackX2 - row.trackX1));
+  const val = Math.round(1 + f * (row.max - 1));
+  flowUnisonMutate(() => { n[key] = Math.max(1, Math.min(row.max, val)); });
 }
 function openFlowUnisonEditor(id) {
   const n = flowNodeById(id);
@@ -3994,31 +4447,40 @@ function drawFlowUnisonEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('One extra voice playing the same wave', p.x + 86, p.y + 30);
-  // Interval preset chips (semitones for the single voice) — disabled while a
-  // semitone envelope drives the voice.
-  const stLocked = flowUnisonParamLocked(flowNodeById(flowUnisonEdit), 'st');
+  // Interval preset chips: semitone jumps for the static st offset, or — while
+  // a semitone envelope drives the voice — preset jumps for the st SCALE slider.
+  const uNode = flowNodeById(flowUnisonEdit);
+  const stLocked = flowUnisonParamLocked(uNode, 'st');
+  const stScaleVal = flowUnisonEnvScale(uNode, 'stScale', FLOW_UNISON_ST_SCALE_DEFAULT);
   for (const ic of flowUnisonIntervals(p)) {
-    const on = v && Math.round(+v.st || 0) === ic.st;
+    const on = stLocked ? (Math.round(stScaleVal) === ic.st) : (v && Math.round(+v.st || 0) === ic.st);
     drawRoundRect(ic.x, ic.y, ic.w, ic.h, 7);
     ctx.fillStyle = on ? FLOW_UNISON_ACCENT : '#222222';
     ctx.fill();
     ctx.strokeStyle = on ? FLOW_UNISON_ACCENT : 'rgba(255,255,255,0.4)';
     ctx.lineWidth = on ? 1.5 : 1;
     ctx.stroke();
-    ctx.globalAlpha = stLocked ? 0.4 : 1;
     ctx.fillStyle = on ? '#000000' : '#ffffff';
     ctx.font = '800 10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(ic.label, ic.x + ic.w / 2, ic.y + ic.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
-    ctx.globalAlpha = 1;
   }
-  // Parameter faders (st/ct/vol) — a fader is locked (inert, greyed) while its
-  // animation envelope is connected.
+  // Parameter rows (st/ct/vol): a static fader by default. When a row's animation
+  // envelope is connected, the row is taken over — the static fader hides and
+  // (for st / ct) the envelope's scale slider renders in its place, with a
+  // Disconnect button where the −/+ buttons were. Vol has no scale slider, so
+  // its row just locks to ENV.
+  const scaleRows = { st: flowUnisonScaleRow(p, 'st'), ct: flowUnisonScaleRow(p, 'ct') };
   for (const f of flowUnisonFaders(p)) {
     const active = !!v;
     const locked = active && flowUnisonParamLocked(flowNodeById(flowUnisonEdit), f.key);
+    const scale = scaleRows[f.key] || null;
+    if (locked && scale) {
+      drawFlowUnisonScaleRow(scale, flowNodeById(flowUnisonEdit));
+      continue;
+    }
     const cur = v ? (+v[f.key] != null ? +v[f.key] : (f.key === 'vol' ? 1 : 0)) : (f.key === 'vol' ? 1 : 0);
     ctx.globalAlpha = active ? (locked ? 0.4 : 1) : 0.35;
     ctx.fillStyle = '#ffffff';
@@ -4092,27 +4554,91 @@ function drawFlowUnisonEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('The extra voice detunes by its st/ct offsets — vol/st/ct envs can animate them over the note', p.x + p.w / 2, p.y + p.h - 8);
+  ctx.fillText('A vol/st/ct env takes over its row — the scale slider sets how far a full-strength env drives it', p.x + p.w / 2, p.y + p.h - 8);
+}
+// The envelope-scale slider that replaces a static fader while its env is
+// connected: label, scale track + knob, value, and a Disconnect button.
+function drawFlowUnisonScaleRow(f, node) {
+  const val = flowUnisonEnvScale(node, f.key, f.def);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(f.label, f.labelX, f.cy + 4);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(f.trackX2, f.cy);
+  ctx.stroke();
+  const frac = clamp01((val - 1) / (f.max - 1));
+  const tx = f.trackX1 + frac * (f.trackX2 - f.trackX1);
+  ctx.strokeStyle = FLOW_UNISON_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(f.trackX1, f.cy); ctx.lineTo(tx, f.cy);
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.arc(tx, f.cy, 8, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(f.fmt(val), f.valX, f.cy + 4);
+  // Disconnect button (same slot as the locked fader's): sever the env
+  // connection to restore the static fader.
+  const bx = f.btnDisconn;
+  drawRoundRect(bx.x, bx.y, bx.w, bx.h, 7);
+  ctx.fillStyle = '#3a243f';
+  ctx.fill();
+  ctx.strokeStyle = FLOW_UNISON_ACCENT;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Disconnect', bx.x + bx.w / 2, bx.y + bx.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
 }
 function flowUnisonHandleDown(x, y) {
   const p = flowUnisonPanel();
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowUnisonEditor(); return; }
-  // Interval preset chips (semitone jumps for the single voice) — inert while a
-  // semitone envelope drives the voice.
+  // Interval preset chips: static st jumps for the voice, or — while a semitone
+  // envelope drives it — preset jumps for the st SCALE slider.
   const v = flowUnisonSelectedVoice();
-  if (v && !flowUnisonParamLocked(flowNodeById(flowUnisonEdit), 'st')) {
-    for (const ic of flowUnisonIntervals(p)) {
-      if (x >= ic.x && x <= ic.x + ic.w && y >= ic.y && y <= ic.y + ic.h) {
-        flowUnisonMutate(() => { v.st = ic.st; });
-        return;
-      }
+  const uNode = flowNodeById(flowUnisonEdit);
+  const stLocked = flowUnisonParamLocked(uNode, 'st');
+  for (const ic of flowUnisonIntervals(p)) {
+    if (x >= ic.x && x <= ic.x + ic.w && y >= ic.y && y <= ic.y + ic.h) {
+      if (stLocked) flowUnisonMutate(() => { uNode.stScale = Math.max(1, Math.min(FLOW_PITCH_SCALE_MAX, ic.st)); });
+      else if (v) flowUnisonMutate(() => { v.st = ic.st; });
+      return;
     }
   }
-  // Faders: nudge buttons, then the track (drag). A fader whose animation
-  // envelope is connected is locked — the envelope drives that value — and a
-  // Disconnect button offers to sever the env connection and re-enable it.
+  // Parameter rows: for a row whose env is connected, the static fader is
+  // replaced by its scale slider (st / ct) — drag its track, or Disconnect to
+  // restore the fader. A locked vol row (no scale slider) offers Disconnect
+  // only. Otherwise the row is a normal static fader.
+  const scaleRows = { st: flowUnisonScaleRow(p, 'st'), ct: flowUnisonScaleRow(p, 'ct') };
   for (const f of flowUnisonFaders(p)) {
-    const locked = flowUnisonParamLocked(flowNodeById(flowUnisonEdit), f.key);
+    const locked = flowUnisonParamLocked(uNode, f.key);
+    const scale = scaleRows[f.key] || null;
+    if (locked && scale) {
+      const bx = scale.btnDisconn;
+      if (x >= bx.x && x <= bx.x + bx.w && y >= bx.y && y <= bx.y + bx.h) { flowUnisonDisconnectEnv(f.key); return; }
+      if (Math.abs(y - scale.cy) <= 16 && x >= scale.trackX1 - 6 && x <= scale.trackX2 + 8) {
+        flowUnisonSetEnvScale(scale.key, x, scale);
+        flowUnisonDrag = { key: scale.key };
+        return;
+      }
+      continue;
+    }
     if (locked) {
       const bx = f.btnDisconn;
       if (x >= bx.x && x <= bx.x + bx.w && y >= bx.y && y <= bx.y + bx.h) { flowUnisonDisconnectEnv(f.key); return; }
@@ -4145,6 +4671,11 @@ function flowUnisonDisconnectEnv(key) {
 function flowUnisonHandleMove(x, y) {
   if (!flowUnisonDrag) return;
   const p = flowUnisonPanel();
+  if (flowUnisonDrag.key === 'stScale' || flowUnisonDrag.key === 'ctScale') {
+    const f = flowUnisonScaleRow(p, flowUnisonDrag.key === 'stScale' ? 'st' : 'ct');
+    if (f && connSlotGet(flowNodeById(flowUnisonEdit), { key: f.slot })) flowUnisonSetEnvScale(f.key, x, f);
+    return;
+  }
   const f = flowUnisonFaders(p).find(f => f.key === flowUnisonDrag.key);
   if (f && !flowUnisonParamLocked(flowNodeById(flowUnisonEdit), f.key)) flowUnisonSetParam(f, x);
 }
@@ -4189,6 +4720,24 @@ function flowCurveTrimApply(y) {
   const sl = flowCurveTrimSlider(flowCurvePanel());
   const f = Math.max(0, Math.min(1, (y - sl.y0) / (sl.y1 - sl.y0)));
   flowCurveMutate(() => { flowCurveEnvOf(flowCurveEdit).trim = Math.max(-1, Math.min(1, 1 - 2 * f)); });
+}
+// The draw-points slider for the env-curve editor: spans the row above the plot
+// (this editor has no sync button to share it with), hidden while the segment
+// strip is open. Shares the volume envelope's draw-points setting.
+function flowCurveGranSlider(p) {
+  return { x: p.x + 16, w: p.w - 32, y: p.y + 44, h: 24 };
+}
+function flowCurveGranApply(g, x) {
+  flowCurveMutate(() => { flowEnvDrawPoints = flowGranFromX(g, x); });
+}
+// Thin a curve down to the draw-density grid inside a swept slot range (the
+// far-left/right anchors are protected), so a low-density sweep flattens a
+// dense curve to the chosen resolution — mirrors the creator's draw thinning.
+function flowCurveThinSweep(pts, loS, hiS) {
+  if (!pts || pts.length <= 2) return;
+  const loT = flowEnvSlotT(loS), hiT = flowEnvSlotT(hiS), eps = 0.008;
+  const kept = pts.filter(pt => pt.t === 0 || pt.t === 1 || pt.t < loT - eps || pt.t > hiT + eps);
+  if (kept.length >= 2) { pts.length = 0; pts.push.apply(pts, kept); }
 }
 function flowCurveInsert(points, t, v) {
   t = clamp01(t); v = Math.max(-1, Math.min(1, v));
@@ -4410,6 +4959,43 @@ function drawFlowCurveEditor() {
     ctx.fillText('✏️', db.x + db.w / 2, db.y + db.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
   }
+  // Draw-points slider (hidden while the segment strip is open): how many
+  // evenly-spaced breakpoints a full-width draw sweep places across the graph.
+  if (!flowCurveSegRange()) {
+    const g = flowCurveGranSlider(p);
+    const n = flowEnvDrawCount();
+    const x1 = g.x + 72, x2 = g.x + g.w - 66, cy = g.y + g.h / 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '800 10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Draw pts', g.x, cy);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x1, cy); ctx.lineTo(x2, cy);
+    ctx.stroke();
+    const frac = clamp01((n - 4) / (HARMONIC_COUNT - 4));
+    const kx = x1 + frac * (x2 - x1);
+    ctx.strokeStyle = '#8dd3ff';
+    ctx.beginPath();
+    ctx.moveTo(x1, cy); ctx.lineTo(kx, cy);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.arc(kx, cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = '800 10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(n + ' pts', g.x + g.w - 8, cy);
+    ctx.textBaseline = 'alphabetic';
+  }
   // Plot grid.
   ctx.strokeStyle = 'rgba(255,255,255,0.14)';
   ctx.lineWidth = 1;
@@ -4520,7 +5106,7 @@ function drawFlowCurveEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · ✏️ draws · tap a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
+  ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · ✏️ draws (' + flowEnvDrawCount() + ' pts · slider) · tap a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
 }
 // Curve value at t (each span applies its segment line type, ends clamp) — like
 // specValueAt but with {t,v} points and a ±1 axis.
@@ -4580,6 +5166,16 @@ function flowCurveHandleDown(x, y) {
       return;
     }
   }
+  // Draw-points slider (hidden while a segment is selected): sets how many
+  // evenly-spaced breakpoints a full-width draw sweep places across the graph.
+  if (!flowCurveSegRange()) {
+    const g = flowCurveGranSlider(p);
+    if (x >= g.x && x <= g.x + g.w && y >= g.y - 4 && y <= g.y + g.h + 4) {
+      flowCurveGranApply(g, x);
+      flowCurvePtr = { kind: 'gran' };
+      return;
+    }
+  }
   // Trim slider.
   const sl = flowCurveTrimSlider(p);
   if (x >= sl.x - 4 && x <= sl.x + sl.w + 4 && y >= sl.y0 - 8 && y <= sl.y1 + 6) {
@@ -4601,7 +5197,7 @@ function flowCurveHandleDown(x, y) {
   // 2. With the ✏️ armed, any press draws (scribble) — the only way into draw
   // mode. A plain tap (no drag) adds a single point on release.
   if (flowCurveDrawArmed) {
-    flowCurvePtr = { kind: 'draw', px: x, py: y, moved: false, lastX: xToT(x, pl) };
+    flowCurvePtr = { kind: 'draw', px: x, py: y, moved: false, lastSlot: flowEnvSlotAtX(x, pl) };
     return;
   }
   // 3. Tapping a segment line selects it (opens the docked strip).
@@ -4650,18 +5246,31 @@ function flowCurveHandleMove(x, y) {
       if (ni >= 0) flowCurvePtr.idx = ni;
     }
   } else if (k === 'draw') {
-    // ✏️ draw mode: cover the press point on the first real move, then scribble
-    // along the finger's path. A still press stays a tap (adds a point).
+    // ✏️ draw mode: scribble through the draw-density slot grid (the Draw pts
+    // slider sets how many breakpoints a full-width sweep places). Existing
+    // points inside each swept corridor are thinned out first, so a low-density
+    // sweep flattens a dense curve to the chosen resolution. A still press
+    // stays a tap (adds a point on release).
     const pts = flowCurvePointsOf(flowCurveEdit);
     if (!flowCurvePtr.moved) {
       flowCurvePtr.moved = true;
-      flowCurveMutate(() => { flowCurveInsert(pts, flowCurvePtr.lastX, yToAmp(flowCurvePtr.py, pl) - trim); });
+      const s0 = flowCurvePtr.lastSlot;
+      flowCurveMutate(() => {
+        flowCurveThinSweep(pts, s0, s0);
+        flowCurveInsert(pts, flowEnvSlotT(s0), yToAmp(flowCurvePtr.py, pl) - trim);
+      });
     }
-    const xf = xToT(x, pl);
-    if (Math.abs(xf - flowCurvePtr.lastX) > 0.01) {
-      flowCurveMutate(() => { flowCurveInsert(pts, xf, yToAmp(y, pl) - trim); });
-      flowCurvePtr.lastX = xf;
+    const s = flowEnvSlotAtX(x, pl);
+    if (s !== flowCurvePtr.lastSlot) {
+      const loS = Math.min(flowCurvePtr.lastSlot, s), hiS = Math.max(flowCurvePtr.lastSlot, s);
+      flowCurveMutate(() => {
+        flowCurveThinSweep(pts, loS, hiS);
+        for (let k = loS; k <= hiS; k++) flowCurveInsert(pts, flowEnvSlotT(k), yToAmp(y, pl) - trim);
+      });
+      flowCurvePtr.lastSlot = s;
     }
+  } else if (k === 'gran') {
+    flowCurveGranApply(flowCurveGranSlider(p), x);
   } else if (k === 'segparam') {
     const type = flowSegTypeOf(flowCurveSegCurrent());
     const S = flowSegStripLayout(p, type);
@@ -4718,11 +5327,19 @@ function compileFlowNote(note) {
     // A muted wave port: the wave's signal is ignored entirely in playback.
     if (connSlotMuted(note, { key: 'waves', idx: i })) continue;
     const spec = (w.wave && w.wave.amplitudes) ? w.wave : defaultWaveSpec();
+    // The node's harmonic count is the wave's hard limit: harmonics beyond it
+    // are erased from the node itself, and the compiled layer uses the
+    // amplitudes array directly (not the editor's breakpoints), so a spectrum
+    // truncated at a lower count never leaks phantom harmonics into playback.
+    const harmN = Math.max(4, Math.min(HARMONIC_COUNT, Math.round(+(spec.harmonics) || HARMONIC_COUNT)));
+    const amps = spec.amplitudes.slice(0, HARMONIC_COUNT);
+    for (let i = harmN; i < HARMONIC_COUNT; i++) amps[i] = 0;
     const layer = {
       id: 'flow-' + w.id,
-      amplitudes: spec.amplitudes.slice(0, HARMONIC_COUNT),
+      amplitudes: amps,
       level: 1, trim: 0, muted: false,
-      presetId: spec.presetId, specPoints: spec.specPoints,
+      presetId: spec.presetId,
+      specPoints: null,
       pitchEnv: null, voices: null,
     };
     // Mix envelope: an env curve v ∈ −1..1 maps to a mix weight 0..1 (0 = full);
@@ -4756,7 +5373,18 @@ function compileFlowNote(note) {
         if (!Array.isArray(uni.voices) || !uni.voices.length) continue;
         const vs = voicesFromSavedFlow(uni.voices);
         const uEnvs = compileUnisonEnvs(uni);
-        if (uEnvs) for (const v of vs) v.envs = uEnvs;
+        if (uEnvs) {
+          for (const v of vs) {
+            v.envs = uEnvs;
+            // A connected env fully drives its parameter: the value heard comes
+            // entirely from the curve × its scale slider, so the voice's static
+            // offset (st/ct) or level (vol) no longer contributes — neutralize
+            // the flat line. Disconnecting the env restores the stored value.
+            if (uEnvs.st) v.st = 0;
+            if (uEnvs.ct) v.ct = 0;
+            if (uEnvs.vol) v.vol = 1;
+          }
+        }
         voices.push.apply(voices, vs);
       }
       if (voices.length) layer.voices = voices.slice(0, MAX_LAYER_VOICES);
@@ -4773,15 +5401,15 @@ function compileFlowNote(note) {
 }
 // The note's optional pitch-env connection, compiled to the legacy MASTER_PITCH_ENV
 // shape ({ range, points: [{ t, st }] }): an env curve's v ∈ −1..1 maps to a
-// semitone bend, full deflection = ±12 st (one octave); the trim shifts the
-// whole curve first, and each span's line type rides along. Disconnected or
-// missing → null (the note plays at its base pitch).
+// semitone bend, full deflection = ±the note's pitch scale (default ±12 st, one
+// octave); the trim shifts the whole curve first, and each span's line type
+// rides along. Disconnected or missing → null (the note plays at its base pitch).
 function compileMasterPitchEnv(note) {
   const id = note && note.conn ? note.conn.pitchEnv : null;
   const n = id ? flowNodeById(id) : null;
   if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
   if (connSlotMuted(note, { key: 'pitchEnv' })) return null;   // muted pitch port → no bend
-  const SCALE = 12;
+  const SCALE = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+note.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
   const trim = +n.env.trim || 0;
   const points = n.env.points.map(pt => {
     const p = { t: clamp01(pt.t), st: ((+pt.v || 0) + trim) * SCALE };
@@ -4791,10 +5419,14 @@ function compileMasterPitchEnv(note) {
   return { range: SCALE, points };
 }
 // The unison's connected vol/st/ct env nodes, compiled to legacy voice-envelope
-// shapes ({ range, points }) with the neutral convention of each parameter.
+// shapes ({ range, points }) with the neutral convention of each parameter. The
+// st and ct scales are per-unison node settings (whole semitones / cents), so
+// a full-strength envelope bends the voice by exactly the chosen amount.
 function compileUnisonEnvs(uni) {
   const c = uni.conn || {};
   const out = { st: null, ct: null, vol: null };
+  const stScale = Math.max(1, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+uni.stScale) || FLOW_UNISON_ST_SCALE_DEFAULT));
+  const ctScale = Math.max(1, Math.min(100, Math.round(+uni.ctScale) || FLOW_UNISON_CT_SCALE_DEFAULT));
   const mk = (id, range, scale, neutral, slot) => {
     const n = id ? flowNodeById(id) : null;
     if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
@@ -4812,8 +5444,8 @@ function compileUnisonEnvs(uni) {
       }),
     };
   };
-  out.st = mk(c.stEnv, 24, 24, 0, { key: 'stEnv' });
-  out.ct = mk(c.ctEnv, 100, 100, 0, { key: 'ctEnv' });
+  out.st = mk(c.stEnv, 24, stScale, 0, { key: 'stEnv' });
+  out.ct = mk(c.ctEnv, 100, ctScale, 0, { key: 'ctEnv' });
   out.vol = mk(c.volEnv, 2, 1, 1, { key: 'volEnv' });
   return (out.st || out.ct || out.vol) ? out : null;
 }
