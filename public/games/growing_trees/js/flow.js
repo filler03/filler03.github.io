@@ -14,13 +14,18 @@
    Wave (🌊, harmonic spectrum), and Unison (🦄, one additional voice with
    optional vol/st/ct animation envelopes).
 
-   Connections are consumer-owned slots shown as emoji-labeled ports on the
-   node's own edges (tap an empty port to arm it, tap a node on the grid to
-   connect, tap the port again to cancel; while armed, a long-press on a blank
-   spot drops a fresh node of the slot's type there and completes the
+   Connections are consumer-owned slots shown as emoji-labeled ports living in a
+   ring that runs all the way around the outside of each node card (the ring is
+   as thick as a port circle, so a port never covers a card's labels). A port
+   sits on whichever side of the ring faces its connection — a filled port moves
+   to the side its source lies on (tap an empty port to arm it, tap a node on the
+   grid to connect, tap the port again to cancel; while armed, a long-press on a
+   blank spot drops a fresh node of the slot's type there and completes the
    connection; tapping a FILLED port jumps the camera
    to the node on the other end — long-press it to re-arm it for reconnecting);
-   wires render as tapered, colored beziers from the source node's border to the
+   a port pinned to the label it drives (a unison's env ports, a layer's mix/pitch
+   envs) stays beside that label and only moves between the left and right sides.
+   Wires render as tapered, colored beziers from the source node's border to the
    consumer's port, colored by the source node's type, with a flared base where
    the border curves into the connector (tap that base to jump to the consumer
    node), and arc around
@@ -56,6 +61,7 @@ const FLOW_SEP_MS = 250;        // duration of the float-away separation animati
 const FLOW_BACK_R = 22;         // round button radius (sidebar / undo / back)
 const FLOW_TAP_MAX = 10;        // px of movement before a touch counts as a pan
 const FLOW_PORT_R = 15;         // connection-port dot radius on a node's edge
+const FLOW_PORT_BAND = FLOW_PORT_R * 2 + 4;   // the port ring's thickness around a node card (screen px): wide enough to hold a port circle edge-to-edge with a little air, so port dots never cover the card's labels
 const FLOW_HOLD_MOVE = 500;     // ms of a still hold before the node enters move mode (flash)
 const FLOW_HOLD_DELETE = 1000;  // ms of a continued hold (past move mode) before the delete countdown starts
 const FLOW_DELETE_MS = 1000;    // delete countdown duration: a 1-second hold before the node is deleted (total ≈ 2 s)
@@ -125,6 +131,43 @@ const FLOW_PITCH_SCALE_MAX = 24;
 const FLOW_PITCH_SCALE_DEFAULT = 12;    // one octave at full deflection
 const FLOW_UNISON_ST_SCALE_DEFAULT = 24; // full deflection = 24 st (voice range)
 const FLOW_UNISON_CT_SCALE_DEFAULT = 100; // full deflection = 100 ¢ (voice range)
+// A note node's visual identity — a name and a color from the palette below.
+// Every note is a distinct "instrument" (a future song editor picks between
+// them by note id); the color keeps them readable at a glance on the grid.
+const FLOW_NOTE_NAME_MAX = 24;              // max chars a note's name may be
+const FLOW_NOTE_COLOR_DEFAULT = '#4fc3f7';  // cyan — a brand-new note starts here
+const FLOW_NOTE_COLORS = [
+  '#4fc3f7', '#f06292', '#4caf50', '#ffb74d', '#ba68c8',
+  '#e57373', '#81c784', '#ffd54f', '#7986cb', '#4dd0e1',
+];
+// The display name of a note node (its instrument name), trimmed + clamped, or
+// '' when it has none (the type label is then used everywhere it is shown).
+function flowNoteName(n) {
+  return (n && typeof n.name === 'string') ? n.name.trim().slice(0, FLOW_NOTE_NAME_MAX) : '';
+}
+// A note node's identity color, validated against the palette (a stale save or
+// an unknown hex falls back to the default so the grid never renders a blank).
+function flowNoteColor(n) {
+  const c = n && n.color;
+  return (typeof c === 'string' && FLOW_NOTE_COLORS.indexOf(c) >= 0) ? c : FLOW_NOTE_COLOR_DEFAULT;
+}
+function flowNoteColorIndex(n) {
+  return FLOW_NOTE_COLORS.indexOf(flowNoteColor(n));
+}
+// The color a brand-new note starts with: walk the palette one note at a time,
+// so consecutive notes differ and stay tellable apart.
+function flowNextNoteColor() {
+  return FLOW_NOTE_COLORS[flowNodes.filter(x => x.type === 'note').length % FLOW_NOTE_COLORS.length];
+}
+// Truncate a label to fit `maxPx` (uses the current ctx font), appending …
+// when it overflows — keeps long instrument names bounded on the widget cards.
+function flowTruncate(str, maxPx) {
+  if (!str) return str;
+  if (ctx.measureText(str).width <= maxPx) return str;
+  let out = str;
+  while (out.length > 1 && ctx.measureText(out + '…').width > maxPx) out = out.slice(0, -1);
+  return out + '…';
+}
 
 var flowCam = { x: 0, y: 0 };   // grid pan offset (px): world = screen + cam
 var flowPtr = null;             // { x, y, startX, startY, lastT, vx, vy, moved } active pan drag, or null
@@ -214,16 +257,17 @@ function flowNodeScreen(n) {
   return { x: n.x - flowCam.x, y: n.y - flowCam.y };
 }
 // The node under the world point (x,y), or null. "Here a node exists" = inside
-// its widget card's bounds (with a little slack), so long-presses near a node
-// still count as on it.
+// its full footprint — the widget card plus its surrounding port ring (with a
+// little slack), so long-presses near a node still count as on it.
 function flowNodeAt(x, y) {
   const pad = 8;
   let best = null, bd = Infinity;
   for (const n of flowNodes) {
-    const s = flowWidgetSize(n);
-    const sw = s.w * FLOW_CARD_SCALE, sh = s.h * FLOW_CARD_SCALE;
-    if (x < n.x - sw / 2 - pad || x > n.x + sw / 2 + pad) continue;
-    if (y < n.y - sh / 2 - pad || y > n.y + sh / 2 + pad) continue;
+    const o = flowNodeOuterRect(n, false);
+    // flowNodeOuterRect is in screen space; `x,y` are world points.
+    const ox = o.x + flowCam.x, oy = o.y + flowCam.y;
+    if (x < ox - pad || x > ox + o.w + pad) continue;
+    if (y < oy - pad || y > oy + o.h + pad) continue;
     const d = Math.hypot(x - n.x, y - n.y);
     if (d < bd) { bd = d; best = n; }
   }
@@ -254,6 +298,14 @@ function flowWidgetRect(node, editing) {
   const sw = s.w * FLOW_CARD_SCALE, sh = s.h * FLOW_CARD_SCALE;
   return { x: p.x - sw / 2, y: p.y - sh / 2, w: sw, h: sh };
 }
+// The node's full footprint in screen space: the content card plus the port ring
+// that runs all the way around its outside (the "border area" the ports live
+// in). When the node is being edited, its widget IS the enlarged editor panel.
+function flowNodeOuterRect(node, editing) {
+  if (editing) return flowWidgetRect(node, true);
+  const c = flowWidgetRect(node, false);
+  return { x: c.x - FLOW_PORT_BAND, y: c.y - FLOW_PORT_BAND, w: c.w + 2 * FLOW_PORT_BAND, h: c.h + 2 * FLOW_PORT_BAND };
+}
 // The id of whichever node is currently being edited (its widget is enlarged),
 // or null when nothing is being edited.
 function flowActiveEditId() {
@@ -266,7 +318,7 @@ function flowActiveEditId() {
 function flowNoteWidgetButtons(r) {
   const gap = 4, n = 4;
   const w = (r.w - 20 - (n - 1) * gap) / n;
-  const y = r.y + 30, h = 26;
+  const y = r.y + 36, h = 26;
   return {
     tap:    { x: r.x + 10, y, w, h },
     full:   { x: r.x + 10 + (w + gap), y, w, h },
@@ -275,10 +327,10 @@ function flowNoteWidgetButtons(r) {
   };
 }
 function flowNoteWidgetLife(r) {
-  return { x: r.x + 62, x2: r.x + r.w - 10, y: r.y + 76 };
+  return { x: r.x + 62, x2: r.x + r.w - 10, y: r.y + 82 };
 }
 function flowNoteWidgetPitch(r) {
-  return { x: r.x + 84, x2: r.x + r.w - 48, y: r.y + 104 };
+  return { x: r.x + 84, x2: r.x + r.w - 48, y: r.y + 110 };
 }
 // The add-menu option buttons, laid out around the anchored point (clamped to
 // stay inside the grid area). One per node type for now.
@@ -528,7 +580,7 @@ function addFlowNode(type) {
   flowPushHistory();
   const id = 'node-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
   const n = { id, x: flowAddMenu.x, y: flowAddMenu.y, type };
-  if (type === 'note') { n.noteLife = 2500; n.pitchScale = FLOW_PITCH_SCALE_DEFAULT; }
+  if (type === 'note') { n.noteLife = 2500; n.pitchScale = FLOW_PITCH_SCALE_DEFAULT; n.name = ''; n.color = flowNextNoteColor(); }
   else if (type === 'volumeEnv') n.envelope = clone(DEFAULT_ENVELOPE);
   else if (type === 'env') n.env = defaultEnvCurve();
   else if (type === 'wave') n.wave = defaultWaveSpec();
@@ -852,17 +904,26 @@ function drawFlowSide() {
     ctx.font = '20px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(FLOW_NODE_TYPES[r.node.type].emoji, r.x + 24, r.y + r.h / 2);
+    // A note row shows its identity color as a small dot beside the emoji.
+    let labelX = r.x + 44;
+    if (r.node.type === 'note') {
+      ctx.beginPath();
+      ctx.arc(r.x + 40, r.y + r.h / 2, 5, 0, Math.PI * 2);
+      ctx.fillStyle = flowNoteColor(r.node);
+      ctx.fill();
+      labelX = r.x + 50;
+    }
     // A node with no connections (nothing feeds it, it feeds nothing) is shown
     // dimmed with a small hollow dot after its label — an "isolated" hint.
     const disconnected = !flowNodeHasConnections(r.node);
     ctx.font = '800 13px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillStyle = sel ? '#ffffff' : (disconnected ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.85)');
-    const label = FLOW_NODE_TYPES[r.node.type].label;
-    ctx.fillText(label, r.x + 44, r.y + r.h / 2);
+    const label = flowTruncate(flowNoteName(r.node) || FLOW_NODE_TYPES[r.node.type].label, 132);
+    ctx.fillText(label, labelX, r.y + r.h / 2);
     if (disconnected) {
       const lw = ctx.measureText(label).width;
-      const dx = r.x + 46 + lw + 6;
+      const dx = labelX + lw + 6;
       ctx.beginPath();
       ctx.arc(dx, r.y + r.h / 2, 3.5, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -1047,7 +1108,7 @@ function drawFlowMoveBadge() {
   if (!n) return;
   const r = flowMoveBadgeRect();
   const xr = flowMoveBadgeXRect();
-  const color = flowSourceColor(n);
+  const color = (n.type === 'note') ? flowNoteColor(n) : flowSourceColor(n);
   drawRoundRect(r.x, r.y, r.w, r.h, 22);
   ctx.fillStyle = 'rgba(22,26,34,0.96)';
   ctx.fill();
@@ -1061,7 +1122,8 @@ function drawFlowMoveBadge() {
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 14px sans-serif';
-  ctx.fillText(FLOW_NODE_TYPES[n.type].emoji + '  ' + FLOW_NODE_TYPES[n.type].label, r.x + 18, r.y + 19);
+  const nm = flowNoteName(n);
+  ctx.fillText(nm ? flowTruncate('🎵  ' + nm, FLOW_MOVE_BADGE_W - 36) : FLOW_NODE_TYPES[n.type].emoji + '  ' + FLOW_NODE_TYPES[n.type].label, r.x + 18, r.y + 19);
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('moving · tap to place', r.x + 18, r.y + 35);
@@ -1360,6 +1422,8 @@ function loadFlow() {
       }
       if (node.type === 'note') {
         node.pitchScale = Math.max(FLOW_PITCH_SCALE_MIN, Math.min(FLOW_PITCH_SCALE_MAX, Math.round(+n.pitchScale) || FLOW_PITCH_SCALE_DEFAULT));
+        node.name = (typeof n.name === 'string') ? n.name.trim().slice(0, FLOW_NOTE_NAME_MAX) : '';
+        node.color = (typeof n.color === 'string' && FLOW_NOTE_COLORS.indexOf(n.color) >= 0) ? n.color : FLOW_NOTE_COLOR_DEFAULT;
       }
       node.conn = connFromSaved(node.type, n.conn);
       flowNodes.push(node);
@@ -1461,12 +1525,18 @@ function flowSetPitchScale(node, st) {
 }
 
 /* ---- On-node connection ports ----
-   Each consumer node's slots are drawn as small emoji-labeled dots around its
-   cell ring. Tapping a dot arms that slot ("Connecting…"); tapping it again
-   cancels. While armed, tapping a valid source node on the grid assigns it.
-   Wires terminate at the consumer's port anchor. A wave node stacks multiple
-   Unison connections (one port per stack, plus an empty port for the next);
-   connections are cleared by selecting a wire and long-pressing it to delete. */
+   Each consumer node's slots are drawn as small emoji-labeled dots sitting in a
+   ring around the card — the ring is the node's border area, as thick as a port
+   circle, running all the way around the outside so the dots never cover the
+   card's labels. A port sits on the side of the ring that faces its connected
+   source (a filled port's side follows its source's direction); row-bound ports
+   (a unison's env rows, a layer's mix/pitch envs) stay aligned beside the label
+   they drive and only move between the left and right sides. Tapping a dot arms
+   that slot ("Connecting…"); tapping it again cancels. While armed, tapping a
+   valid source node on the grid assigns it. Wires terminate at the consumer's
+   port anchor. A wave node stacks multiple Unison connections (one port per
+   stack, plus an empty port for the next); connections are cleared by selecting
+   a wire and long-pressing it to delete. */
 function flowPortEmoji(slot) {
   if (slot.key === 'volumeEnv') return '📉';
   if (slot.key === 'layers') return '🧅';
@@ -1502,15 +1572,16 @@ function flowConnPath(consumer, slot) {
   const start = flowWireSourceAnchor(a, b, src);
   return flowWirePath(start, { x: bx, y: by }, consumer, src);
 }
-// The point on the source node's card border where its wire leaves: the first
-// intersection of the source-centre → consumer-port ray with the (idle, scaled)
-// card rect. This keeps wires clear of the card and makes the "from" end land
-// exactly on the border. Falls back to the source centre if the ray is a point.
+// The point on the source node's outer ring border where its wire leaves: the
+// first intersection of the source-centre → consumer-port ray with the node's
+// full footprint (content card + port ring). This keeps wires clear of the card
+// and makes the "from" end land exactly on the node's outer edge. Falls back to
+// the source centre if the ray is a point.
 function flowWireSourceAnchor(a, b, src) {
   const dx = b.x - a.x, dy = b.y - a.y;
   if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return { x: a.x, y: a.y };
-  const s = flowWidgetSize(src);
-  const hw = s.w * FLOW_CARD_SCALE / 2, hh = s.h * FLOW_CARD_SCALE / 2;
+  const o = flowNodeOuterRect(src, false);
+  const hw = o.w / 2, hh = o.h / 2;
   const tx = dx !== 0 ? hw / Math.abs(dx) : Infinity;
   const ty = dy !== 0 ? hh / Math.abs(dy) : Infinity;
   const t = Math.min(tx, ty);
@@ -1551,8 +1622,8 @@ function flowWireBlocker(a, b, mx, consumer, src) {
   let best = null, bestD = Infinity;
   for (const n of flowNodes) {
     if (n.id === consumer.id || n.id === src.id) continue;
-    const r = flowWidgetRect(n, false);
-    const rx = r.x - 10, ry = r.y - 10, rw = r.w + 20, rh = r.h + 20;
+    const r = flowNodeOuterRect(n, false);
+    const rx = r.x - 4, ry = r.y - 4, rw = r.w + 8, rh = r.h + 8;
     if (rx > x1 || rx + rw < x0) continue;
     for (let i = 1; i < 24; i++) {
       const t = i / 24;
@@ -1639,118 +1710,169 @@ function flowWireRibbon(path, w0, w1, steps) {
   for (let i = right.length - 1; i >= 0; i--) poly.push(right[i]);
   return { poly, p0: pts[0], p1: pts[n], first: pts[0], last: pts[n] };
 }
+// Lay the ports of one edge of a node out along its seat range [a, b]. Row-bound
+// ports (the ones pinned beside the label they drive, e.g. a unison's env rows)
+// are immovable; free ports settle nearest their ideal coordinate, pushed clear
+// of the fixed rows and of each other.
+function flowEdgePlace(items, a, b, minSep) {
+  const n = items.length;
+  const pos = {};
+  const fixed = items.filter(t => t.fixed).sort((p, q) => p.ideal - q.ideal);
+  const free = items.filter(t => !t.fixed);
+  for (const f of fixed) pos[f.i] = Math.max(a, Math.min(b, f.ideal));
+  if (!free.length) return items.map(t => pos[t.i]);
+  if (fixed.length) {
+    // Slots around the fixed rows: the gap between each pair of fixed seats plus
+    // the two end gaps. Free ports go into the roomiest gap, settling nearest
+    // their ideal — pushed to the gap's outer end so they stay clear of the
+    // rows when the gap is tight.
+    const bounds = [a, ...fixed.map(f => pos[f.i]), b];
+    let gaps = bounds.slice(0, -1).map((s, g) => ({ s, e: bounds[g + 1], len: bounds[g + 1] - s }));
+    const freeSorted = free.slice().sort((p, q) => p.ideal - q.ideal);
+    for (const f of freeSorted) {
+      gaps = gaps.filter(g => g.len > 0.5).sort((g1, g2) => g2.len - g1.len);
+      const g = gaps[0];
+      // End gaps flush to the outside edge (farthest from the rows); a middle
+      // gap settles nearest the port's ideal.
+      let v = f.ideal;
+      if (g.s === a) v = a;
+      else if (g.e === b) v = b;
+      else v = Math.max(g.s, Math.min(g.e, v));
+      pos[f.i] = v;
+      const left = { s: g.s, e: v, len: v - g.s };
+      const right = { s: v, e: g.e, len: g.e - v };
+      gaps = gaps.filter(g2 => g2 !== g);
+      if (right.len > 0.5) gaps.push(right);
+      if (left.len > 0.5) gaps.push(left);
+    }
+    return items.map(t => pos[t.i]);
+  }
+  // No fixed rows: even-ish spacing with a push-apart pass.
+  const sorted = free.slice().sort((p, q) => p.ideal - q.ideal);
+  const arr = sorted.map(f => Math.max(a, Math.min(b, f.ideal)));
+  for (let iter = 0; iter < 24; iter++) {
+    let any = false;
+    for (let k = 1; k < arr.length; k++) {
+      if (arr[k] - arr[k - 1] < minSep) {
+        const gap = minSep - (arr[k] - arr[k - 1]);
+        let da = -gap / 2, db = gap / 2;
+        if (arr[k - 1] + da < a) { db += arr[k - 1] + da - a; da = a - arr[k - 1]; }
+        if (arr[k] + db > b) { da -= arr[k] + db - b; db = b - arr[k]; }
+        arr[k - 1] = Math.max(a, arr[k - 1] + da);
+        arr[k] = Math.min(b, arr[k] + db);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  sorted.forEach((f, idx) => pos[f.i] = arr[idx]);
+  return items.map(t => pos[t.i]);
+}
 function flowPorts(node) {
   const p = flowNodeScreen(node);
   const cx = p.x, cy = p.y;
   const r = flowWidgetRect(node, false);
   const w = r.w, h = r.h;
-  const out = [];
-  const add = (slot, px, py, edge, req, nx, ny) => {
+  // Ports sit in a ring around the card: each dot's centre is offset out from
+  // the content edge by half the band's width, so it never covers a label.
+  const off = FLOW_PORT_BAND / 2;
+  const edgeX = { left: r.x - off, right: r.x + w + off };
+  const edgeY = { top: r.y - off, bottom: r.y + h + off };
+  // The straight stretch of each edge where a free dot can sit (clear of the
+  // rounded corners).
+  const freeRange = {
+    top: [r.x + FLOW_PORT_R, r.x + w - FLOW_PORT_R],
+    bottom: [r.x + FLOW_PORT_R, r.x + w - FLOW_PORT_R],
+    left: [r.y + FLOW_PORT_R, r.y + h - FLOW_PORT_R],
+    right: [r.y + FLOW_PORT_R, r.y + h - FLOW_PORT_R],
+  };
+  // The face a port's seat sits on: a connected port faces whichever side of the
+  // node its source lies on (the side "corresponding to where its connection
+  // is"); a row-bound port — aligned beside the label it drives, like a unison's
+  // env ports — only moves between the left and the right side.
+  const face = (kind, src, defaultEdge) => {
+    if (kind === 'bound') return src ? (src.x > node.x ? 'right' : 'left') : 'left';
+    if (!src) return defaultEdge;
+    const dx = src.x - node.x, dy = src.y - node.y;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left';
+    return dy >= 0 ? 'bottom' : 'top';
+  };
+  const byEdge = { top: [], bottom: [], left: [], right: [] };
+  const seat = (slot, req, kind, defaultEdge, offset, rowY) => {
     const filled = !!connSlotGet(node, slot);
     const src = filled ? flowNodeById(connSlotGet(node, slot)) : null;
-    out.push({
-      slot, cx: px, cy: py, edge, req: !!req, nx: nx || 0, ny: ny || 0,
-      emoji: flowPortEmoji(slot),
-      label: flowPortLabel(slot),
-      color: src ? flowSourceColor(src) : (FLOW_ROLE_COLORS[slot.key] || '#bdbdbd'),
+    const edge = face(kind, src, defaultEdge);
+    byEdge[edge].push({
+      i: byEdge[edge].length, slot, req, src, kind, offset, rowY,
+      edge, fixed: kind === 'bound',
+      ideal: kind === 'bound' ? rowY : (edge === 'top' || edge === 'bottom' ? cx + offset : cy + offset),
     });
   };
   if (node.type === 'note') {
-    // Vol-env port (top by default; flips to the bottom when the env node sits
-    // below the note).
-    const volId = connSlotGet(node, { key: 'volumeEnv' });
-    const volSrc = volId ? flowNodeById(volId) : null;
-    const volEdge = flowPortEdge('top', volSrc, node);
-    const volY = volEdge === 'bottom' ? cy + h / 2 + 6 : cy - h / 2 - 6;
-    add({ key: 'volumeEnv' }, cx, volY, volEdge, true);
-    // Pitch-env port: top edge, offset left of the Vol port (flips to the
-    // bottom edge, same x, when the env node sits below the note).
-    const pitchId = connSlotGet(node, { key: 'pitchEnv' });
-    const pitchSrc = pitchId ? flowNodeById(pitchId) : null;
-    const pitchEdge = flowPortEdge('top', pitchSrc, node);
-    const pitchY = pitchEdge === 'bottom' ? cy + h / 2 + 6 : cy - h / 2 - 6;
-    add({ key: 'pitchEnv' }, cx - 34, pitchY, pitchEdge);
-    for (let i = 0; i < 3; i++) {
-      const y = cy + (i - 1) * 27;
-      // Layer port (right by default; flips to the left when the layer node
-      // sits to the note's left). The y stays fixed so the row keeps its
-      // identity.
-      const layerId = connSlotGet(node, { key: 'layers', idx: i });
-      const lsrc = layerId ? flowNodeById(layerId) : null;
-      const layerEdge = flowPortEdge('right', lsrc, node);
-      const lx = layerEdge === 'left' ? cx - w / 2 - 6 : cx + w / 2 + 6;
-      add({ key: 'layers', idx: i }, lx, y, layerEdge);
-    }
+    seat({ key: 'volumeEnv' }, true, 'free', 'top', 0);
+    seat({ key: 'pitchEnv' }, false, 'free', 'top', -34);
+    for (let i = 0; i < 3; i++) seat({ key: 'layers', idx: i }, false, 'free', 'right', (i - 1) * 27);
   } else if (node.type === 'layer') {
-    // Wave port (right by default; flips to the left when the wave node sits
-    // to the layer's left).
-    const waveId = connSlotGet(node, { key: 'wave' });
-    const wsrc = waveId ? flowNodeById(waveId) : null;
-    const waveEdge = flowPortEdge('right', wsrc, node);
-    const wx = waveEdge === 'left' ? cx - w / 2 - 6 : cx + w / 2 + 6;
-    add({ key: 'wave' }, wx, cy, waveEdge, true);
-    // Mix + pitch env ports on the left edge, aligned beside the fader row
-    // each drives (Mix / Pitch). A connected port flips to the right edge when
-    // its env node sits to the right — the y stays aligned either way.
-    const envDefs = [
-      ['mixEnv', r.y + 30],
-      ['pitchEnv', r.y + 58],
-    ];
-    for (const [key, py] of envDefs) {
-      const sid = connSlotGet(node, { key });
-      const ssrc = sid ? flowNodeById(sid) : null;
-      const edge = flowPortEdge('left', ssrc, node);
-      const x = edge === 'right' ? cx + w / 2 + 6 : cx - w / 2 - 6;
-      add({ key }, x, py, edge);
-    }
+    seat({ key: 'wave' }, true, 'free', 'right', 0);
+    seat({ key: 'mixEnv' }, false, 'bound', 'left', 0, r.y + 30);
+    seat({ key: 'pitchEnv' }, false, 'bound', 'left', 0, r.y + 58);
   } else if (node.type === 'wave') {
-    // One bottom port per connected unison, plus a trailing empty port for the
-    // next connection (capped at MAX_LAYER_VOICES stacked voices). A connected
-    // port flips to the top when its unison sits above the wave.
+    // One port per connected unison plus a trailing empty port for the next
+    // connection (capped at MAX_LAYER_VOICES stacked voices).
     const unis = flowNodeConn(node).unison;
     const unisArr = Array.isArray(unis) ? unis : [];
     const n = Math.min(unisArr.length, MAX_LAYER_VOICES);
     const total = n < MAX_LAYER_VOICES ? n + 1 : n;
-    for (let i = 0; i < total; i++) {
-      const px = cx + (i - (total - 1) / 2) * 27;
-      const uid = connSlotGet(node, { key: 'unison', idx: i });
-      const usrc = uid ? flowNodeById(uid) : null;
-      const edge = flowPortEdge('bottom', usrc, node);
-      const y = edge === 'top' ? cy - h / 2 - 6 : cy + h / 2 + 6;
-      add({ key: 'unison', idx: i }, px, y, edge);
-    }
+    for (let i = 0; i < total; i++) seat({ key: 'unison', idx: i }, false, 'free', 'bottom', (i - (total - 1) / 2) * 27);
   } else if (node.type === 'unison') {
-    // One left-edge port per animation envelope, aligned beside the fader row
-    // it drives (Semitones / Cents / Volume). A connected port flips to the
-    // right edge when its env node sits to the right — the y stays aligned to
-    // the fader it drives either way.
-    const envDefs = [
-      ['stEnv', r.y + 30],
-      ['ctEnv', r.y + 58],
-      ['volEnv', r.y + 86],
-    ];
-    for (const [key, py] of envDefs) {
-      const sid = connSlotGet(node, { key });
-      const ssrc = sid ? flowNodeById(sid) : null;
-      const edge = flowPortEdge('left', ssrc, node);
-      const x = edge === 'right' ? cx + w / 2 + 6 : cx - w / 2 - 6;
-      add({ key }, x, py, edge);
+    seat({ key: 'stEnv' }, false, 'bound', 'left', 0, r.y + 30);
+    seat({ key: 'ctEnv' }, false, 'bound', 'left', 0, r.y + 58);
+    seat({ key: 'volEnv' }, false, 'bound', 'left', 0, r.y + 86);
+  }
+  const minSep = FLOW_PORT_R * 2 + 2;
+  // Relieve crowded vertical edges: a vertical edge that also carries row-bound
+  // ports (a layer's mix/pitch env rows) may have no room left for a free port
+  // beside them. When even the roomiest gap is too small, the free port moves to
+  // the horizontal edge nearest its source instead (top when the source sits
+  // above the node, else bottom), so ports never overlap.
+  for (const edge of ['left', 'right']) {
+    const items = byEdge[edge];
+    if (!items.length) continue;
+    if (!items.some(it => it.fixed) || !items.some(it => !it.fixed)) continue;
+    const [a, b] = freeRange[edge];
+    const fixed = items.filter(it => it.fixed).map(it => Math.max(a, Math.min(b, it.ideal))).sort((p, q) => p - q);
+    const bounds = [a, ...fixed, b];
+    let maxGap = 0;
+    for (let g = 0; g < bounds.length - 1; g++) maxGap = Math.max(maxGap, bounds[g + 1] - bounds[g]);
+    if (maxGap >= minSep) continue;
+    for (const it of items.slice()) {
+      if (it.fixed) continue;
+      const newEdge = (it.src && it.src.y < node.y) ? 'top' : 'bottom';
+      byEdge[edge] = byEdge[edge].filter(x => x !== it);
+      it.edge = newEdge;
+      it.ideal = cx + it.offset;
+      byEdge[newEdge].push(it);
     }
   }
+  const out = [];
+  for (const edge of ['top', 'bottom', 'left', 'right']) {
+    const items = byEdge[edge];
+    if (!items.length) continue;
+    const isHoriz = edge === 'top' || edge === 'bottom';
+    const [a, b] = freeRange[edge];
+    const pos = flowEdgePlace(items.map((it, i) => ({ i, ideal: it.ideal, fixed: it.fixed })), a, b, minSep);
+    items.forEach((it, i) => {
+      const cx2 = isHoriz ? pos[i] : edgeX[edge];
+      const cy2 = isHoriz ? edgeY[edge] : pos[i];
+      out.push({
+        slot: it.slot, cx: cx2, cy: cy2, edge, req: !!it.req, nx: 0, ny: 0,
+        emoji: flowPortEmoji(it.slot),
+        label: flowPortLabel(it.slot),
+        color: it.src ? flowSourceColor(it.src) : (FLOW_ROLE_COLORS[it.slot.key] || '#bdbdbd'),
+      });
+    });
+  }
   return out;
-}
-// A port flips to the opposite edge when its connected source sits on that
-// side, so the wire runs straight out instead of across the node's own card.
-// The port keeps its cross-edge coordinate (y for a left/right flip, x for a
-// top/bottom flip), so the row stays aligned to the value it drives (e.g. a
-// unison's env ports stay beside the fader they animate). No source → default.
-function flowPortEdge(edge, srcNode, node) {
-  if (!srcNode || !node) return edge;
-  if (edge === 'left' && srcNode.x > node.x) return 'right';
-  if (edge === 'right' && srcNode.x < node.x) return 'left';
-  if (edge === 'top' && srcNode.y > node.y) return 'bottom';
-  if (edge === 'bottom' && srcNode.y < node.y) return 'top';
-  return edge;
 }
 // The port dot for a particular slot (wire endpoint / armed-slot match).
 function flowPortAnchor(node, slot) {
@@ -1791,13 +1913,25 @@ function drawFlowPorts() {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(filled ? (src ? FLOW_NODE_TYPES[src.type].emoji : pt.emoji) : pt.emoji, pt.cx, pt.cy + 1);
-      // Label on the outward side of the dot.
+      // Label on the outward side of the dot (clear of the ring, so it never
+      // covers the card or the neighbouring nodes' rings).
       ctx.fillStyle = 'rgba(255,255,255,0.7)';
       ctx.font = '800 9px sans-serif';
+      ctx.textBaseline = 'middle';
       if (pt.edge === 'wire') {
         ctx.fillText(pt.label, pt.cx + pt.nx * (FLOW_PORT_R + 5), pt.cy + pt.ny * (FLOW_PORT_R + 5));
+      } else if (pt.edge === 'top') {
+        ctx.textAlign = 'center';
+        ctx.fillText(pt.label, pt.cx, pt.cy - FLOW_PORT_R - 4);
+      } else if (pt.edge === 'bottom') {
+        ctx.textAlign = 'center';
+        ctx.fillText(pt.label, pt.cx, pt.cy + FLOW_PORT_R + 4);
+      } else if (pt.edge === 'left') {
+        ctx.textAlign = 'right';
+        ctx.fillText(pt.label, pt.cx - FLOW_PORT_R - 4, pt.cy);
       } else {
-        ctx.fillText(pt.label, pt.cx, pt.edge === 'top' ? pt.cy - FLOW_PORT_R - 5 : pt.cy + FLOW_PORT_R + 6);
+        ctx.textAlign = 'left';
+        ctx.fillText(pt.label, pt.cx + FLOW_PORT_R + 4, pt.cy);
       }
       ctx.textBaseline = 'alphabetic';
     }
@@ -1808,9 +1942,10 @@ function drawFlowPorts() {
    Consumer-owned slots are drawn as beziers from the source node's border to the
    consumer's port, colored by the SOURCE node's type (the "from" node owns the
    color). Wires are filled tapered ribbons — thick at the source, thin at the
-   consumer port — so the "from" end reads clearly. Drawn under the node circles.
-   A selected wire (flowSelConn) is drawn thick and glowing; wires of the selected
-   consumer node are also brightened. */
+   consumer port — so the "from" end reads clearly. Drawn over the node cards, so
+   a connection stays visible where it plugs into a node's border ring (the ports
+   render on top). A selected wire (flowSelConn) is drawn thick and glowing; wires
+   of the selected consumer node are also brightened. */
 function flowWireEntries() {
   const out = [];
   for (const n of flowNodes) {
@@ -2120,25 +2255,24 @@ function drawMiniPlotFrame(pl) {
 }
 function drawFlowWidget(n) {
   // Idle cards render at FLOW_CARD_SCALE of their full size (a mild "zoom
-  // out"). The card's content is drawn at its full rect under a scale about its
-  // centre, so fonts, mini plots, faders and play buttons all shrink together.
+  // out"). A ring — the port band, as thick as a port circle — runs all the way
+  // around the card's outside; the ports live in that ring, so they never cover
+  // the card's labels. The card's content is drawn at its full rect under a
+  // scale about its centre, so fonts, mini plots, faders and play buttons all
+  // shrink together.
   const p = flowNodeScreen(n);
   const s = flowWidgetSize(n);
-  const r = { x: p.x - s.w / 2, y: p.y - s.h / 2, w: s.w, h: s.h };
-  ctx.save();
-  ctx.translate(p.x, p.y);
-  ctx.scale(FLOW_CARD_SCALE, FLOW_CARD_SCALE);
-  ctx.translate(-p.x, -p.y);
-  drawFlowWidgetBody(n, r);
-  ctx.restore();
-}
-function drawFlowWidgetBody(n, r) {
+  const cw = s.w * FLOW_CARD_SCALE, ch = s.h * FLOW_CARD_SCALE;
+  const c = { x: p.x - cw / 2, y: p.y - ch / 2, w: cw, h: ch };
+  const o = { x: c.x - FLOW_PORT_BAND, y: c.y - FLOW_PORT_BAND, w: c.w + 2 * FLOW_PORT_BAND, h: c.h + 2 * FLOW_PORT_BAND };
   const sel = n.id === flowSelId;
   const move = n.id === flowMoveId;
-  drawRoundRect(r.x, r.y, r.w, r.h, 12);
-  ctx.fillStyle = 'rgba(20,20,24,0.92)';
+  const cr = Math.round(12 * FLOW_CARD_SCALE) + FLOW_PORT_BAND;   // outer corner radius: the band runs uniformly around the card
+  // The port band itself — the "border area" around the node.
+  drawRoundRect(o.x, o.y, o.w, o.h, cr);
+  ctx.fillStyle = sel ? 'rgba(64,70,86,0.96)' : (n.type === 'note' ? withAlpha(flowNoteColor(n), 0.26) : 'rgba(44,50,62,0.94)');
   ctx.fill();
-  ctx.strokeStyle = sel ? '#ffffff' : 'rgba(255,255,255,0.4)';
+  ctx.strokeStyle = sel ? '#ffffff' : (n.type === 'note' ? withAlpha(flowNoteColor(n), 0.55) : 'rgba(255,255,255,0.32)');
   ctx.lineWidth = sel ? 2.5 : 1.2;
   ctx.stroke();
   if (move) {
@@ -2146,17 +2280,82 @@ function drawFlowWidgetBody(n, r) {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2.5;
     ctx.setLineDash([6, 6]);
-    drawRoundRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6, 14);
+    drawRoundRect(o.x - 3, o.y - 3, o.w + 6, o.h + 6, cr + 4);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
   }
-  // Header: type emoji + label.
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '800 13px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(FLOW_NODE_TYPES[n.type].emoji + '  ' + FLOW_NODE_TYPES[n.type].label, r.x + 10, r.y + 20);
+  const r = { x: p.x - s.w / 2, y: p.y - s.h / 2, w: s.w, h: s.h };
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(FLOW_CARD_SCALE, FLOW_CARD_SCALE);
+  ctx.translate(-p.x, -p.y);
+  drawFlowWidgetBody(n, r);
+  ctx.restore();
+  // Delete countdown overlay covers the whole node (ring included).
+  if (flowHold && flowHold.id === n.id && flowHold.stage === 2) {
+    const remain = FLOW_DELETE_MS - (performance.now() - flowHold.del0);
+    const num = Math.max(1, Math.ceil(remain / 1000));
+    drawRoundRect(o.x, o.y, o.w, o.h, cr);
+    ctx.fillStyle = 'rgba(130,20,20,0.88)';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 34px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), o.x + o.w / 2, o.y + o.h / 2 - 8);
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('hold to delete · release to cancel', o.x + o.w / 2, o.y + o.h / 2 + 22);
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.globalAlpha = 1;
+}
+function drawFlowWidgetBody(n, r) {
+  const sel = n.id === flowSelId;
+  drawRoundRect(r.x, r.y, r.w, r.h, 12);
+  ctx.fillStyle = 'rgba(20,20,24,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = sel ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  // Header: the node's emoji + identity. A note card is tinted with its own
+  // color and shows its name (falling back to the "Note" type label), so each
+  // note reads as a distinct instrument; every other type keeps the plain
+  // type label.
+  if (n.type === 'note') {
+    const col = flowNoteColor(n);
+    ctx.fillStyle = withAlpha(col, 0.15);
+    drawRoundRect(r.x, r.y, r.w, r.h, 12);
+    ctx.fill();
+    ctx.fillStyle = col;
+    drawRoundRect(r.x + 6, r.y + 6, r.w - 12, 4, 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(r.x + 19, r.y + 19, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🎵', r.x + 19, r.y + 20);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(flowTruncate(flowNoteName(n) || FLOW_NODE_TYPES[n.type].label, r.w - 62), r.x + 36, r.y + 22);
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(FLOW_NODE_TYPES[n.type].emoji + '  ' + FLOW_NODE_TYPES[n.type].label, r.x + 10, r.y + 20);
+  }
   // Per-type read-only content.
   if (n.type === 'note') drawFlowWidgetNote(n, r);
   else if (n.type === 'volumeEnv') drawFlowWidgetEnv(n, r);
@@ -2180,25 +2379,6 @@ function drawFlowWidgetBody(n, r) {
     ctx.fillText('!', r.x + r.w - 14, r.y + 14 + 1);
     ctx.textBaseline = 'alphabetic';
   }
-  // Delete countdown overlay while a longer hold is deleting this node.
-  if (flowHold && flowHold.id === n.id && flowHold.stage === 2) {
-    const remain = FLOW_DELETE_MS - (performance.now() - flowHold.del0);
-    const num = Math.max(1, Math.ceil(remain / 1000));
-    drawRoundRect(r.x, r.y, r.w, r.h, 12);
-    ctx.fillStyle = 'rgba(130,20,20,0.88)';
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '800 34px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(num), r.x + r.w / 2, r.y + r.h / 2 - 8);
-    ctx.font = '700 11px sans-serif';
-    ctx.fillText('hold to delete · release to cancel', r.x + r.w / 2, r.y + r.h / 2 + 22);
-    ctx.textBaseline = 'alphabetic';
-  }
   ctx.globalAlpha = 1;
 }
 // Draw one of a note's three play buttons (tap / full / live). `ready` dims a
@@ -2208,13 +2388,13 @@ function drawFlowWidgetBody(n, r) {
 // `ready` dims a button whose note has no volume + wave yet; `active` highlights
 // a button that is engaged (a held live note, or the repeat toggle on); `stop`
 // turns the button red with a stop label (the looping button while a repeat runs).
-function drawFlowNotePlayButton(b, label, ready, active, font, stop) {
+function drawFlowNotePlayButton(b, label, ready, active, font, stop, accent) {
   drawRoundRect(b.x, b.y, b.w, b.h, 8);
   if (stop) ctx.fillStyle = '#8a2b2b';
   else if (active) ctx.fillStyle = '#0e5a34';
-  else ctx.fillStyle = ready ? '#1b8a4a' : '#2b2b2b';
+  else ctx.fillStyle = ready ? (accent || '#1b8a4a') : '#2b2b2b';
   ctx.fill();
-  ctx.strokeStyle = (stop || active) ? '#ffffff' : (ready ? '#1b8a4a' : 'rgba(255,255,255,0.3)');
+  ctx.strokeStyle = (stop || active) ? '#ffffff' : (ready ? (accent || '#1b8a4a') : 'rgba(255,255,255,0.3)');
   ctx.lineWidth = (stop || active) ? 2 : 1.5;
   ctx.stroke();
   ctx.fillStyle = ready ? '#ffffff' : 'rgba(255,255,255,0.4)';
@@ -2226,14 +2406,15 @@ function drawFlowNotePlayButton(b, label, ready, active, font, stop) {
 }
 function drawFlowWidgetNote(n, r) {
   const ready = flowNoteReady(n);
+  const accent = flowNoteColor(n);
   // Four play buttons (always live — tapping them plays, never edits).
   const btns = flowNoteWidgetButtons(r);
   const looping = flowLoopingMode();
   const liveOn = !!(flowLive && flowLive.nodeId === n.id);
-  drawFlowNotePlayButton(btns.tap, looping === 'tap' ? '■' : 'Tap', ready, looping === 'tap', '800 9px sans-serif');
-  drawFlowNotePlayButton(btns.full, looping === 'full' ? '■' : 'Full', ready, looping === 'full', '800 9px sans-serif');
-  drawFlowNotePlayButton(btns.live, 'Live', ready, liveOn, '800 9px sans-serif');
-  drawFlowNotePlayButton(btns.repeat, '⟳', ready, flowRepeat, '800 11px sans-serif');
+  drawFlowNotePlayButton(btns.tap, looping === 'tap' ? '■' : 'Tap', ready, looping === 'tap', '800 9px sans-serif', false, accent);
+  drawFlowNotePlayButton(btns.full, looping === 'full' ? '■' : 'Full', ready, looping === 'full', '800 9px sans-serif', false, accent);
+  drawFlowNotePlayButton(btns.live, 'Live', ready, liveOn, '800 9px sans-serif', false, accent);
+  drawFlowNotePlayButton(btns.repeat, '⟳', ready, flowRepeat, '800 11px sans-serif', false, accent);
   // Note-life readout: the slider is shown but read-only until edit mode.
   const env = flowNoteLifeEnv(n);
   const ms = env ? flowNoteLifeMs(n) : 0;
@@ -2241,9 +2422,9 @@ function drawFlowWidgetNote(n, r) {
   ctx.font = '800 10px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Note life', r.x + 12, r.y + 76);
+  ctx.fillText('Note life', r.x + 12, r.y + 82);
   ctx.textAlign = 'right';
-  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', r.x + r.w - 10, r.y + 76);
+  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', r.x + r.w - 10, r.y + 82);
   ctx.textBaseline = 'alphabetic';
   const s = flowNoteWidgetLife(r);
   ctx.globalAlpha = env ? 1 : 0.4;
@@ -2256,7 +2437,7 @@ function drawFlowWidgetNote(n, r) {
   if (env) {
     const frac = clamp01((ms - FLOW_NOTE_LIFE_MIN) / (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN));
     const tx = s.x + frac * (s.x2 - s.x);
-    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.strokeStyle = accent;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y); ctx.lineTo(tx, s.y);
     ctx.stroke();
@@ -2278,9 +2459,9 @@ function drawFlowWidgetNote(n, r) {
   ctx.font = '800 10px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Pitch scale', r.x + 12, r.y + 104);
+  ctx.fillText('Pitch scale', r.x + 12, r.y + 110);
   ctx.textAlign = 'right';
-  ctx.fillText(hasPitch ? '±' + st + ' st' : '—', r.x + r.w - 10, r.y + 104);
+  ctx.fillText(hasPitch ? '±' + st + ' st' : '—', r.x + r.w - 10, r.y + 110);
   ctx.textBaseline = 'alphabetic';
   const ps = flowNoteWidgetPitch(r);
   ctx.globalAlpha = hasPitch ? 1 : 0.4;
@@ -2293,7 +2474,7 @@ function drawFlowWidgetNote(n, r) {
   if (hasPitch) {
     const frac = clamp01((st - FLOW_PITCH_SCALE_MIN) / (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
     const tx = ps.x + frac * (ps.x2 - ps.x);
-    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.strokeStyle = accent;
     ctx.beginPath();
     ctx.moveTo(ps.x, ps.y); ctx.lineTo(tx, ps.y);
     ctx.stroke();
@@ -2505,6 +2686,7 @@ function drawFlowWidgetScale(label, val, max, fmt, y, r, accent) {
    Mix, a connected pitch env replaces the Pitch row with its env-scale slider).
    The required Wave, and the optional mix/pitch envs, arrive as wires. */
 var flowLayerDrag = null;    // { nodeId, key } active layer-fader drag, or null
+var flowLayerArm = null;     // { nodeId, key } a press on a layer fader row, waiting to become a drag or a long-press move, or null
 var flowLayerDirty = false;  // any edit happened this drag session (coalesces undo)
 function flowLayerParamLocked(node, key) {
   return !!(node && connSlotGet(node, { key: key + 'Env' }));
@@ -2928,19 +3110,40 @@ function flowLayerHandleUp() {
 var flowNoteEdit = null;    // id of the note node being edited, or null
 var flowNoteDirty = false;  // any edit happened this session (coalesces undo)
 function flowNoteEditorButtons(p) {
-  const w = p.w - 32, h = 30, x = p.x + 16;
+  const x = p.x + 16, h = 34, gw = (p.w - 32 - 8) / 2;
   return {
-    tap:    { x, y: p.y + 44, w, h },
-    full:   { x, y: p.y + 78, w, h },
-    live:   { x, y: p.y + 112, w, h },
-    repeat: { x, y: p.y + 146, w, h },
+    tap:    { x, y: p.y + 128, w: gw, h },
+    full:   { x: x + gw + 8, y: p.y + 128, w: gw, h },
+    live:   { x, y: p.y + 166, w: gw, h },
+    repeat: { x: x + gw + 8, y: p.y + 166, w: gw, h },
   };
 }
+// The note editor's name row: a display-only strip. Tapping it does nothing —
+// only the small pencil button (flowNoteEditorPencil) opens the rename input,
+// so swatch taps never get hijacked by the name field.
+function flowNoteEditorName(p) {
+  return { x: p.x + 16, y: p.y + 50, w: p.w - 32, h: 30 };
+}
+// The pencil button in front of the name row — the sole way to rename a note.
+function flowNoteEditorPencil(p) {
+  const r = flowNoteEditorName(p);
+  return { x: r.x + 18, y: r.y + r.h / 2, r: 11 };
+}
+// The note editor's color swatches (a row of palette dots below the name).
+function flowNoteEditorSwatches(p) {
+  const count = FLOW_NOTE_COLORS.length;
+  const gap = 8;
+  const avail = p.w - 32;
+  const r = Math.max(8, Math.min(12, (avail - (count - 1) * gap) / (count * 2)));
+  const totalW = count * r * 2 + (count - 1) * gap;
+  const x0 = p.x + (p.w - totalW) / 2;
+  return FLOW_NOTE_COLORS.map((c, i) => ({ c, i, cx: x0 + i * (r * 2 + gap) + r, cy: p.y + 104, r }));
+}
 function flowNoteEditorLife(p) {
-  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 190 };
+  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + p.h - 74 };
 }
 function flowNoteEditorPitch(p) {
-  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + 224 };
+  return { x: p.x + 108, x2: p.x + p.w - 20, y: p.y + p.h - 44 };
 }
 function openFlowNoteEditor(id) {
   const n = flowNodeById(id);
@@ -2954,14 +3157,102 @@ function openFlowNoteEditor(id) {
 }
 function closeFlowNoteEditor() {
   if (!flowNoteEdit) return;
+  flowNoteNameCommit();   // commit any pending name edit before closing (no-op when none)
   flowNoteEdit = null;
   flowNoteDirty = false;
   saveFlow();
+}
+// ---- In-place name editing ----
+// Naming is a real text entry, so the flow editor opens a small DOM <input>
+// over the name field (the canvas draws everything else). It commits on Enter
+// or blur, and Escape discards the change — either way it is one undoable edit.
+var flowNameInput = null;        // the DOM <input> for a note's name, or null
+var flowNameInputNodeId = null;  // id of the note being named while it is open
+var flowNameInputCancel = false; // Escape pressed → discard instead of committing
+// While the name input is open, a mouse press on the canvas (or page backdrop)
+// makes the browser move focus to the element under the cursor by default —
+// which instantly blurs the input and commits+closes it before anything can be
+// typed. Block that default focus move for presses that land outside the input;
+// presses on the input itself still behave normally (caret, selection, focus).
+document.addEventListener('mousedown', e => {
+  if (flowNameInput && flowNameInput.style.display !== 'none' && e.target !== flowNameInput) e.preventDefault();
+}, true);
+function flowNameInputHide() {
+  if (flowNameInput) {
+    flowNameInput.style.display = 'none';
+    flowNameInputNodeId = null;
+    flowNameInputCancel = false;
+  }
+}
+// Re-glue the visible rename <input> to the current name row (canvas-space rect
+// + safe-area offset). Only writes when the target actually moved, so it costs
+// nothing on a static frame. Called once per frame while the input is showing.
+function flowNameInputTrack() {
+  const inp = flowNameInput;
+  if (!inp || inp.style.display === 'none') return;
+  const r = flowNoteEditorName(flowNotePanel());
+  const x = Math.round(r.x + SAFE.left), y = Math.round(r.y + SAFE.top);
+  if (Math.round(parseFloat(inp.style.left)) !== x || Math.round(parseFloat(inp.style.top)) !== y) {
+    inp.style.left = x + 'px';
+    inp.style.top = y + 'px';
+  }
+}
+function flowNoteBeginNameEdit() {
+  const n = flowNodeById(flowNoteEdit);
+  if (!n) return;
+  const r = flowNoteEditorName(flowNotePanel());
+  if (!flowNameInput) {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.maxLength = FLOW_NOTE_NAME_MAX;
+    inp.autocomplete = 'off';
+    inp.autocapitalize = 'sentences';
+    inp.spellcheck = false;
+    inp.style.cssText = 'position:fixed;z-index:80;box-sizing:border-box;'
+      + 'border:2px solid ' + FLOW_WAVE_ACCENT + ';border-radius:8px;'
+      + 'background:#101114;color:#ffffff;font:800 16px sans-serif;'
+      + 'padding:0 12px;outline:none;cursor:text;';
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); flowNameInput.blur(); }
+      else if (e.key === 'Escape') { flowNameInputCancel = true; flowNameInput.blur(); }
+    });
+    inp.addEventListener('blur', flowNoteNameCommit);
+    flowNameInput = inp;
+    document.body.appendChild(inp);
+  }
+  const inp = flowNameInput;
+  flowNameInputNodeId = n.id;
+  flowNameInputCancel = false;
+  inp.value = n.name || '';
+  inp.style.left = (r.x + SAFE.left) + 'px';   // stage coords → viewport px
+  inp.style.top = (r.y + SAFE.top) + 'px';
+  inp.style.width = r.w + 'px';
+  inp.style.height = r.h + 'px';
+  inp.style.display = 'block';
+  inp.focus();
+  inp.select();
+}
+function flowNoteNameCommit() {
+  const inp = flowNameInput;
+  const id = flowNameInputNodeId;
+  if (!inp || id == null) return;
+  const n = flowNodeById(id);
+  if (n && n.type === 'note' && !flowNameInputCancel) {
+    const val = (inp.value || '').slice(0, FLOW_NOTE_NAME_MAX).trim();
+    if (val !== (n.name || '')) {
+      flowPushHistory();
+      n.name = val;
+      saveFlow();
+    }
+  }
+  flowNameInputHide();
 }
 function drawFlowNoteEditor() {
   const p = flowNotePanel();
   const n = flowNodeById(flowNoteEdit);
   if (!n) return;
+  const nm = flowNoteName(n);
+  const accent = flowNoteColor(n);
   drawRoundRect(p.x, p.y, p.w, p.h, 14);
   ctx.fillStyle = 'rgba(14,14,16,0.74)';
   ctx.fill();
@@ -2972,31 +3263,91 @@ function drawFlowNoteEditor() {
   ctx.font = '800 16px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('🎵  Note', p.x + 16, p.y + 30);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = '700 11px sans-serif';
-  ctx.fillText('Aggregates volume + up to 3 layers', p.x + 96, p.y + 30);
+  ctx.fillText('🎵  ' + (nm || 'Note'), p.x + 16, p.y + 30);
+  if (!nm) {
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('Aggregates volume + up to 3 layers', p.x + 96, p.y + 30);
+  }
+  // Identity rows: the note's name (read-only here — tap the ✎ pencil to
+  // rename it) and its color swatches. Each note is a distinct "instrument" the
+  // song editor will pick between, so it gets a name plus a recognizable color.
+  const nameR = flowNoteEditorName(p);
+  drawRoundRect(nameR.x, nameR.y, nameR.w, nameR.h, 8);
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // The ✎ edit button: the only way to open the rename input (tapping the name
+  // row itself does nothing, so swatch taps can't be swallowed by it).
+  const pencil = flowNoteEditorPencil(p);
+  ctx.beginPath();
+  ctx.arc(pencil.x, pencil.y, pencil.r, 0, Math.PI * 2);
+  ctx.fillStyle = accent;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('✎', pencil.x, pencil.y + 1);
+  ctx.textBaseline = 'alphabetic';
+  // The note's color dot, then the name text.
+  ctx.beginPath();
+  ctx.arc(nameR.x + 40, nameR.y + nameR.h / 2, 5, 0, Math.PI * 2);
+  ctx.fillStyle = accent;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = nm ? '#ffffff' : 'rgba(255,255,255,0.45)';
+  ctx.font = '800 13px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(nm || 'Tap ✎ to name', nameR.x + 54, nameR.y + nameR.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
+  for (const sw of flowNoteEditorSwatches(p)) {
+    const on = sw.i === flowNoteColorIndex(n);
+    ctx.beginPath();
+    ctx.arc(sw.cx, sw.cy, sw.r, 0, Math.PI * 2);
+    ctx.fillStyle = sw.c;
+    ctx.fill();
+    ctx.strokeStyle = on ? '#ffffff' : 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = on ? 2.5 : 1;
+    ctx.stroke();
+    if (on) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✓', sw.cx, sw.cy + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
   // Four play buttons: tap, full length, live (hold), repeat (tap/full loop).
   const ready = flowNoteReady(n);
   const btns = flowNoteEditorButtons(p);
   const looping = flowLoopingMode();
   const liveOn = !!(flowLive && flowLive.nodeId === n.id);
-  drawFlowNotePlayButton(btns.tap, looping === 'tap' ? '■ Stop' : '▶ Play (tap)', ready, looping === 'tap', '800 13px sans-serif', looping === 'tap');
-  drawFlowNotePlayButton(btns.full, looping === 'full' ? '■ Stop' : '▶ Play (full length)', ready, looping === 'full', '800 13px sans-serif', looping === 'full');
-  drawFlowNotePlayButton(btns.live, '▶ Play (live — press & hold)', ready, liveOn, '800 13px sans-serif');
-  drawFlowNotePlayButton(btns.repeat, flowRepeat ? '⟳ Repeat: ON' : '⟳ Repeat: OFF', ready, flowRepeat, '800 13px sans-serif');
+  drawFlowNotePlayButton(btns.tap, looping === 'tap' ? '■ Stop' : 'Play (tap)', ready, looping === 'tap', '800 12px sans-serif', looping === 'tap', accent);
+  drawFlowNotePlayButton(btns.full, looping === 'full' ? '■ Stop' : 'Play (full)', ready, looping === 'full', '800 12px sans-serif', looping === 'full', accent);
+  drawFlowNotePlayButton(btns.live, 'Play (live · hold)', ready, liveOn, '800 12px sans-serif', false, accent);
+  drawFlowNotePlayButton(btns.repeat, flowRepeat ? 'Repeat: ON' : 'Repeat: OFF', ready, flowRepeat, '800 12px sans-serif', false, accent);
   // Note-life slider (editable here).
   const env = flowNoteLifeEnv(n);
   const ms = env ? flowNoteLifeMs(n) : 0;
+  const s = flowNoteEditorLife(p);
   ctx.fillStyle = env ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
   ctx.font = '800 12px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Note life', p.x + 16, p.y + 190);
+  ctx.fillText('Note life', p.x + 16, s.y);
   ctx.textAlign = 'right';
-  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', p.x + p.w - 16, p.y + 190);
+  ctx.fillText(ms ? Math.round(ms) + ' ms' : '—', p.x + p.w - 16, s.y);
   ctx.textBaseline = 'alphabetic';
-  const s = flowNoteEditorLife(p);
   ctx.globalAlpha = env ? 1 : 0.4;
   ctx.lineCap = 'round';
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
@@ -3007,7 +3358,7 @@ function drawFlowNoteEditor() {
   if (env) {
     const frac = clamp01((ms - FLOW_NOTE_LIFE_MIN) / (FLOW_NOTE_LIFE_MAX - FLOW_NOTE_LIFE_MIN));
     const tx = s.x + frac * (s.x2 - s.x);
-    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.strokeStyle = accent;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y); ctx.lineTo(tx, s.y);
     ctx.stroke();
@@ -3026,15 +3377,15 @@ function drawFlowNoteEditor() {
   // without a pitch env of its own). Disabled while no pitch env is connected.
   const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
   const st = flowPitchScale(n);
+  const ps = flowNoteEditorPitch(p);
   ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
   ctx.font = '800 12px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Pitch scale', p.x + 16, p.y + 224);
+  ctx.fillText('Pitch scale', p.x + 16, ps.y);
   ctx.textAlign = 'right';
-  ctx.fillText(hasPitch ? '±' + st + ' st' : '—', p.x + p.w - 16, p.y + 224);
+  ctx.fillText(hasPitch ? '±' + st + ' st' : '—', p.x + p.w - 16, ps.y);
   ctx.textBaseline = 'alphabetic';
-  const ps = flowNoteEditorPitch(p);
   ctx.globalAlpha = hasPitch ? 1 : 0.4;
   ctx.lineCap = 'round';
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
@@ -3045,7 +3396,7 @@ function drawFlowNoteEditor() {
   if (hasPitch) {
     const frac = clamp01((st - FLOW_PITCH_SCALE_MIN) / (FLOW_PITCH_SCALE_MAX - FLOW_PITCH_SCALE_MIN));
     const tx = ps.x + frac * (ps.x2 - ps.x);
-    ctx.strokeStyle = FLOW_WAVE_ACCENT;
+    ctx.strokeStyle = accent;
     ctx.beginPath();
     ctx.moveTo(ps.x, ps.y); ctx.lineTo(tx, ps.y);
     ctx.stroke();
@@ -3070,6 +3421,21 @@ function flowNoteHandleDown(x, y) {
   const p = flowNotePanel();
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowNoteEditor(); return; }
   const n = flowNodeById(flowNoteEdit);
+  // Identity rows: only the ✎ pencil opens the rename input; the name row itself
+  // is inert and swatches recolor the note (each change is its own undoable edit).
+  if (n) {
+    const pencil = flowNoteEditorPencil(p);
+    if (Math.hypot(x - pencil.x, y - pencil.y) <= pencil.r + 6) { flowNoteBeginNameEdit(); return; }
+    for (const sw of flowNoteEditorSwatches(p)) {
+      if (Math.hypot(x - sw.cx, y - sw.cy) <= sw.r + 6) {
+        flowPushHistory();
+        flowNoteDirty = true;
+        n.color = sw.c;
+        saveFlow();
+        return;
+      }
+    }
+  }
   const btns = flowNoteEditorButtons(p);
   const hitBtn = btns.tap.x <= x && x <= btns.tap.x + btns.tap.w && y >= btns.tap.y && y <= btns.tap.y + btns.tap.h
     ? 'tap' : (btns.full.x <= x && x <= btns.full.x + btns.full.w && y >= btns.full.y && y <= btns.full.y + btns.full.h
@@ -3172,8 +3538,12 @@ function drawFlow(now) {
     }
   }
 
-  // ---- Wires (consumer slots → sources), drawn under the nodes ----
-  drawFlowWires();
+  // ---- Sound nodes: always-visible widget cards (the editing node's enlarged
+  // editor draws in its place, further down). ----
+  for (const n of flowNodes) {
+    if (n.id === flowActiveEditId()) continue;
+    drawFlowWidget(n);
+  }
 
   // ---- Connecting mode: highlight valid targets ----
   if (flowConnArm) {
@@ -3181,7 +3551,7 @@ function drawFlow(now) {
     if (consumer) {
       for (const n of flowNodes) {
         if (!flowConnCanAssign(consumer, flowConnArm.slot, n.id)) continue;
-        const r = flowWidgetRect(n, false);
+        const r = flowNodeOuterRect(n, false);
         ctx.globalAlpha = 0.5 + 0.5 * Math.sin(performance.now() / 250);
         ctx.strokeStyle = '#5cdb7a';
         ctx.lineWidth = 3;
@@ -3192,15 +3562,13 @@ function drawFlow(now) {
     }
   }
 
-  // ---- Sound nodes: always-visible widget cards (the editing node's enlarged
-  // editor draws in its place, further down). ----
-  for (const n of flowNodes) {
-    if (n.id === flowActiveEditId()) continue;
-    drawFlowWidget(n);
-  }
+  // ---- Wires (consumer slots → sources), drawn over the node cards so they
+  // stay visible where they meet a node's border ring (the connection "plugs
+  // into" the border instead of disappearing behind it). ----
+  drawFlowWires();
 
   // ---- Flared wire bases: the border bends into each connector (drawn over
-  // the cards, under the ports). ----
+  // the cards and the wires, under the ports). ----
   drawFlowWireBases();
 
   // ---- Add-node menu (around the anchored cell) ----
@@ -6222,6 +6590,11 @@ function flowPlayMode(mode, note) {
 /* ---- Pointer handling (active only in flow mode) ---- */
 canvas.addEventListener('pointerdown', e => {
   if (!flowActive) return;
+  // A press anywhere on the canvas while a note-name <input> is open commits
+  // the pending edit first — so typing a name and then tapping a swatch, a
+  // play button, a slider, undo/back, or outside the panel always keeps it
+  // (never silently discards it).
+  flowNoteNameCommit();
   const x = stageX(e), y = stageY(e);
   // Control buttons first (top-right ← → ↺ ↻, bottom-right back): they are drawn
   // on top of any open editor, so they must win the hit-test even in edit mode
@@ -6358,17 +6731,21 @@ canvas.addEventListener('pointerdown', e => {
       return;
     }
   }
-  // A layer widget's Mix / Pitch faders are directly draggable on the card:
-  // pressing a track starts a drag that updates the value live (an envelope
-  // driving that row locks it, so the press falls through to the grid).
+  // A layer widget's Mix / Pitch faders are directly draggable on the card: a
+  // quick drag (or a tap) adjusts the value live (an envelope driving that row
+  // locks it, so the press falls through to the grid). The press is still a
+  // normal node long-press though — hold still and the layer node enters move
+  // mode / the delete countdown just like any other node; only real finger
+  // movement (or a quick tap) touches the fader.
   if (wn && wn.type === 'layer') {
     const key = flowLayerWidgetRowAt(wn, x, y);
     if (key) {
       flowSelId = wn.id;
       flowAddMenu = null;
       flowConnArm = null;
-      flowLayerDirty = false;
-      flowLayerDragStart(wn, key, x);
+      flowLayerArm = { nodeId: wn.id, key };
+      flowHold = { id: wn.id, kind: 'move', t0: performance.now(), stage: 0 };
+      flowPtr = { kind: 'grid', x, y, startX: x, startY: y, lastT: e.timeStamp, vx: 0, vy: 0, moved: false };
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
       return;
     }
@@ -6404,6 +6781,17 @@ canvas.addEventListener('pointermove', e => {
   if (flowUnisonEdit) { flowUnisonHandleMove(x, y); return; }
   if (flowCurveEdit) { flowCurveHandleMove(x, y); return; }
   if (flowLayerEdit) { flowLayerHandleMove(x, y); return; }
+  if (flowLayerArm) {
+    // A press on a layer fader row: any real movement starts the fader drag (a
+    // still press is a long-press → move/delete mode instead).
+    if (flowPtr && Math.hypot(x - flowPtr.startX, y - flowPtr.startY) > FLOW_TAP_MAX) {
+      const n = flowNodeById(flowLayerArm.nodeId);
+      if (n) flowLayerDragStart(n, flowLayerArm.key, x);
+      flowLayerArm = null;
+      flowHold = null;
+    }
+    return;
+  }
   if (flowLayerDrag) { flowLayerDragMove(x); return; }
   if (flowLive) return;   // a held live button is a sustain, not a pan
   if (!flowPtr) return;
@@ -6438,6 +6826,21 @@ canvas.addEventListener('pointerup', e => {
   if (flowUnisonEdit) { flowUnisonHandleUp(); return; }
   if (flowCurveEdit) { flowCurveHandleUp(x, y); return; }
   if (flowLayerEdit) { flowLayerHandleUp(); return; }
+  if (flowLayerArm) {
+    // A quick tap on a fader row sets the value there; a long-press already
+    // moved on to move/delete mode (the arm was cleared when the hold fired).
+    const n = flowNodeById(flowLayerArm.nodeId);
+    if (n) {
+      flowLayerDirty = false;
+      flowLayerMutate(() => flowSetLayerParam(n, flowLayerArm.key, x));
+      flowLayerDirty = false;
+      saveFlow();
+    }
+    flowLayerArm = null;
+    flowHold = null;
+    flowPtr = null;
+    return;
+  }
   if (flowLayerDrag) { flowLayerDragEnd(); return; }
   // A held live button releases on finger-up: schedule the note's release tail.
   if (flowLive) { flowLiveEnd(); return; }
@@ -6561,6 +6964,7 @@ canvas.addEventListener('pointercancel', () => {
   flowWavePtr = null;
   flowUnisonDrag = null;
   flowLayerDrag = null;
+  flowLayerArm = null;
   flowLayerPtr = null;
   flowCurvePtr = null;
   flowPtr = null;
@@ -6572,6 +6976,16 @@ canvas.addEventListener('pointercancel', () => {
 
 function flowLoop(now) {
   if (flowActive) {
+    // Keep the rename <input> glued to the note editor's name row (it can move
+    // while the editor's camera pan settles, or when the on-screen keyboard
+    // shrinks the layout viewport — a stale input that drifts over the swatches
+    // or buttons would swallow their taps and look like they stopped working).
+    // If the editor has closed, commit any pending text instead of leaving an
+    // invisible overlay behind.
+    if (flowNameInput && flowNameInput.style.display !== 'none') {
+      if (!flowNoteEdit) flowNoteNameCommit();
+      else flowNameInputTrack();
+    }
     // A held live note sustains its envelope body while the finger stays down.
     if (flowLive) tickLiveHold(flowLive.ds);
     // Long-press hold: move mode on a node (stage 1), then a longer hold on the
@@ -6626,6 +7040,9 @@ function flowLoop(now) {
               flowSelId = flowHold.id;
             }
             flowAddMenu = null;
+            // A layer fader-row press reached move mode: the fader is no longer
+            // being adjusted, so drop the pending drag.
+            if (flowLayerArm && flowLayerArm.nodeId === flowHold.id) flowLayerArm = null;
           }
         }
         // Keep holding past move mode → switch to the brief delete countdown.
