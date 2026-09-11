@@ -90,7 +90,8 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`pitchPositions`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
 | `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawPitchZones`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
 | `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring (incl. `syncPitchZonesUI`) |
-| `creator.js` | Sound creator (tabs: Volume envelope / Pitch / Harmonics): envelope editor (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`), mix curves, harmonic spectrum (`initLayerSpecPoints`/`syncLayerAmplitudes`), pitch envelopes (`selectedPitchEnvOrNull`/`ensureSelectedPitchEnv`/`insertPitchPoint`/`pitchStAt` consumer), note-life slider (`applyLifeFromX`) |
+| `creator.js` | Shared sound-editing helpers reused by the flow editor (the standalone 🎛️ sound creator was removed): envelope editing (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`/`envDeleteAt`/`envDrawAt`/`markerValidTimes`/`dragCreatorMarker`/`setNoteLifetime`), wave-spectrum helpers (`initLayerSpecPoints`/`insertSpecPoint`/`removeSpecPoint`/`syncLayerAmplitudes`), segment-line rendering (`strokeSegPath`/`segDrawSamples`), preview-pitch helper (`previewPitchName`), `drawRoundRect`, and shared constants (`HARM_PRESETS`/`SEGMENT_TYPE_*`/`VOICE_PARAM_DEFS`/`VOICE_INTERVALS`) |
+| `instrument.js` | Instrument selector strip (`#instrumentBar`): one chip per ready flow-editor note, one always selected while any note is ready ("no instrument" only shows when nothing is ready). Selecting swaps the shared sound globals (`ENVELOPE`/`OSC_STACK`/`MASTER_PITCH_ENV`/`MASTER_VOICE_ENVS`) to the compiled note, and `onFlowGraphChanged()` re-applies live / auto-picks the first ready note when the active one is deleted. No ready notes = silent (`OSC_STACK.layers = []`) |
 | `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
 
 ### Key constants
@@ -110,7 +111,9 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 ## Pitch envelopes (v1.10.0)
 
 Each oscillator layer (or all of them at once) can bend pitch over the note's
-life. Envelopes live in the sound creator's **Pitch** tab:
+life. Since the standalone sound creator was removed, these envelopes are edited
+in the flow editor — a layer's own pitch env in its **Layer** editor, the
+note-level master bend in the **Note** editor:
 
 - Shape: `{ range, points: [{ t, st }] }` — `t` = note progress 0..1 across the
   body + release timeline (aligned to HOLD/CUT/REL like mix curves), `st` =
@@ -136,13 +139,14 @@ that play its same waveform in parallel with per-voice offsets:
   (−100..100), relative gain (0..2). Voices are **fully coupled** to their
   layer (no tab per duplicate); they share the waveform, mix curve, and pitch
   envelope. Only pitch/volume differ, producing chorus/unison thickening.
-- Editing: a **Voices** tab beside Volume envelope / Pitch / Harmonics. Two
-  sub-selection levels: the layer swatch row picks the oscillator, a chip row
-  picks which voice to edit (✕ on a chip deletes it, + adds one — new voices
-  default to +0 st · +7¢ · 100% for instant audible chorus). The graph area
-  shows three draggable sliders (semitones, cents, volume) with −/+ nudge
-  buttons for fine steps; **Reset** ("↺ Clear all") wipes every voice of the
-  selected oscillator. Deleting all voices returns the layer to a single osc.
+- Editing: the flow editor's **Unison** node adds coupled duplicate voices to a
+  **Wave** node (a Layer's wave; a Unison feeds a Wave's unison slot, and a
+  Layer's wave can stack up to `MAX_LAYER_VOICES` unison voices). Each unison
+  voice is `{ id, st, ct, vol }` edited in the Unison overlay's voice list (✕ on
+  a row deletes it, + adds one — new voices default to +0 st · +7¢ · 100% for
+  instant audible chorus); its graph area shows three draggable sliders
+  (semitones, cents, volume) with −/+ nudge buttons for fine steps. Deleting
+  all voices returns the wave to a single osc.
 - Loudness is **normalized**: each layer's [1, ...voice vols] are divided by
   their sum (`normalizedVoiceLevels`), so duplicating never gets louder.
 - Audio: `buildLayerStack` spawns one osc per voice (osc → voiceGain → envGain)
@@ -158,8 +162,9 @@ button) arranges sound-definition nodes at **free positions on an infinitely
 pannable canvas** and wires them into a playable graph. The old dotted grid and
 its `gx,gy` coordinate labels are **hidden** (drawing code kept, gated by
 `FLOW_SHOW_GRID = false` in case it returns). Node types own a slice of the
-legacy creator's data model and are edited in dark-theme anchored overlays that
-reuse the legacy logic by temporarily pointing a shared global at the node's own
+sound data model and are edited in dark-theme anchored overlays that
+reuse the shared editing logic in creator.js by temporarily pointing a shared
+global at the node's own
 data (the volume-envelope overlay swaps `ENVELOPE`; the wave/unison overlays
 swap a layer-shaped proxy into `OSC_STACK` at `selectedLayerIdx` 0 and restore
 it on close):

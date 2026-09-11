@@ -12,10 +12,8 @@ const statHud = document.getElementById('statHud');
 
 var playbacks = [];      // { pts, cumTime, totalMs, startedAt, released }
 var gestureNotes = [];   // { osc, gain, cleanupTimer } running gesture-note audio
-var previewPlayhead = null;   // { t0, bodyMs, relMs, totalMs, endAt } drives the sound-creator playhead
 
-var mode = 'plant';      // 'plant' | 'nav' | 'creator' (full-screen sound editor) | 'flow' (full-screen sound flow editor)
-var creatorActive = false;   // sound-creator mode is open (declared early: main.js reads it)
+var mode = 'plant';      // 'plant' | 'nav' | 'flow' (full-screen sound flow editor)
 var flowActive = false;      // sound-flow editor mode is open (declared early: main.js reads it)
 var navState = null;     // single-finger pan drag in nav mode
 var dragStates = new Map();  // plant gestures, one per pointer (multi-finger)

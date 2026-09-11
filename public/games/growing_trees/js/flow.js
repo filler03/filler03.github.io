@@ -807,10 +807,26 @@ function flowSideClearRect() {
   const s = flowSideRect();
   return { x: s.x + s.w - 96, y: 8, w: 86, h: 28 };
 }
+// Side-bar order: note nodes first, alphabetical by their displayed name (the
+// flowNoteName, falling back to the "Note" type label — case-insensitive), then
+// every other node in grid order.
+function flowSideOrderedNodes() {
+  const notes = [];
+  const rest = [];
+  for (const n of flowNodes) (n.type === 'note' ? notes : rest).push(n);
+  notes.sort((a, b) => {
+    const la = (flowNoteName(a) || FLOW_NODE_TYPES.note.label).toLowerCase();
+    const lb = (flowNoteName(b) || FLOW_NODE_TYPES.note.label).toLowerCase();
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+    return 0;
+  });
+  return notes.concat(rest);
+}
 function flowSideRows() {
   const s = flowSideRect();
   const top = s.y + FLOW_SIDE_HDR;
-  return flowNodes.map((node, i) => ({
+  return flowSideOrderedNodes().map((node, i) => ({
     node, x: s.x, y: top - flowSideScrollY + i * FLOW_SIDE_ROW_H, w: s.w, h: FLOW_SIDE_ROW_H,
   }));
 }
@@ -827,7 +843,7 @@ function flowSideRowAt(x, y) {
   if (flowSideScrollY > max) flowSideScrollY = max;
   const idx = Math.floor((y - (s.y + FLOW_SIDE_HDR) + flowSideScrollY) / FLOW_SIDE_ROW_H);
   if (idx < 0 || idx >= flowNodes.length) return null;
-  return flowNodes[idx];
+  return flowSideOrderedNodes()[idx];
 }
 // Whether a node has any connection, to OR from: it feeds at least one consumer
 // slot, or it consumes at least one filled slot itself. Used by the side-bar list
@@ -1216,6 +1232,10 @@ function drawFlowStop() {
 /* ---- Persistence ---- */
 function saveFlow() {
   try { localStorage.setItem(FLOW_SAVE_KEY, JSON.stringify({ nodes: flowNodes, envDrawPoints: flowEnvDrawPoints })); } catch (err) {}
+  // The instrument selector (instrument.js, loaded after flow.js) mirrors the
+  // flow graph's note nodes; refresh it whenever the graph changes and reapply
+  // the active instrument so edits to it are heard live in the playing area.
+  if (typeof onFlowGraphChanged === 'function') onFlowGraphChanged();
 }
 // A wave node's spectrum, loaded and clamped from storage: specPoints sorted by
 // x with clamped x (0..1) / a (−1..1), amplitudes clamped; falls back to the
@@ -3682,9 +3702,9 @@ function drawFlow(now) {
 }
 
 /* ---- Envelope editor overlay ----
-   Editing an envelope node reuses the legacy sound creator's envelope logic
+   Editing an envelope node reuses the shared envelope logic in creator.js
    (envBoundaries, envSplitAtTime, envDragBoundary, envDeleteAt, markerValidTimes,
-   dragCreatorMarker, hitTestEnv, segment line types, ...) by temporarily pointing
+   dragCreatorMarker, segment line types, ...) by temporarily pointing
    the shared global ENVELOPE at the node's own envelope object. The overlay
    panel is drawn with this screen's dark theme and is partially transparent so
    the flow grid stays visible behind it. */
@@ -4379,7 +4399,8 @@ function drawFlowEnvEditor() {
   ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · ✏️ draws (' + flowEnvDrawCount() + ' pts · slider) · long-press a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
 }
 
-// A fatter grab for boundary dots than hitTestEnv's 18px: fingers are imprecise,
+// A fatter grab for boundary dots than the envelope editor's usual 18px:
+// fingers are imprecise,
 // and the end dot sits exactly on the plot's right edge, so a tap that lands a
 // little past the border (or just off the dot) should still grab it rather than
 // spawning a new point.

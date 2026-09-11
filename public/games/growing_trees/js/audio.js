@@ -462,7 +462,6 @@ function stopPreviewVoices() {
     } catch (e) {}
   }
   previewVoices.length = 0;
-  previewPlayhead = null;
 }
 
 function previewNote(pitch, bodyMsOpt) {
@@ -511,9 +510,6 @@ function previewNote(pitch, bodyMsOpt) {
 
   const voice = { oscs: stack.oscs, mixGains: stack.mixGains, gain, cleanupTimer: null };
   previewVoices.push(voice);
-  // Record the note's audio timing so the sound creator can animate a playhead
-  // across the graph in sync with the preview (times in seconds / milliseconds).
-  previewPlayhead = { t0, bodyMs, relMs, totalMs: bodyMs + relMs, endAt: tEnd };
   voice.cleanupTimer = setTimeout(() => {
     try {
       stack.oscs.forEach(o => o.disconnect());
