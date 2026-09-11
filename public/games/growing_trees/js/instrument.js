@@ -121,10 +121,18 @@ if (instBar) {
 }
 
 // Called by flow.js's saveFlow() after every graph mutation: keep the strip in
-// sync and re-apply the active instrument so edits are heard live. If the
-// active note was deleted or stopped being ready, pick the first ready note;
-// only when nothing is ready does the field fall back to silent.
+// sync and re-apply the active instrument so edits are heard live in the
+// playing field. While the flow editor is open (flowActive), the globals are
+// temporarily swapped to whatever overlay the editor is working on — re-applying
+// the instrument here would replace that working layer with a compiled copy and
+// the editor's edits would be lost (the "snaps back" bug). So while in flow
+// mode we only skip the swap; closeSoundFlow() ends with a saveFlow() after
+// flowActive clears, which is when the refreshed instrument is re-applied.
+// Outside flow mode, if the active note was deleted or stopped being ready,
+// pick the first ready note; only when nothing is ready does the field fall
+// back to silent.
 window.onFlowGraphChanged = function () {
+  if (flowActive) return;
   const active = instActiveId ? flowNodeById(instActiveId) : null;
   if (active && flowNoteReady(active)) {
     const compiled = compileFlowNote(active);
