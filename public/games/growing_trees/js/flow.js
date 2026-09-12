@@ -9,7 +9,7 @@
    Node types: Note (🎵, the entry point — aggregates a required
    Volume envelope + up to 3 Layers), Layer (🧅, one oscillator: a required
    Wave + an optional mix Env and pitch Env, plus static Mix/Pitch faders
-   that take over while no env is hooked), Volume (📉, the ADSR envelope
+   that take over while no env is hooked), Volume/Pitch (📉, the ADSR envelope
    with HOLD/CUT/REL markers — also carries the note's master pitch curve
    on the same timeline, edited via the envelope editor's Vol/Pitch toggle),
    Env (📈, a kind-agnostic neutral curve),
@@ -117,7 +117,7 @@ function flowSourceColor(node) {
 // curve whose consumers decide what it means (mix / st / ct / voice volume).
 const FLOW_NODE_TYPES = {
   note: { label: 'Note', emoji: '🎵' },
-  volumeEnv: { label: 'Volume', emoji: '📉' },
+  volumeEnv: { label: 'Volume/Pitch', emoji: '📉' },
   env: { label: 'Env', emoji: '📈' },
   wave: { label: 'Wave', emoji: '🌊' },
   layer: { label: 'Layer', emoji: '🧅' },
@@ -1567,7 +1567,7 @@ function flowPortEmoji(slot) {
   return '📈';   // mixEnv, pitchEnv, volEnv, stEnv, ctEnv
 }
 function flowPortLabel(slot) {
-  if (slot.key === 'volumeEnv') return 'Vol';
+  if (slot.key === 'volumeEnv') return 'Vol/Pitch';
   if (slot.key === 'pitchEnv') return 'Pitch';
   if (slot.key === 'layers') return 'L' + ((slot.idx != null ? slot.idx : 0) + 1);
   if (slot.key === 'wave') return 'Wave';
@@ -1832,7 +1832,6 @@ function flowPorts(node) {
   };
   if (node.type === 'note') {
     seat({ key: 'volumeEnv' }, true, 'free', 'top', 0);
-    seat({ key: 'pitchEnv' }, false, 'free', 'top', -34);
     for (let i = 0; i < 3; i++) seat({ key: 'layers', idx: i }, false, 'free', 'right', (i - 1) * 27);
   } else if (node.type === 'layer') {
     seat({ key: 'wave' }, true, 'free', 'right', 0);
@@ -6345,8 +6344,8 @@ function flowCurveHandleUp(x, y) {
    A note is the entry point of a sound: it aggregates its volume envelope, up
    to three Layers (each a wave + optional mix/pitch envs + static Mix/Pitch
    offsets), and the unison stacks hanging off each layer's wave. The note keeps
-   its own overall pitch env (the master, applied to any layer without a pitch
-   env of its own). compileFlowNote() builds the legacy globals (ENVELOPE,
+   its own overall pitch env (the master, summed ON TOP of each layer's own
+   static pitch / pitch env — see compileLayerPitchEnv). compileFlowNote() builds the legacy globals (ENVELOPE,
    OSC_STACK, per-layer pitch envs, per-voice envs) from the connected graph;
    playFlowNote() swaps them in, previews the note, and restores. */
 function compileFlowNote(note) {
@@ -6477,25 +6476,28 @@ function compileLayerPitchEnv(ln, master) {
   }
   if (!own) return null;
   if (!master || !master.points || master.points.length < 2) return { range: SCALE, points: own };
-  // Sum the note's master bend on top of the layer's own at the union of their
-  // knot times (a layer with only a static pitch still follows the master's
-  // whole shape, with the offset added everywhere).
+  // Sum the note's master bend on top of the layer's own. When both curves are
+  // plain lines the sum is exactly reproduced at the union of their knot times,
+  // so a compact 3-6 point curve is enough. Any Stairs/Spring/Pulse line type
+  // (on either curve) cannot be represented by a single summed curve — and
+  // stretching one curve's shape across the other's knots distorts it — so fall
+  // back to densely sampling the true sum, which the engine plays back linearly.
   const ownObj = { range: SCALE, points: own };
-  const ts = new Set();
-  own.forEach(p => ts.add(p.t));
-  master.points.forEach(p => ts.add(clamp01(p.t)));
-  const times = Array.from(ts).sort((a, b) => a - b);
-  const pts = times.map(t => ({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) }));
-  // Carry the layer's own seg line types onto spans that still stretch between
-  // two consecutive own points (an undivided piece of its curve).
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i].t, b = pts[i + 1].t;
-    for (let k = 0; k < own.length - 1; k++) {
-      if (own[k].seg && Math.abs(own[k].t - a) < 1e-6 && Math.abs(own[k + 1].t - b) < 1e-6) {
-        pts[i].seg = clone(own[k].seg);
-        break;
-      }
+  const hasSeg = own.some(p => p.seg) || master.points.some(p => p.seg);
+  let pts;
+  if (hasSeg) {
+    const N = 256;
+    pts = [];
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1);
+      pts.push({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) });
     }
+  } else {
+    const ts = new Set();
+    own.forEach(p => ts.add(p.t));
+    master.points.forEach(p => ts.add(clamp01(p.t)));
+    const times = Array.from(ts).sort((a, b) => a - b);
+    pts = times.map(t => ({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) }));
   }
   return { range: SCALE, points: pts };
 }
@@ -6529,8 +6531,8 @@ function flowNoteHasPitch(note) {
 // v ∈ −1..1 maps to a semitone bend, full deflection = ±the note's pitch scale
 // (default ±12 st, one octave); the trim shifts the whole curve first, and each
 // span's line type rides along. A flat curve → no bend. This is the
-// OVERALL-note bend: it applies to every layer that has no pitch env of its own
-// (the layer's own env wins when both are connected).
+// OVERALL-note bend: compileLayerPitchEnv sums it on top of every layer's own
+// pitch (static fader or pitch env), so layer- and note-level pitch stack.
 function compileMasterPitchEnv(note) {
   const pitch = flowNotePitchCurve(note);
   if (!pitch || !Array.isArray(pitch.points) || pitch.points.length < 2) return null;

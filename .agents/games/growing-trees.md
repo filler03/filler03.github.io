@@ -189,8 +189,9 @@ it on close):
   `setNoteLifetime`). Tapping the note card enters its **note editor**
   (`flowNoteEdit`, `flowNotePanel`) — a big play button + editable Note-life and
   **Pitch scale** sliders.
-- `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
-  also carries the note's master **pitch curve** (`envelope.pitch`, a flat-0
+- `volumeEnv` / **Volume/Pitch** (📉) — the note's required ADSR envelope
+  (HOLD/CUT/REL markers); also carries the note's master **pitch curve**
+  (`envelope.pitch`, a flat-0
   neutral by default) on the same 0..1 timeline. The overlay (envelope editor)
   has a **Vol | Pitch** toggle: the Vol tab edits the ADSR components + markers;
   the Pitch tab edits the pitch curve on the same plot with the markers shown as
@@ -225,8 +226,11 @@ it on close):
   connection and re-enables the fader. The layer's own pitch env bends **only
   that layer** (its static Pitch fader is a constant semitone offset when no env
   is hooked); the note's master pitch env is then applied **on top** — both are
-  summed (at the union of their knot times), so layer-level and note-level pitch
-  configuration stack (`compileLayerPitchEnv`).
+  summed, so layer-level and note-level pitch configuration stack
+  (`compileLayerPitchEnv`). Plain line curves are summed at the union of their
+  knot times; if either curve carries a Stairs/Spring/Pulse line type the sum is
+  densely sampled instead (a single summed curve can't represent two different
+  segment shapes), so the layer env's line type never absorbs the note env's.
 - `unison` (🦄) — exactly one additional voice `[{ id, st, ct, vol, muted }]`
   (the first stored voice is kept; defaults to a single voice). Its widget shows
   mini read-only faders for the selected voice's st/ct/vol; tapping it opens the
