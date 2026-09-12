@@ -113,7 +113,8 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 Each oscillator layer (or all of them at once) can bend pitch over the note's
 life. Since the standalone sound creator was removed, these envelopes are edited
 in the flow editor — a layer's own pitch env in its **Layer** editor, the
-note-level master bend in the **Note** editor:
+note-level master bend in the volume envelope's **Pitch** tab (the envelope
+editor's Vol/Pitch toggle; it lives on the same timeline as the volume):
 
 - Shape: `{ range, points: [{ t, st }] }` — `t` = note progress 0..1 across the
   body + release timeline (aligned to HOLD/CUT/REL like mix curves), `st` =
@@ -170,12 +171,13 @@ swap a layer-shaped proxy into `OSC_STACK` at `selectedLayerIdx` 0 and restore
 it on close):
 
 - `note` (🎵) — the entry point of a sound. Its on-node ports assign the
-  connections: a required **volume envelope**, an optional **pitch envelope**
-  (an `env` 📈 curve compiled to the legacy `MASTER_PITCH_ENV` — a full-scale
-  `v ∈ −1..1` curve bends the note's pitch **±12 semitones**, `st = (v+trim)·12`,
-  and the curve's segment line types ride along), and up to **3 layers** (1
-  required). This overall note-level pitch env is the **master** bend and is
-  applied **on top of** each layer's own pitch (see Layer). Every layer
+  connections: a required **volume envelope**, and up to **3 layers** (1
+  required). The note's **master pitch** bend lives on its volume-envelope node
+  (`envelope.pitch`), on the same timeline as the volume, so the HOLD/CUT/REL
+  markers are shared (see `volumeEnv` below). It is the **master** bend,
+  applied **on top of** each layer's own pitch (see Layer), compiled to the
+  legacy `MASTER_PITCH_ENV` (`st = (v+trim)·pitchScale`, full deflection = ±the
+  note's pitch scale, default ±12 st). Every layer
   connection is **muteable** (double-tap its wire): a muted layer is silenced
   without touching the layer node, and the note stays ready while ≥1 unmuted
   layer plays. Its widget card has a **▶ Play**
@@ -188,8 +190,13 @@ it on close):
   (`flowNoteEdit`, `flowNotePanel`) — a big play button + editable Note-life and
   **Pitch scale** sliders.
 - `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
-  the old `envelope` node type (migrated on load). Overlay reuses the legacy
-  envelope editor helpers.
+  also carries the note's master **pitch curve** (`envelope.pitch`, a flat-0
+  neutral by default) on the same 0..1 timeline. The overlay (envelope editor)
+  has a **Vol | Pitch** toggle: the Vol tab edits the ADSR components + markers;
+  the Pitch tab edits the pitch curve on the same plot with the markers shown as
+  read-only guides (derived each frame — never stored, so they can't drift). The
+  old `envelope` node type (migrated on load) is the same node. Overlay reuses the
+  legacy envelope-editor helpers.
 - `env` (📈) — kind-agnostic breakpoint curve `{ points: [{t, v, seg?}], trim }`,
   v ∈ −1..1 with **0 = neutral**. Consumers decide the meaning: a layer's mix
   envelope maps v → mix weight `1+v` (0 = full), a layer's pitch envelope maps to
@@ -234,7 +241,8 @@ it on close):
   re-enables the fader/chips.
 
 Connections are consumer-owned named slots (`conn` on each node): the note has
-`{ volumeEnv, pitchEnv, layers[3] }`, the layer `{ wave, mixEnv, pitchEnv }`, the
+`{ volumeEnv, layers[3] }` (its master pitch lives in the volume envelope, not a
+slot), the layer `{ wave, mixEnv, pitchEnv }`, the
 wave `{ unison[] }`
 (a wave can stack up to `MAX_LAYER_VOICES` unisons, one port per stack), the
 unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
@@ -242,7 +250,7 @@ unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
 "ready" (playable) with a volume env + ≥1 layer connected to a wave, shown by a
 warning badge otherwise. **No drawer**: each consumer's slots are drawn as small
 emoji-labeled **ports around the node itself** (`flowPorts` — note: Vol top +
-Pitch top-left + L1..L3 right; layer: Wave right + Mix/Pitch env left, aligned
+L1..L3 right; layer: Wave right + Mix/Pitch env left, aligned
 beside the fader each drives; wave: a unison port along the
 bottom for each
 stack plus an empty port for the next; unison: Vol/St/Ct
@@ -375,8 +383,7 @@ migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
 `envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Pre-v1.35 saves
 (the note wired `waves[3]` + per-wave `mixEnvs[3]` straight in) are rewritten by
 `flowMigrateOldWaveConns`: each connected wave + its mix env become a synthetic
-`layer` node (spawned just off the note), while the note keeps its own master
-`pitchEnv` + `pitchScale`. Edits are
+`layer` node (spawned just off the note). Edits are
 coalesced into one undo entry per overlay session; undo **never leaves edit
 mode** — it pops the session's snapshot, restores, and reopens the same editor
 (`flowActiveEditId` + `openFlowNodeEditor`). If an open editor has **not**

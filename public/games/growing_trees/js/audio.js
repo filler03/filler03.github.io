@@ -310,7 +310,7 @@ function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
 function updateLiveMixTargets(ds, at, tc) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
-  const prog = mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs());
+  const prog = mixProgForTimes(Math.min(liveFadeProgress(ds), actualBodyMs), actualBodyMs, relMs, designBodyMs());
   for (let i = 0; i < ds.mixParams.length; i++) {
     const p = ds.mixParams[i];
     const layerIdx = ds.oscLayer[i], gi = ds.oscGroup ? ds.oscGroup[i] : 0;
@@ -389,7 +389,7 @@ function updateLivePitchTargets(ds, at, tc) {
   if (!ds.oscs || !ds.baseFreq) return;
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
-  const prog = mixProgForTimes(liveFadeProgress(ds), actualBodyMs, relMs, designBodyMs());
+  const prog = mixProgForTimes(Math.min(liveFadeProgress(ds), actualBodyMs), actualBodyMs, relMs, designBodyMs());
   for (let i = 0; i < ds.oscs.length; i++) {
     const voice = ds.oscVoice ? ds.oscVoice[i] : null;
     const env = activePitchEnv(ds.oscLayer[i]);
@@ -798,7 +798,12 @@ function scheduleLiveCurves(ds, fromT, toT, baseVol) {
   const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
   const dBody = designBodyMs();
-  const prog = ms => mixProgForTimes(ms, actualBodyMs, relMs, dBody);
+  // Curves sustain during a hold: while the finger stays down past the drawn
+  // body, the mix/pitch/unison progress clamps at the release-start position
+  // (bodyFrac) so they freeze at the value where the release begins, exactly
+  // like a sustained bend. The volume envelope is unaffected — it keeps looping
+  // its hold window via relValueBody (sampled at the raw atMs below).
+  const prog = ms => mixProgForTimes(Math.min(ms, actualBodyMs), actualBodyMs, relMs, dBody);
   const atMs = k => fromMs + (toMs - fromMs) * k / (N - 1);
   // Volume envelope (the note's loudness), scaled by the fingertip base volume.
   const gainCurve = new Float32Array(N);

@@ -10,7 +10,9 @@
    Volume envelope + up to 3 Layers), Layer (🧅, one oscillator: a required
    Wave + an optional mix Env and pitch Env, plus static Mix/Pitch faders
    that take over while no env is hooked), Volume (📉, the ADSR envelope
-   with HOLD/CUT/REL markers), Env (📈, a kind-agnostic neutral curve),
+   with HOLD/CUT/REL markers — also carries the note's master pitch curve
+   on the same timeline, edited via the envelope editor's Vol/Pitch toggle),
+   Env (📈, a kind-agnostic neutral curve),
    Wave (🌊, harmonic spectrum), and Unison (🦄, one additional voice with
    optional vol/st/ct animation envelopes).
 
@@ -385,7 +387,9 @@ function defaultEnvCurve() {
    envs (its own static Mix/Pitch faders take over when an env is absent); a wave
    may feed a unison; a unison may feed up to three envs (volume / st / ct). */
 function defaultConn(type) {
-  if (type === 'note') return { volumeEnv: null, pitchEnv: null, layers: [null, null, null] };
+  // A note's master pitch no longer has its own slot: the pitch curve lives on
+  // the note's volume envelope (envelope.pitch), on the same timeline.
+  if (type === 'note') return { volumeEnv: null, layers: [null, null, null] };
   if (type === 'layer') return { wave: null, mixEnv: null, pitchEnv: null };
   if (type === 'wave') return { unison: [] };
   if (type === 'unison') return { volEnv: null, stEnv: null, ctEnv: null };
@@ -450,7 +454,6 @@ function flowSlotRows(node) {
   const rows = [];
   if (node.type === 'note') {
     rows.push({ slot: { key: 'volumeEnv' }, label: 'Vol env', req: true, y: 0 });
-    rows.push({ slot: { key: 'pitchEnv' }, label: 'Pitch env', y: 0 });
     // Every layer slot is optional/muteable: a muted layer connection silences
     // that layer without touching it.
     for (let i = 0; i < 3; i++) {
@@ -1294,7 +1297,6 @@ function connFromSaved(type, c) {
   if (!out || !c || typeof c !== 'object') return out;
   if (type === 'note') {
     out.volumeEnv = typeof c.volumeEnv === 'string' ? c.volumeEnv : null;
-    out.pitchEnv = typeof c.pitchEnv === 'string' ? c.pitchEnv : null;
     for (let i = 0; i < 3; i++) {
       out.layers[i] = (Array.isArray(c.layers) && typeof c.layers[i] === 'string') ? c.layers[i] : null;
     }
@@ -1357,8 +1359,8 @@ function flowPruneConns() {
 // Rewrite a raw saved node array for the Layer node model (v1.35). Notes saved
 // before it connected waves directly ({ waves[3], mixEnvs[3], pitchEnv }); each
 // connected wave becomes a synthetic Layer node owning the wave + its mix env.
-// The note keeps its own master pitch env + scale (still the overall-note
-// fallback for layers without a pitch env of their own), so those stay put.
+// The note's own master pitch lives on its volume envelope now (envelope.pitch),
+// so the old separate pitch env slot is simply dropped on load.
 // Nodes already saved in the new shape ({ layers[3] }) pass through untouched.
 function flowMigrateOldWaveConns(arr) {
   const extra = [];
@@ -1385,7 +1387,7 @@ function flowMigrateOldWaveConns(arr) {
       });
       layers[i] = lid;
     }
-    n.conn = { volumeEnv: typeof c.volumeEnv === 'string' ? c.volumeEnv : null, pitchEnv: typeof c.pitchEnv === 'string' ? c.pitchEnv : null, layers };
+    n.conn = { volumeEnv: typeof c.volumeEnv === 'string' ? c.volumeEnv : null, layers };
   }
   return arr.concat(extra);
 }
@@ -2473,7 +2475,7 @@ function drawFlowWidgetNote(n, r) {
   ctx.globalAlpha = 1;
   // Pitch-scale slider (read-only): a full-strength pitch env bends the note
   // ±N semitones, or the track sits empty while no pitch env is connected.
-  const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
+  const hasPitch = flowNoteHasPitch(n);
   const st = flowPitchScale(n);
   ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
   ctx.font = '800 10px sans-serif';
@@ -3395,7 +3397,7 @@ function drawFlowNoteEditor() {
   // Pitch-scale slider (editable here): how many semitones a full-strength
   // pitch env bends the note (the overall, master bend applied to every layer
   // without a pitch env of its own). Disabled while no pitch env is connected.
-  const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
+  const hasPitch = flowNoteHasPitch(n);
   const st = flowPitchScale(n);
   const ps = flowNoteEditorPitch(p);
   ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
@@ -3480,7 +3482,7 @@ function flowNoteHandleDown(x, y) {
   }
   // Pitch-scale slider — editable only while a pitch env is connected.
   const ps = flowNoteEditorPitch(p);
-  if (n && connSlotGet(n, { key: 'pitchEnv' }) && y >= ps.y - 18 && y <= ps.y + 18 && x >= ps.x - 12 && x <= ps.x2 + 12) {
+  if (n && flowNoteHasPitch(n) && y >= ps.y - 18 && y <= ps.y + 18 && x >= ps.x - 12 && x <= ps.x2 + 12) {
     flowPushHistory();
     flowNoteDirty = true;
     flowSetPitchScale(n, flowPitchScaleFromX(ps, x));
@@ -3718,6 +3720,87 @@ var flowEnvSyncOn = false; // hold↔release Y are synced (loop-smooth) → the 
 var flowEnvMarkerHold = null; // { key, t0 } press-and-hold on a HOLD/REL marker tab (fires sync in flowLoop)
 var flowEnvSegHold = null; // { idx, t0 } press-and-hold in a segment's section (long-press opens the segment editor)
 var flowEnvDrawArmed = false; // the ✏️ draw-mode toggle: armed → plot presses scribble freehand points
+// The envelope node carries BOTH curves on one shared timeline (the volume ADSR
+// owns the HOLD/CUT/REL markers; the pitch bend rides the same axis). 'vol'
+// edits the volume components; 'pitch' edits the pitch curve on the same plot
+// with the markers shown as read-only guides.
+var flowEnvMode = 'vol';
+// The mode toggle pills (top-left of the editor header, clear of Clear/Draw).
+function flowEnvModeToggle(p) {
+  const w = 46, h = 24, gap = 6;
+  const x = p.x + 16;
+  const y = p.y + 8;
+  return [
+    { mode: 'vol', label: 'Vol', x, y, w, h },
+    { mode: 'pitch', label: 'Pitch', x: x + w + gap, y, w, h },
+  ];
+}
+function flowEnvSetMode(m) {
+  if (m !== 'vol' && m !== 'pitch') return;
+  flowEnvMode = m;
+  // Reset both curves' drag/segment/draw state on the switch.
+  flowEnvPtr = null;
+  flowEnvMarker = null;
+  flowEnvSegFrom = null;
+  flowEnvSegTo = null;
+  flowEnvMarkerHold = null;
+  flowEnvSegHold = null;
+  flowEnvDrawArmed = false;
+  flowCurveIsPitch = m === 'pitch';
+  flowCurvePtr = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
+  flowCurveDirty = false;
+  flowCurveDrawArmed = false;
+  flowPushHistory();
+}
+function drawFlowEnvModeToggle(p) {
+  for (const pill of flowEnvModeToggle(p)) {
+    const active = flowEnvMode === pill.mode;
+    drawRoundRect(pill.x, pill.y, pill.w, pill.h, 7);
+    ctx.fillStyle = active ? '#ffffff' : '#2b2b2b';
+    ctx.fill();
+    ctx.strokeStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = active ? 1.5 : 1;
+    ctx.stroke();
+    ctx.fillStyle = active ? '#000000' : '#ffffff';
+    ctx.font = '800 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pill.label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+}
+// Read-only HOLD/CUT/REL guides over the pitch curve: the envelope's marker
+// positions on the shared timeline, derived live each frame so they can never
+// drift out of sync. The volume editor is where the markers are moved.
+function drawFlowPitchGuides(pl) {
+  const tl = designTimeline();
+  const defs = [
+    { key: 'hold', label: 'HOLD', color: '#7ecfff', t: tl.tHoldStart },
+    { key: 'cut', label: 'CUT', color: '#ffb37a', t: tl.tCut },
+    { key: 'rel', label: 'REL', color: '#ff9aa0', t: tl.tHoldEnd },
+  ];
+  ctx.setLineDash([4, 4]);
+  for (const m of defs) {
+    const x = tToX(clamp01(m.t), pl);
+    ctx.strokeStyle = m.color;
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, pl.top);
+    ctx.lineTo(x, pl.bottom);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = m.color;
+    ctx.font = '800 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.label, x, pl.top - 10);
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.setLineDash([]);
+}
 
 // The shared enlarged editor panel: the node's own widget, grown in place at
 // its position (centered on the node, clamped to stay on screen), so the rest
@@ -3813,6 +3896,13 @@ function openFlowEnvelopeEditor(id) {
   flowEnvSegHold = null;
   flowEnvDrawArmed = false;
   flowEnvSyncOn = false;   // sync mode is off until the user turns it on (long-press / toggle)
+  flowEnvMode = 'vol';     // start on the volume curve; the pitch tab reuses the curve editor
+  flowCurveIsPitch = false;
+  flowCurvePtr = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
+  flowCurveDirty = false;
+  flowCurveDrawArmed = false;
   flowAddMenu = null;
   flowMoveId = null;
   flowConnArm = null;
@@ -3832,6 +3922,13 @@ function closeFlowEnvelopeEditor() {
   flowEnvSegHold = null;
   flowEnvDrawArmed = false;
   flowEnvSyncOn = false;
+  flowEnvMode = 'vol';
+  flowCurveIsPitch = false;
+  flowCurvePtr = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
+  flowCurveDirty = false;
+  flowCurveDrawArmed = false;
   saveFlow();
 }
 // Wrap an edit: the first mutation of a session records one undo entry.
@@ -4152,6 +4249,15 @@ function flowEnvSegAtX(x, pl) {
 }
 
 function drawFlowEnvEditor() {
+  // The Pitch tab reuses the env-curve editor (points/draw/segments/trim)
+  // against ENVELOPE.pitch, then overlays the read-only HOLD/CUT/REL guides.
+  if (flowEnvMode === 'pitch') {
+    flowCurveIsPitch = true;
+    drawFlowCurveEditor();
+    drawFlowPitchGuides(flowEnvPlot(flowEnvPanel(), true));
+    drawFlowEnvModeToggle(flowEnvPanel());
+    return;
+  }
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p, true);
   // Partially transparent backdrop: the flow grid shows through.
@@ -4170,6 +4276,7 @@ function drawFlowEnvEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Shapes this node’s volume over its note', p.x + 86, p.y + 30);
+  drawFlowEnvModeToggle(p);
   // Dock the line-mode strip at the top while a segment is selected.
   if (flowEnvSegRange()) drawFlowSegStrip(p, { current: flowEnvSegCurrent, range: flowEnvSegRange, paramValue: flowEnvSegParamValue });
   // Clear pill.
@@ -4417,9 +4524,14 @@ function flowEnvHitBoundary(x, y, pl) {
 }
 function flowEnvHandleDown(x, y) {
   const p = flowEnvPanel();
-  const pl = flowEnvPlot(p, true);
   // Tap anywhere outside the panel to dismiss (no ✕ button).
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowEnvelopeEditor(); return; }
+  // Vol/Pitch mode toggle (shared with the Pitch tab's own editor).
+  for (const pill of flowEnvModeToggle(p)) {
+    if (x >= pill.x && x <= pill.x + pill.w && y >= pill.y && y <= pill.y + pill.h) { flowEnvSetMode(pill.mode); return; }
+  }
+  if (flowEnvMode === 'pitch') { flowCurveHandleDown(x, y); return; }
+  const pl = flowEnvPlot(p, true);
   // Clear pill: reset to a single straight line — a lone component holding the
   // full volume across the whole note (the flat "no shaping" envelope).
   const cp = flowEnvClearPill(p);
@@ -4547,6 +4659,7 @@ function flowEnvHandleDown(x, y) {
 }
 
 function flowEnvHandleMove(x, y) {
+  if (flowEnvMode === 'pitch') { flowCurveHandleMove(x, y); return; }
   if (!flowEnvPtr) return;
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p, true);
@@ -4631,6 +4744,7 @@ function flowEnvHandleMove(x, y) {
 }
 
 function flowEnvHandleUp(x, y) {
+  if (flowEnvMode === 'pitch') { flowCurveHandleUp(x, y); return; }
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p, true);
   if (flowEnvPtr) {
@@ -5591,18 +5705,32 @@ var flowCurveDirty = false;   // any edit happened this session (coalesces undo)
 var flowCurvePtr = null;      // { kind: 'point'|'draw'|'segarm'|'trim'|'segparam', ... } active drag
 var flowCurveSegFrom = null, flowCurveSegTo = null;   // selected segment (point indexes)
 var flowCurveDrawArmed = false; // the ✏️ draw-mode toggle: armed → plot presses scribble freehand points
+// When true, the curve editor operates on the envelope editor's pitch curve
+// (ENVELOPE.pitch) instead of a standalone env node — the "Pitch" tab of the
+// volume envelope node. Set/cleared by flowEnvSetMode / open&closeFlowEnvelopeEditor.
+var flowCurveIsPitch = false;
 
 function flowCurvePanel() { return flowEnvPanel(); }
 function flowCurvePlot(p) { return flowEnvPlot(p, true); }
 function flowCurveClearPill(p) { return flowEnvClearPill(p); }
 function flowCurvePointsOf(node) {
+  if (flowCurveIsPitch) {
+    const pitch = flowEnvelopePitch(ENVELOPE);
+    return pitch ? pitch.points : null;
+  }
   const n = flowNodeById(node);
   if (!n) return null;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
   return n.env.points;
 }
-// The env node's curve object itself (ensured a default, with a trim).
+// The curve object being edited (env node's `env`, or the envelope's pitch when
+// the curve editor is in the envelope editor's Pitch tab).
 function flowCurveEnvOf(node) {
+  if (flowCurveIsPitch) {
+    const pitch = flowEnvelopePitch(ENVELOPE);
+    if (pitch && pitch.trim == null) pitch.trim = 0;
+    return pitch;
+  }
   const n = flowNodeById(node);
   if (!n) return null;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
@@ -5776,6 +5904,7 @@ function openFlowCurveEditor(id) {
   if (!n || n.type !== 'env') return;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
   flowCurveEdit = id;
+  flowCurveIsPitch = false;   // a standalone env node, not the envelope's pitch tab
   flowCurveDirty = false;
   flowCurvePtr = null;
   flowCurveSegFrom = null;
@@ -5818,10 +5947,17 @@ function drawFlowCurveEditor() {
   ctx.font = '800 16px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('Env', p.x + 16, p.y + 30);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = '700 11px sans-serif';
-  ctx.fillText('Neutral curve · 0 = no change · consumers decide the meaning', p.x + 86, p.y + 30);
+  if (flowCurveIsPitch) {
+    ctx.fillText('Pitch', p.x + 16, p.y + 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('Bends the note’s pitch · full deflection = ±its pitch scale · guides = the note’s timeline', p.x + 70, p.y + 30);
+  } else {
+    ctx.fillText('Env', p.x + 16, p.y + 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('Neutral curve · 0 = no change · consumers decide the meaning', p.x + 86, p.y + 30);
+  }
   // Dock the line-mode strip at the top while a segment is selected.
   if (flowCurveSegRange()) drawFlowSegStrip(p, { current: flowCurveSegCurrent, range: flowCurveSegRange, paramValue: flowCurveSegParamValue });
   // Clear pill (row 1, right): reset to the flat neutral line.
@@ -6363,21 +6499,44 @@ function compileLayerPitchEnv(ln, master) {
   }
   return { range: SCALE, points: pts };
 }
-// The note's optional pitch-env connection, compiled to the legacy MASTER_PITCH_ENV
-// shape ({ range, points: [{ t, st }] }): an env curve's v ∈ −1..1 maps to a
-// semitone bend, full deflection = ±the note's pitch scale (default ±12 st, one
-// octave); the trim shifts the whole curve first, and each span's line type
-// rides along. Disconnected or missing → null (the note plays at its base pitch).
-// This is the OVERALL-note bend: it applies to every layer that has no pitch env
-// of its own (the layer's own env wins when both are connected).
+// A note's master pitch envelope, merged into its volume envelope: a curve on
+// the same 0..1 timeline as the volume (so the HOLD/CUT/REL structure is shared
+// and always in sync), v ∈ −1..1 with the note's pitchScale as full deflection.
+// Ensured a flat-0 default on first access so the pitch bend is opt-in.
+function flowEnvelopePitch(env) {
+  if (!env || typeof env !== 'object') return null;
+  if (!env.pitch || !Array.isArray(env.pitch.points) || env.pitch.points.length < 2) env.pitch = defaultEnvCurve();
+  if (env.pitch.trim == null) env.pitch.trim = 0;
+  return env.pitch;
+}
+// The volume envelope node's pitch curve, or null when the note has none.
+function flowNotePitchCurve(note) {
+  const envId = note && note.conn ? note.conn.volumeEnv : null;
+  const envNode = envId ? flowNodeById(envId) : null;
+  if (!envNode || envNode.type !== 'volumeEnv' || !envNode.envelope) return null;
+  return flowEnvelopePitch(envNode.envelope);
+}
+// Whether a note's pitch actually bends anything: its volume envelope's pitch
+// curve deviates from the flat-neutral line (or the trim is off zero).
+function flowNoteHasPitch(note) {
+  const pitch = flowNotePitchCurve(note);
+  if (!pitch) return false;
+  const trim = +pitch.trim || 0;
+  return pitch.points.some(pt => Math.abs((+pt.v || 0) + trim) > 1e-6);
+}
+// The note's optional pitch curve, compiled to the legacy MASTER_PITCH_ENV
+// shape ({ range, points: [{ t, st }] }): the volume envelope's pitch curve's
+// v ∈ −1..1 maps to a semitone bend, full deflection = ±the note's pitch scale
+// (default ±12 st, one octave); the trim shifts the whole curve first, and each
+// span's line type rides along. A flat curve → no bend. This is the
+// OVERALL-note bend: it applies to every layer that has no pitch env of its own
+// (the layer's own env wins when both are connected).
 function compileMasterPitchEnv(note) {
-  const id = note && note.conn ? note.conn.pitchEnv : null;
-  const n = id ? flowNodeById(id) : null;
-  if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
-  if (connSlotMuted(note, { key: 'pitchEnv' })) return null;   // muted pitch port → no bend
+  const pitch = flowNotePitchCurve(note);
+  if (!pitch || !Array.isArray(pitch.points) || pitch.points.length < 2) return null;
   const SCALE = flowPitchScale(note);
-  const trim = +n.env.trim || 0;
-  const points = n.env.points.map(pt => {
+  const trim = +pitch.trim || 0;
+  const points = pitch.points.map(pt => {
     const p = { t: clamp01(pt.t), st: ((+pt.v || 0) + trim) * SCALE };
     if (pt.seg && typeof pt.seg === 'object') p.seg = clone(pt.seg);
     return p;
