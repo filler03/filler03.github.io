@@ -3801,6 +3801,42 @@ function drawFlowPitchGuides(pl) {
   ctx.setLineDash([]);
 }
 
+// Faint, dashed guides of the SIBLING curve on the volume/pitch node's shared
+// timeline: the Vol tab draws the note's pitch curve behind the editable volume
+// envelope, and the Pitch tab draws the volume envelope behind the editable
+// pitch curve. Both editors use the same plot rect, so the pitch amp axis and
+// the volume 0..1 axis line up (volume v sits at pitch amp 2v−1), letting the
+// user see how the two shapes relate without switching tabs.
+function drawFlowEnvPitchGuide(pl) {
+  const pitch = flowEnvelopePitch(ENVELOPE);
+  if (!pitch || !Array.isArray(pitch.points) || pitch.points.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.strokeStyle = '#8dd3ff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  strokeSegPath(flowCurveScreenPoints(pitch.points, +pitch.trim || 0, pl), 1, v => ampToY(clampSign(v), pl));
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+function drawFlowEnvVolumeGuide(pl) {
+  const eb = envBoundaries();
+  const trim = envTrim(ENVELOPE);
+  const vOf = v => clamp01(v + trim);
+  const pts = [];
+  for (let i = 0; i <= eb.n; i++) {
+    pts.push({ x: tToX(eb.tOf(eb.b[i]), pl), y: vToY(vOf(eb.vals[i]), pl), v: vOf(eb.vals[i]), el: i < eb.n ? eb.env.components[i] : null });
+  }
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  strokeSegPath(pts, 1, v => vToY(clamp01(v), pl));
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
 // The shared enlarged editor panel: the node's own widget, grown in place at
 // its position (centered on the node, clamped to stay on screen), so the rest
 // of the grid stays visible around it. Tapping outside it ends edit mode. The
@@ -4430,6 +4466,8 @@ function drawFlowEnvEditor() {
   ctx.textAlign = 'left';
   ctx.fillText('100%', pl.left + 2, pl.top + 10);
   ctx.fillText('0%', pl.left + 2, pl.bottom - 4);
+  // Faint pitch-curve guide (the curve the Pitch tab edits) behind the volume.
+  drawFlowEnvPitchGuide(pl);
   // Envelope curve + boundary dots (offset by the trim).
   const eb = envBoundaries();
   const trim = envTrim(ENVELOPE);
@@ -6049,14 +6087,18 @@ function drawFlowCurveEditor() {
     ctx.fillStyle = 'rgba(141,211,255,0.14)';
     ctx.fillRect(x0, pl.top, Math.max(1, x1 - x0), pl.ph);
   }
-  // Neutral (0) line highlighted.
-  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([5, 5]);
-  ctx.beginPath();
-  ctx.moveTo(pl.left, y0); ctx.lineTo(pl.right, y0);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Neutral (0) line highlighted — except on the volume/pitch node's Pitch tab,
+  // where the volume guide already provides the reference and a second line down
+  // the middle just reads as a redundant guide.
+  if (!flowCurveIsPitch) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(pl.left, y0); ctx.lineTo(pl.right, y0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   // Axis labels.
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '700 10px sans-serif';
@@ -6064,6 +6106,9 @@ function drawFlowCurveEditor() {
   ctx.fillText('+100%', pl.left + 2, pl.top + 10);
   ctx.fillText('0', pl.left + 2, y0 + 3);
   ctx.fillText('−100%', pl.left + 2, pl.bottom - 4);
+  // On the volume/pitch node's Pitch tab, overlay a faint guide of the volume
+  // envelope the Vol tab edits (a standalone env node has no volume sibling).
+  if (flowCurveIsPitch) drawFlowEnvVolumeGuide(pl);
   // Curve + dots: each span renders its own line type (Line/Stairs/Spring/
   // Pulse); the trim offsets the whole curve vertically like the envelope's.
   ctx.strokeStyle = '#8dd3ff';
