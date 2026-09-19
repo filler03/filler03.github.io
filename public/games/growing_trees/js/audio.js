@@ -308,9 +308,8 @@ function scheduleLayerMix(stack, t0, tEnd, actualBodyMs, relMs) {
 // The voice's normalized level at the progress value (its vol envelope when
 // active) scales each oscillator's target.
 function updateLiveMixTargets(ds, at, tc) {
-  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
-  const prog = mixProgForTimes(Math.min(liveFadeProgress(ds), actualBodyMs), actualBodyMs, relMs, designBodyMs());
+  const prog = mixBodyProg(liveFadeProgress(ds), designBodyMs(), relMs);
   for (let i = 0; i < ds.mixParams.length; i++) {
     const p = ds.mixParams[i];
     const layerIdx = ds.oscLayer[i], gi = ds.oscGroup ? ds.oscGroup[i] : 0;
@@ -338,8 +337,14 @@ function rampLayerMixToEnd(ds, startT, ms) {
       const prog = mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody);
       curve[k] = layerGainsAt(prog)[layerIdx] * normalizedVoiceLevelsAt(OSC_STACK.layers[layerIdx], prog)[gi];
     }
+    // Lerp from the currently-held value into the release trajectory instead of
+    // jumping to the release marker: start at the live value and fade the offset
+    // out over the release, so the morph eases in rather than cutting.
+    const cur = Math.max(1e-4, p.value);
+    const off = cur - curve[0];
+    if (off) for (let k = 0; k < N; k++) curve[k] = Math.max(0, curve[k] + off * (1 - k / (N - 1)));
     p.cancelScheduledValues(startT);
-    p.setValueAtTime(Math.max(1e-4, p.value), startT);
+    p.setValueAtTime(cur, startT);
     p.setValueCurveAtTime(curve, startT + 0.002, Math.max(0.004, ms / 1000) - 0.002);
   }
 }
@@ -387,9 +392,8 @@ function scheduleLayerPitch(stack, t0, tEnd, baseFreq, bodyMs, relMs) {
 // so the chase never overlaps it.
 function updateLivePitchTargets(ds, at, tc) {
   if (!ds.oscs || !ds.baseFreq) return;
-  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
-  const prog = mixProgForTimes(Math.min(liveFadeProgress(ds), actualBodyMs), actualBodyMs, relMs, designBodyMs());
+  const prog = mixBodyProg(liveFadeProgress(ds), designBodyMs(), relMs);
   for (let i = 0; i < ds.oscs.length; i++) {
     const voice = ds.oscVoice ? ds.oscVoice[i] : null;
     const env = activePitchEnv(ds.oscLayer[i]);
@@ -422,8 +426,14 @@ function rampPitchToEnd(ds, startT, ms) {
       const prog = mixProgForTimes(actualBodyMs + relElapsed, actualBodyMs, relMs, dBody);
       curve[k] = freqShifted(ds.baseFreq, pitchStAt(env, prog) + voiceStOffsetAt(voice, prog));
     }
+    // Lerp from the currently-held frequency into the release trajectory instead
+    // of jumping to the release marker's pitch: start at the live value and fade
+    // the offset out over the release, so the bend eases in rather than cutting.
+    const cur = Math.max(20, p.value);
+    const off = cur - curve[0];
+    if (off) for (let k = 0; k < N; k++) curve[k] = Math.max(20, curve[k] + off * (1 - k / (N - 1)));
     p.cancelScheduledValues(startT);
-    p.setValueAtTime(p.value, startT);
+    p.setValueAtTime(cur, startT);
     p.setValueCurveAtTime(curve, startT + 0.002, Math.max(0.004, ms / 1000) - 0.002);
   }
 }
@@ -795,15 +805,13 @@ function scheduleLiveCurves(ds, fromT, toT, baseVol) {
   const dur = Math.max(0.004, toT - fromT);
   // Roughly 2ms per sample so fast wobbles/steps stay faithful, capped for sanity.
   const N = Math.min(256, Math.max(32, Math.round((toMs - fromMs) / 2)));
-  const actualBodyMs = Math.max(ds.totalMs || 0, earlyCutMs());
   const relMs = releaseMs();
   const dBody = designBodyMs();
-  // Curves sustain during a hold: while the finger stays down past the drawn
-  // body, the mix/pitch/unison progress clamps at the release-start position
-  // (bodyFrac) so they freeze at the value where the release begins, exactly
-  // like a sustained bend. The volume envelope is unaffected — it keeps looping
-  // its hold window via relValueBody (sampled at the raw atMs below).
-  const prog = ms => mixProgForTimes(Math.min(ms, actualBodyMs), actualBodyMs, relMs, dBody);
+  // The mix/pitch/unison curves follow the design timeline and LOOP the hold
+  // window once past the hold end — the same loop the volume envelope does via
+  // relValueBody (sampled at the raw atMs below) — so a held note oscillates
+  // every curve, not just the volume.
+  const prog = ms => mixBodyProg(ms, dBody, relMs);
   const atMs = k => fromMs + (toMs - fromMs) * k / (N - 1);
   // Volume envelope (the note's loudness), scaled by the fingertip base volume.
   const gainCurve = new Float32Array(N);
@@ -927,18 +935,16 @@ function finishLivePathNote(ds) {
     // components up to it all play before the release section.
     const prog = liveFadeProgress(ds);
     if (prog < cutMs) {
+      // Extend the body through the cut. Bake the FULL envelope set (master
+      // volume + layer mix + voice vol/st/ct + pitch) across the remainder — a
+      // quick tap has no drawn path to feed the live scheduler's per-point
+      // bakes, so without this the mix and pitch envelopes would sit frozen at
+      // their start values instead of animating exactly like the full preview.
       const baseVol = baseVolumeFromY(ds.pts[ds.pts.length - 1].y);
-      const N = 96;
-      const curve = new Float32Array(N);
-      curve[0] = Math.max(1e-4, ds.gain.value);
-      for (let k = 1; k < N; k++) {
-        const t = prog + (cutMs - prog) * k / (N - 1);
-        curve[k] = baseVol * relValueBody(ENVELOPE, t, true);
-      }
-      ds.gain.cancelScheduledValues(now);
-      ds.gain.setValueAtTime(Math.max(1e-4, ds.gain.value), now);
-      ds.gain.setValueCurveAtTime(curve, now + 0.002, (cutMs - prog) / 1000);
-      scheduleReleaseTail(ds, curve[curve.length - 1], now + 0.002 + (cutMs - prog) / 1000);
+      const t0 = Math.max(now, ds.ctx0 + prog / 1000);
+      const endT = ds.ctx0 + cutMs / 1000;
+      scheduleLiveCurves(ds, t0, endT, baseVol);
+      scheduleReleaseTail(ds, ds.gainLevel, endT);
     } else {
       // The body already played through the cut: play the release section from
       // the held level, then fade.

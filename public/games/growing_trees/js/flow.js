@@ -2595,7 +2595,8 @@ function drawFlowWidgetWave(n, r) {
 // connected to the node — the envelope drives that value, so its slider is
 // disabled until the connection is removed.
 function flowUnisonParamLocked(node, key) {
-  return !!(node && connSlotGet(node, { key: key + 'Env' }));
+  const slot = { key: key + 'Env' };
+  return !!(node && connSlotGet(node, slot) && !connSlotMuted(node, slot));
 }
 function drawFlowWidgetUnison(n, r) {
   const vs = (Array.isArray(n.voices) && n.voices.length) ? n.voices : null;
@@ -2710,7 +2711,8 @@ var flowLayerDrag = null;    // { nodeId, key } active layer-fader drag, or null
 var flowLayerArm = null;     // { nodeId, key } a press on a layer fader row, waiting to become a drag or a long-press move, or null
 var flowLayerDirty = false;  // any edit happened this drag session (coalesces undo)
 function flowLayerParamLocked(node, key) {
-  return !!(node && connSlotGet(node, { key: key + 'Env' }));
+  const slot = { key: key + 'Env' };
+  return !!(node && connSlotGet(node, slot) && !connSlotMuted(node, slot));
 }
 function drawFlowWidgetLayer(n, r) {
   const mixLocked = flowLayerParamLocked(n, 'mix');
@@ -3112,7 +3114,7 @@ function flowLayerHandleMove(x, y) {
   const n = flowNodeById(flowLayerEdit);
   if (flowLayerPtr.key === 'pitchScale') {
     const f = flowLayerScaleRow(p);
-    if (f && n && connSlotGet(n, { key: f.slot })) flowLayerSetEnvScale(x, f);
+    if (f && n && !flowLayerParamLocked(n, 'pitch')) flowLayerSetEnvScale(x, f);
     return;
   }
   const f = flowLayerFaders(p).find(f => f.key === flowLayerPtr.key);
@@ -5719,8 +5721,9 @@ function flowUnisonHandleMove(x, y) {
   if (!flowUnisonDrag) return;
   const p = flowUnisonPanel();
   if (flowUnisonDrag.key === 'stScale' || flowUnisonDrag.key === 'ctScale') {
-    const f = flowUnisonScaleRow(p, flowUnisonDrag.key === 'stScale' ? 'st' : 'ct');
-    if (f && connSlotGet(flowNodeById(flowUnisonEdit), { key: f.slot })) flowUnisonSetEnvScale(f.key, x, f);
+    const param = flowUnisonDrag.key === 'stScale' ? 'st' : 'ct';
+    const f = flowUnisonScaleRow(p, param);
+    if (f && !flowUnisonParamLocked(flowNodeById(flowUnisonEdit), param)) flowUnisonSetEnvScale(f.key, x, f);
     return;
   }
   const f = flowUnisonFaders(p).find(f => f.key === flowUnisonDrag.key);
@@ -6621,36 +6624,27 @@ function compileUnisonEnvs(uni) {
   out.vol = mk(c.volEnv, 2, 1, 1, { key: 'volEnv' });
   return (out.st || out.ct || out.vol) ? out : null;
 }
+// Play a note exactly the way the playing field does: build a synthetic gesture
+// (a single point at the preview pitch and preview base volume) and run it
+// through whichever scheduler the field is configured to use — the wait-mode
+// scheduler (schedulePathAudio) or the live one (initLivePathAudio). The compiled
+// globals are swapped in for the synchronous scheduling call, then restored —
+// same as the instrument selector applies them on the field.
 function playFlowNote(note) {
-  const compiled = compileFlowNote(note);
-  if (!compiled) return false;
-  initAudio();
-  resumeAudio();
-  if (!audioCtx || !masterGain) return false;
-  const saved = { ENVELOPE, OSC_STACK, MASTER_PITCH_ENV, MASTER_VOICE_ENVS };
-  ENVELOPE = compiled.envelope;
-  OSC_STACK = { layers: compiled.layers };
-  MASTER_PITCH_ENV = compiled.masterPitchEnv;
-  MASTER_VOICE_ENVS = compiled.masterVoiceEnvs;
-  try { previewNote(previewPitchName()); }
-  finally {
-    ENVELOPE = saved.ENVELOPE;
-    OSC_STACK = saved.OSC_STACK;
-    MASTER_PITCH_ENV = saved.MASTER_PITCH_ENV;
-    MASTER_VOICE_ENVS = saved.MASTER_VOICE_ENVS;
-  }
-  return true;
+  return previewFlowNote(note, 'full');
 }
 
 /* ---- Note play modes (tap / full length / live) ----
-   Beyond the one-shot full-length preview (playFlowNote above), a flow note can
-   also be played like a tap or held live. Both reuse the shared live-note
-   scheduler (initLivePathAudio / tickLiveHold / finishLivePathNote in audio.js)
-   driven by a minimal synthetic "gesture": a single point at the preview pitch
-   and preview base volume. Because they run the real live scheduler, every
-   connected envelope applies — volume, wave mix, and unison vol/st/ct/pitch.
-   The synthetic playback path is never drawn (gesture rendering only runs in
-   the main area), so no stray circles appear in flow mode. */
+   A flow note's tap / full previews run the playing field's wait-mode scheduler
+   (schedulePathAudio) over a synthetic released gesture — the field's one-pass
+   path, so every connected envelope applies the same way it does on the field.
+   (The live scheduler is not used for these one-shots: finishLivePathNote
+   assumes the body already played, so it would cancel the freshly-baked body
+   curves.) The live preview button still uses the live scheduler
+   (initLivePathAudio / tickLiveHold / finishLivePathNote), driven by a minimal
+   synthetic "gesture": a single point at the preview pitch and preview base
+   volume. The synthetic playback path is never drawn (gesture rendering only
+   runs in the main area), so no stray circles appear in flow mode. */
 var flowLive = null;    // { ds, nodeId } while a flow note's live button is held
 function flowSyntheticDs(savedGlobals) {
   // Same base volume as the full preview (previewNote clamps its base to 0.35),
@@ -6666,6 +6660,25 @@ function flowSyntheticDs(savedGlobals) {
     finished: false,
     playback: { pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true },
     savedGlobals,
+  };
+}
+// The synthetic gesture for the one-shot (wait-mode) previews. The field's wait
+// mode schedules a whole released gesture at once (schedulePathAudio), so this
+// ds mirrors a released field gesture: a single point at the preview pitch and
+// preview base volume, `totalMs` = the body to play. Running it through
+// schedulePathAudio makes the tap / full previews bit-for-bit the same scheduler
+// the playing field uses in wait mode.
+function flowPreviewWaitDs(bodyMs) {
+  const y = yForBaseVolume(Math.max(0.35, baseVolumeFromY(H * 0.55)));
+  return {
+    startX: 0, startY: y,
+    pts: [{ x: 0, y }],
+    cumTime: [0],
+    totalMs: bodyMs,
+    pitchOverride: previewPitchName(),
+    lastMoveAt: 0,
+    finished: false,
+    playback: null,
   };
 }
 // Swap the shared sound globals in for the compiled flow note. They stay
@@ -6685,6 +6698,36 @@ function flowGlobalsRestore(saved) {
   OSC_STACK = saved.OSC_STACK;
   MASTER_PITCH_ENV = saved.MASTER_PITCH_ENV;
   MASTER_VOICE_ENVS = saved.MASTER_VOICE_ENVS;
+}
+// One-shot preview (tap / full): compile the note, swap in its globals for the
+// synchronous scheduling call, and run the playing field's wait-mode scheduler
+// (schedulePathAudio) over a synthetic released gesture. This is the field's
+// one-pass scheduler, so every connected envelope applies exactly as it does
+// when the field plays a released gesture in wait mode. (The live scheduler is
+// deliberately NOT used for these one-shots: finishLivePathNote assumes the
+// body has already played and would cancel the freshly-baked body curves.)
+// `mode` picks the body: 'tap' plays through the early-cut marker, 'full' the
+// whole hold end. Prior preview/gesture voices are faded first so repeats never
+// stack.
+function previewFlowNote(note, mode) {
+  const compiled = compileFlowNote(note);
+  if (!compiled) return false;
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return false;
+  stopGestureNote();
+  stopPreviewVoices();
+  if (flowLive) flowLiveEnd();
+  const saved = flowGlobalsSwap(compiled);
+  try {
+    // Body lengths are read off the compiled envelope, so compute them after the
+    // swap (earlyCutMs / designBodyMs read the shared ENVELOPE).
+    const bodyMs = mode === 'tap' ? Math.max(1, earlyCutMs()) : designBodyMs();
+    schedulePathAudio(flowPreviewWaitDs(bodyMs), bodyMs, null);
+  } finally {
+    flowGlobalsRestore(saved);
+  }
+  return true;
 }
 // Play a note "live": press-and-hold. Starts the note on press and sustains the
 // envelope body (tickLiveHold in flowLoop) until release, then the release tail.
@@ -6729,24 +6772,11 @@ function flowLiveEnd() {
   }
 }
 // Play a note like a tap in the main area: the body plays through the early-cut
-// marker, then the release section. Uses the same self-contained scheduler as
-// the full button (previewNote) with a shorter body, so the tap starts exactly
-// like the full preview — same onset, level, and every connected envelope.
+// marker, then the release section. Runs the playing field's own wait-mode
+// scheduler (schedulePathAudio) with a shorter body, so the tap is exactly the
+// same scheduler as the field — same onset, level, and every connected envelope.
 function tapFlowNote(note) {
-  const compiled = compileFlowNote(note);
-  if (!compiled) return false;
-  initAudio();
-  resumeAudio();
-  if (!audioCtx || !masterGain) return false;
-  stopPreviewVoices();
-  if (flowLive) flowLiveEnd();
-  const saved = flowGlobalsSwap(compiled);
-  try {
-    previewNote(previewPitchName(), Math.max(1, earlyCutMs()));
-  } finally {
-    flowGlobalsRestore(saved);
-  }
-  return true;
+  return previewFlowNote(note, 'tap');
 }
 
 /* ---- Note repeat (tap / full length) ----
