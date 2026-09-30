@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.36.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.43.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -90,7 +90,8 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`pitchPositions`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
 | `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawPitchZones`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
 | `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring (incl. `syncPitchZonesUI`) |
-| `creator.js` | Sound creator (tabs: Volume envelope / Pitch / Harmonics): envelope editor (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`), mix curves, harmonic spectrum (`initLayerSpecPoints`/`syncLayerAmplitudes`), pitch envelopes (`selectedPitchEnvOrNull`/`ensureSelectedPitchEnv`/`insertPitchPoint`/`pitchStAt` consumer), note-life slider (`applyLifeFromX`) |
+| `creator.js` | Shared sound-editing helpers reused by the flow editor (the standalone 🎛️ sound creator was removed): envelope editing (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`/`envDeleteAt`/`envDrawAt`/`markerValidTimes`/`dragCreatorMarker`/`setNoteLifetime`), wave-spectrum helpers (`initLayerSpecPoints`/`insertSpecPoint`/`removeSpecPoint`/`syncLayerAmplitudes`), segment-line rendering (`strokeSegPath`/`segDrawSamples`), preview-pitch helper (`previewPitchName`), `drawRoundRect`, and shared constants (`HARM_PRESETS`/`SEGMENT_TYPE_*`/`VOICE_PARAM_DEFS`/`VOICE_INTERVALS`) |
+| `instrument.js` | Instrument selector strip (`#instrumentBar`): one chip per ready flow-editor note, one always selected while any note is ready ("no instrument" only shows when nothing is ready). Selecting swaps the shared sound globals (`ENVELOPE`/`OSC_STACK`/`MASTER_PITCH_ENV`/`MASTER_VOICE_ENVS`) to the compiled note, and `onFlowGraphChanged()` re-applies live / auto-picks the first ready note when the active one is deleted. No ready notes = silent (`OSC_STACK.layers = []`) |
 | `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
 
 ### Key constants
@@ -110,7 +111,10 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 ## Pitch envelopes (v1.10.0)
 
 Each oscillator layer (or all of them at once) can bend pitch over the note's
-life. Envelopes live in the sound creator's **Pitch** tab:
+life. Since the standalone sound creator was removed, these envelopes are edited
+in the flow editor — a layer's own pitch env in its **Layer** editor, the
+note-level master bend in the volume envelope's **Pitch** tab (the envelope
+editor's Vol/Pitch toggle; it lives on the same timeline as the volume):
 
 - Shape: `{ range, points: [{ t, st }] }` — `t` = note progress 0..1 across the
   body + release timeline (aligned to HOLD/CUT/REL like mix curves), `st` =
@@ -124,6 +128,19 @@ life. Envelopes live in the sound creator's **Pitch** tab:
   `osc.frequency.setValueCurveAtTime` (`scheduleLayerPitch`); live gesture
   notes chase targets (`updateLivePitchTargets`) and continue through the
   release tail (`rampPitchToEnd`). No envelope → constant base pitch.
+- **Design-timeline mapping (`mixProgForTimes` / `mixBodyProg`):** mix/pitch/
+  unison curves are sampled by the note's ABSOLUTE time on the design timeline
+  (like the volume envelope's components), not stretched to the actual gesture
+  body. The body plays the proportional section of the curve at its natural
+  speed (never speeding up/down), so a tap plays only the section up to its
+  early cut with the same rate as a full note; at the cut it then jumps to the
+  release marker and plays the release section. A hold past the hold end LOOPS
+  the hold window of the curve — the same loop the volume envelope does via
+  `relValueBody` — so held notes oscillate their mix/pitch/unison curves too. On
+  release, the volume, layer mix and pitch all LERP from the currently-held value
+  into the release trajectory (`scheduleReleaseTail` / `rampLayerMixToEnd` /
+  `rampPitchToEnd` seed the curve's first sample from the live `AudioParam`
+  value) instead of hard-cutting to the release marker's value.
 - Persistence: `masterPitchEnv` in the settings payload plus per-layer
   `pitchEnv`; invalid/absent values load as null.
 
@@ -136,13 +153,14 @@ that play its same waveform in parallel with per-voice offsets:
   (−100..100), relative gain (0..2). Voices are **fully coupled** to their
   layer (no tab per duplicate); they share the waveform, mix curve, and pitch
   envelope. Only pitch/volume differ, producing chorus/unison thickening.
-- Editing: a **Voices** tab beside Volume envelope / Pitch / Harmonics. Two
-  sub-selection levels: the layer swatch row picks the oscillator, a chip row
-  picks which voice to edit (✕ on a chip deletes it, + adds one — new voices
-  default to +0 st · +7¢ · 100% for instant audible chorus). The graph area
-  shows three draggable sliders (semitones, cents, volume) with −/+ nudge
-  buttons for fine steps; **Reset** ("↺ Clear all") wipes every voice of the
-  selected oscillator. Deleting all voices returns the layer to a single osc.
+- Editing: the flow editor's **Unison** node adds coupled duplicate voices to a
+  **Wave** node (a Layer's wave; a Unison feeds a Wave's unison slot, and a
+  Layer's wave can stack up to `MAX_LAYER_VOICES` unison voices). Each unison
+  voice is `{ id, st, ct, vol }` edited in the Unison overlay's voice list (✕ on
+  a row deletes it, + adds one — new voices default to +0 st · +7¢ · 100% for
+  instant audible chorus); its graph area shows three draggable sliders
+  (semitones, cents, volume) with −/+ nudge buttons for fine steps. Deleting
+  all voices returns the wave to a single osc.
 - Loudness is **normalized**: each layer's [1, ...voice vols] are divided by
   their sum (`normalizedVoiceLevels`), so duplicating never gets louder.
 - Audio: `buildLayerStack` spawns one osc per voice (osc → voiceGain → envGain)
@@ -158,33 +176,44 @@ button) arranges sound-definition nodes at **free positions on an infinitely
 pannable canvas** and wires them into a playable graph. The old dotted grid and
 its `gx,gy` coordinate labels are **hidden** (drawing code kept, gated by
 `FLOW_SHOW_GRID = false` in case it returns). Node types own a slice of the
-legacy creator's data model and are edited in dark-theme anchored overlays that
-reuse the legacy logic by temporarily pointing a shared global at the node's own
+sound data model and are edited in dark-theme anchored overlays that
+reuse the shared editing logic in creator.js by temporarily pointing a shared
+global at the node's own
 data (the volume-envelope overlay swaps `ENVELOPE`; the wave/unison overlays
 swap a layer-shaped proxy into `OSC_STACK` at `selectedLayerIdx` 0 and restore
 it on close):
 
 - `note` (🎵) — the entry point of a sound. Its on-node ports assign the
-  connections: a required **volume envelope**, an optional **pitch envelope**
-  (an `env` 📈 curve compiled to the legacy `MASTER_PITCH_ENV` — a full-scale
-  `v ∈ −1..1` curve bends the note's pitch **±12 semitones**, `st = (v+trim)·12`,
-  and the curve's segment line types ride along), and up to **3 layers** (1
-  required). This overall note-level pitch env is the **master** bend and is
-  applied **on top of** each layer's own pitch (see Layer). Every layer
+  connections: a required **volume envelope**, and up to **3 layers** (1
+  required). The note's **master pitch** bend lives on its volume-envelope node
+  (`envelope.pitch`), on the same timeline as the volume, so the HOLD/CUT/REL
+  markers are shared (see `volumeEnv` below). It is the **master** bend,
+  applied **on top of** each layer's own pitch (see Layer), compiled to the
+  legacy `MASTER_PITCH_ENV` (`st = (v+trim)·pitchScale`, full deflection = ±the
+  note's pitch scale, default ±12 st). Every layer
   connection is **muteable** (double-tap its wire): a muted layer is silenced
   without touching the layer node, and the note stays ready while ≥1 unmuted
   layer plays. Its widget card has a **▶ Play**
   that is always live (tapping it previews, never edits — compiles the graph
   and previews it via `compileFlowNote`/`playFlowNote`: builds `ENVELOPE`,
   `OSC_STACK` layers + per-layer pitch envs + per-voice envs, swaps the globals
-  in around `previewNote`, restores), plus a **Note life** slider that scales the
+  in around the playing field's one-pass wait scheduler (`schedulePathAudio`) for
+  the tap/full previews, or `initLivePathAudio` for the always-live hold preview,
+  then restores), plus a
+  **Note life** slider that scales the
   connected volume-envelope node's component durations (the legacy
   `setNoteLifetime`). Tapping the note card enters its **note editor**
   (`flowNoteEdit`, `flowNotePanel`) — a big play button + editable Note-life and
   **Pitch scale** sliders.
-- `volumeEnv` (📉) — the note's required ADSR envelope (HOLD/CUT/REL markers);
-  the old `envelope` node type (migrated on load). Overlay reuses the legacy
-  envelope editor helpers.
+- `volumeEnv` / **Volume/Pitch** (📉) — the note's required ADSR envelope
+  (HOLD/CUT/REL markers); also carries the note's master **pitch curve**
+  (`envelope.pitch`, a flat-0
+  neutral by default) on the same 0..1 timeline. The overlay (envelope editor)
+  has a **Vol | Pitch** toggle: the Vol tab edits the ADSR components + markers;
+  the Pitch tab edits the pitch curve on the same plot with the markers shown as
+  read-only guides (derived each frame — never stored, so they can't drift). The
+  old `envelope` node type (migrated on load) is the same node. Overlay reuses the
+  legacy envelope-editor helpers.
 - `env` (📈) — kind-agnostic breakpoint curve `{ points: [{t, v, seg?}], trim }`,
   v ∈ −1..1 with **0 = neutral**. Consumers decide the meaning: a layer's mix
   envelope maps v → mix weight `1+v` (0 = full), a layer's pitch envelope maps to
@@ -205,7 +234,8 @@ it on close):
   always-visible faders — **Mix** (0..100%) and **Pitch** (−24..24 st) — that
   are **directly draggable** for quick edits while no envelope drives them; a
   connected mix env locks Mix to `ENV`, and a connected pitch env replaces the
-  Pitch row with its **Pitch scale** slider. **Tapping the card opens its full
+  Pitch row with its **Pitch scale** slider (a **muted** env wire is bypassed —
+  the fader returns and its static value is what plays). **Tapping the card opens its full
   editor** (`flowLayerEdit`, `flowLayerPanel`), grown in place like every other
   node type: the connected wave's spectrum up top, then the same Mix/Pitch
   faders full-size with −/+ nudge buttons — or the pitch env's scale slider / the
@@ -213,23 +243,29 @@ it on close):
   connection and re-enables the fader. The layer's own pitch env bends **only
   that layer** (its static Pitch fader is a constant semitone offset when no env
   is hooked); the note's master pitch env is then applied **on top** — both are
-  summed (at the union of their knot times), so layer-level and note-level pitch
-  configuration stack (`compileLayerPitchEnv`).
+  summed, so layer-level and note-level pitch configuration stack
+  (`compileLayerPitchEnv`). Plain line curves are summed at the union of their
+  knot times; if either curve carries a Stairs/Spring/Pulse line type the sum is
+  densely sampled instead (a single summed curve can't represent two different
+  segment shapes), so the layer env's line type never absorbs the note env's.
 - `unison` (🦄) — exactly one additional voice `[{ id, st, ct, vol, muted }]`
   (the first stored voice is kept; defaults to a single voice). Its widget shows
   mini read-only faders for the selected voice's st/ct/vol; tapping it opens the
   overlay (interval presets + st/ct/vol faders). On-node ports assign optional
   **vol / st / ct** env connections (compiled to per-voice `envs`), each port
   aligned beside the fader it drives (Semitones / Cents / Volume); while an env
-  is connected, that fader (and the semitone interval chips, for st) is locked —
-  rendered greyed with an `ENV` readout and inert until the connection is
-  removed (`flowUnisonParamLocked`). In the overlay a locked fader shows a
-  **Disconnect** button (`flowUnisonDisconnectEnv`) that severs the env
-  connection (coalesced into the session's undo entry) and immediately
-  re-enables the fader/chips.
+  is connected (and **unmuted**), that fader (and the semitone interval chips,
+  for st) is locked — rendered greyed with an `ENV` readout and inert until the
+  connection is removed (`flowUnisonParamLocked`). A **muted** env wire is
+  bypassed: the static fader returns and its stored st/ct/vol is what plays
+  (matching `compileUnisonEnvs`, which drops muted ports). In the overlay a
+  locked fader shows a **Disconnect** button (`flowUnisonDisconnectEnv`) that
+  severs the env connection (coalesced into the session's undo entry) and
+  immediately re-enables the fader/chips.
 
 Connections are consumer-owned named slots (`conn` on each node): the note has
-`{ volumeEnv, pitchEnv, layers[3] }`, the layer `{ wave, mixEnv, pitchEnv }`, the
+`{ volumeEnv, layers[3] }` (its master pitch lives in the volume envelope, not a
+slot), the layer `{ wave, mixEnv, pitchEnv }`, the
 wave `{ unison[] }`
 (a wave can stack up to `MAX_LAYER_VOICES` unisons, one port per stack), the
 unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
@@ -237,7 +273,7 @@ unison `{ volEnv, stEnv, ctEnv }`. Any node may feed multiple consumers
 "ready" (playable) with a volume env + ≥1 layer connected to a wave, shown by a
 warning badge otherwise. **No drawer**: each consumer's slots are drawn as small
 emoji-labeled **ports around the node itself** (`flowPorts` — note: Vol top +
-Pitch top-left + L1..L3 right; layer: Wave right + Mix/Pitch env left, aligned
+L1..L3 right; layer: Wave right + Mix/Pitch env left, aligned
 beside the fader each drives; wave: a unison port along the
 bottom for each
 stack plus an empty port for the next; unison: Vol/St/Ct
@@ -370,8 +406,7 @@ migrates `envelope`→`volumeEnv`, parses `env`/`conn` (clamping via
 `envCurveFromSaved`/`connFromSaved`), and prunes dangling ids. Pre-v1.35 saves
 (the note wired `waves[3]` + per-wave `mixEnvs[3]` straight in) are rewritten by
 `flowMigrateOldWaveConns`: each connected wave + its mix env become a synthetic
-`layer` node (spawned just off the note), while the note keeps its own master
-`pitchEnv` + `pitchScale`. Edits are
+`layer` node (spawned just off the note). Edits are
 coalesced into one undo entry per overlay session; undo **never leaves edit
 mode** — it pops the session's snapshot, restores, and reopens the same editor
 (`flowActiveEditId` + `openFlowNodeEditor`). If an open editor has **not**
@@ -380,7 +415,7 @@ is popped — `flowEditorPending` gates the pop).
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.36.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.43.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).

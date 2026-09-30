@@ -9,8 +9,10 @@
    Node types: Note (🎵, the entry point — aggregates a required
    Volume envelope + up to 3 Layers), Layer (🧅, one oscillator: a required
    Wave + an optional mix Env and pitch Env, plus static Mix/Pitch faders
-   that take over while no env is hooked), Volume (📉, the ADSR envelope
-   with HOLD/CUT/REL markers), Env (📈, a kind-agnostic neutral curve),
+   that take over while no env is hooked), Volume/Pitch (📉, the ADSR envelope
+   with HOLD/CUT/REL markers — also carries the note's master pitch curve
+   on the same timeline, edited via the envelope editor's Vol/Pitch toggle),
+   Env (📈, a kind-agnostic neutral curve),
    Wave (🌊, harmonic spectrum), and Unison (🦄, one additional voice with
    optional vol/st/ct animation envelopes).
 
@@ -115,7 +117,7 @@ function flowSourceColor(node) {
 // curve whose consumers decide what it means (mix / st / ct / voice volume).
 const FLOW_NODE_TYPES = {
   note: { label: 'Note', emoji: '🎵' },
-  volumeEnv: { label: 'Volume', emoji: '📉' },
+  volumeEnv: { label: 'Volume/Pitch', emoji: '📉' },
   env: { label: 'Env', emoji: '📈' },
   wave: { label: 'Wave', emoji: '🌊' },
   layer: { label: 'Layer', emoji: '🧅' },
@@ -385,7 +387,9 @@ function defaultEnvCurve() {
    envs (its own static Mix/Pitch faders take over when an env is absent); a wave
    may feed a unison; a unison may feed up to three envs (volume / st / ct). */
 function defaultConn(type) {
-  if (type === 'note') return { volumeEnv: null, pitchEnv: null, layers: [null, null, null] };
+  // A note's master pitch no longer has its own slot: the pitch curve lives on
+  // the note's volume envelope (envelope.pitch), on the same timeline.
+  if (type === 'note') return { volumeEnv: null, layers: [null, null, null] };
   if (type === 'layer') return { wave: null, mixEnv: null, pitchEnv: null };
   if (type === 'wave') return { unison: [] };
   if (type === 'unison') return { volEnv: null, stEnv: null, ctEnv: null };
@@ -450,7 +454,6 @@ function flowSlotRows(node) {
   const rows = [];
   if (node.type === 'note') {
     rows.push({ slot: { key: 'volumeEnv' }, label: 'Vol env', req: true, y: 0 });
-    rows.push({ slot: { key: 'pitchEnv' }, label: 'Pitch env', y: 0 });
     // Every layer slot is optional/muteable: a muted layer connection silences
     // that layer without touching it.
     for (let i = 0; i < 3; i++) {
@@ -807,10 +810,26 @@ function flowSideClearRect() {
   const s = flowSideRect();
   return { x: s.x + s.w - 96, y: 8, w: 86, h: 28 };
 }
+// Side-bar order: note nodes first, alphabetical by their displayed name (the
+// flowNoteName, falling back to the "Note" type label — case-insensitive), then
+// every other node in grid order.
+function flowSideOrderedNodes() {
+  const notes = [];
+  const rest = [];
+  for (const n of flowNodes) (n.type === 'note' ? notes : rest).push(n);
+  notes.sort((a, b) => {
+    const la = (flowNoteName(a) || FLOW_NODE_TYPES.note.label).toLowerCase();
+    const lb = (flowNoteName(b) || FLOW_NODE_TYPES.note.label).toLowerCase();
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+    return 0;
+  });
+  return notes.concat(rest);
+}
 function flowSideRows() {
   const s = flowSideRect();
   const top = s.y + FLOW_SIDE_HDR;
-  return flowNodes.map((node, i) => ({
+  return flowSideOrderedNodes().map((node, i) => ({
     node, x: s.x, y: top - flowSideScrollY + i * FLOW_SIDE_ROW_H, w: s.w, h: FLOW_SIDE_ROW_H,
   }));
 }
@@ -827,7 +846,7 @@ function flowSideRowAt(x, y) {
   if (flowSideScrollY > max) flowSideScrollY = max;
   const idx = Math.floor((y - (s.y + FLOW_SIDE_HDR) + flowSideScrollY) / FLOW_SIDE_ROW_H);
   if (idx < 0 || idx >= flowNodes.length) return null;
-  return flowNodes[idx];
+  return flowSideOrderedNodes()[idx];
 }
 // Whether a node has any connection, to OR from: it feeds at least one consumer
 // slot, or it consumes at least one filled slot itself. Used by the side-bar list
@@ -1216,6 +1235,10 @@ function drawFlowStop() {
 /* ---- Persistence ---- */
 function saveFlow() {
   try { localStorage.setItem(FLOW_SAVE_KEY, JSON.stringify({ nodes: flowNodes, envDrawPoints: flowEnvDrawPoints })); } catch (err) {}
+  // The instrument selector (instrument.js, loaded after flow.js) mirrors the
+  // flow graph's note nodes; refresh it whenever the graph changes and reapply
+  // the active instrument so edits to it are heard live in the playing area.
+  if (typeof onFlowGraphChanged === 'function') onFlowGraphChanged();
 }
 // A wave node's spectrum, loaded and clamped from storage: specPoints sorted by
 // x with clamped x (0..1) / a (−1..1), amplitudes clamped; falls back to the
@@ -1274,7 +1297,6 @@ function connFromSaved(type, c) {
   if (!out || !c || typeof c !== 'object') return out;
   if (type === 'note') {
     out.volumeEnv = typeof c.volumeEnv === 'string' ? c.volumeEnv : null;
-    out.pitchEnv = typeof c.pitchEnv === 'string' ? c.pitchEnv : null;
     for (let i = 0; i < 3; i++) {
       out.layers[i] = (Array.isArray(c.layers) && typeof c.layers[i] === 'string') ? c.layers[i] : null;
     }
@@ -1337,8 +1359,8 @@ function flowPruneConns() {
 // Rewrite a raw saved node array for the Layer node model (v1.35). Notes saved
 // before it connected waves directly ({ waves[3], mixEnvs[3], pitchEnv }); each
 // connected wave becomes a synthetic Layer node owning the wave + its mix env.
-// The note keeps its own master pitch env + scale (still the overall-note
-// fallback for layers without a pitch env of their own), so those stay put.
+// The note's own master pitch lives on its volume envelope now (envelope.pitch),
+// so the old separate pitch env slot is simply dropped on load.
 // Nodes already saved in the new shape ({ layers[3] }) pass through untouched.
 function flowMigrateOldWaveConns(arr) {
   const extra = [];
@@ -1365,7 +1387,7 @@ function flowMigrateOldWaveConns(arr) {
       });
       layers[i] = lid;
     }
-    n.conn = { volumeEnv: typeof c.volumeEnv === 'string' ? c.volumeEnv : null, pitchEnv: typeof c.pitchEnv === 'string' ? c.pitchEnv : null, layers };
+    n.conn = { volumeEnv: typeof c.volumeEnv === 'string' ? c.volumeEnv : null, layers };
   }
   return arr.concat(extra);
 }
@@ -1545,7 +1567,7 @@ function flowPortEmoji(slot) {
   return '📈';   // mixEnv, pitchEnv, volEnv, stEnv, ctEnv
 }
 function flowPortLabel(slot) {
-  if (slot.key === 'volumeEnv') return 'Vol';
+  if (slot.key === 'volumeEnv') return 'Vol/Pitch';
   if (slot.key === 'pitchEnv') return 'Pitch';
   if (slot.key === 'layers') return 'L' + ((slot.idx != null ? slot.idx : 0) + 1);
   if (slot.key === 'wave') return 'Wave';
@@ -1810,7 +1832,6 @@ function flowPorts(node) {
   };
   if (node.type === 'note') {
     seat({ key: 'volumeEnv' }, true, 'free', 'top', 0);
-    seat({ key: 'pitchEnv' }, false, 'free', 'top', -34);
     for (let i = 0; i < 3; i++) seat({ key: 'layers', idx: i }, false, 'free', 'right', (i - 1) * 27);
   } else if (node.type === 'layer') {
     seat({ key: 'wave' }, true, 'free', 'right', 0);
@@ -2453,7 +2474,7 @@ function drawFlowWidgetNote(n, r) {
   ctx.globalAlpha = 1;
   // Pitch-scale slider (read-only): a full-strength pitch env bends the note
   // ±N semitones, or the track sits empty while no pitch env is connected.
-  const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
+  const hasPitch = flowNoteHasPitch(n);
   const st = flowPitchScale(n);
   ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
   ctx.font = '800 10px sans-serif';
@@ -2574,7 +2595,8 @@ function drawFlowWidgetWave(n, r) {
 // connected to the node — the envelope drives that value, so its slider is
 // disabled until the connection is removed.
 function flowUnisonParamLocked(node, key) {
-  return !!(node && connSlotGet(node, { key: key + 'Env' }));
+  const slot = { key: key + 'Env' };
+  return !!(node && connSlotGet(node, slot) && !connSlotMuted(node, slot));
 }
 function drawFlowWidgetUnison(n, r) {
   const vs = (Array.isArray(n.voices) && n.voices.length) ? n.voices : null;
@@ -2689,7 +2711,8 @@ var flowLayerDrag = null;    // { nodeId, key } active layer-fader drag, or null
 var flowLayerArm = null;     // { nodeId, key } a press on a layer fader row, waiting to become a drag or a long-press move, or null
 var flowLayerDirty = false;  // any edit happened this drag session (coalesces undo)
 function flowLayerParamLocked(node, key) {
-  return !!(node && connSlotGet(node, { key: key + 'Env' }));
+  const slot = { key: key + 'Env' };
+  return !!(node && connSlotGet(node, slot) && !connSlotMuted(node, slot));
 }
 function drawFlowWidgetLayer(n, r) {
   const mixLocked = flowLayerParamLocked(n, 'mix');
@@ -3091,7 +3114,7 @@ function flowLayerHandleMove(x, y) {
   const n = flowNodeById(flowLayerEdit);
   if (flowLayerPtr.key === 'pitchScale') {
     const f = flowLayerScaleRow(p);
-    if (f && n && connSlotGet(n, { key: f.slot })) flowLayerSetEnvScale(x, f);
+    if (f && n && !flowLayerParamLocked(n, 'pitch')) flowLayerSetEnvScale(x, f);
     return;
   }
   const f = flowLayerFaders(p).find(f => f.key === flowLayerPtr.key);
@@ -3375,7 +3398,7 @@ function drawFlowNoteEditor() {
   // Pitch-scale slider (editable here): how many semitones a full-strength
   // pitch env bends the note (the overall, master bend applied to every layer
   // without a pitch env of its own). Disabled while no pitch env is connected.
-  const hasPitch = !!connSlotGet(n, { key: 'pitchEnv' });
+  const hasPitch = flowNoteHasPitch(n);
   const st = flowPitchScale(n);
   const ps = flowNoteEditorPitch(p);
   ctx.fillStyle = hasPitch ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)';
@@ -3460,7 +3483,7 @@ function flowNoteHandleDown(x, y) {
   }
   // Pitch-scale slider — editable only while a pitch env is connected.
   const ps = flowNoteEditorPitch(p);
-  if (n && connSlotGet(n, { key: 'pitchEnv' }) && y >= ps.y - 18 && y <= ps.y + 18 && x >= ps.x - 12 && x <= ps.x2 + 12) {
+  if (n && flowNoteHasPitch(n) && y >= ps.y - 18 && y <= ps.y + 18 && x >= ps.x - 12 && x <= ps.x2 + 12) {
     flowPushHistory();
     flowNoteDirty = true;
     flowSetPitchScale(n, flowPitchScaleFromX(ps, x));
@@ -3682,9 +3705,9 @@ function drawFlow(now) {
 }
 
 /* ---- Envelope editor overlay ----
-   Editing an envelope node reuses the legacy sound creator's envelope logic
+   Editing an envelope node reuses the shared envelope logic in creator.js
    (envBoundaries, envSplitAtTime, envDragBoundary, envDeleteAt, markerValidTimes,
-   dragCreatorMarker, hitTestEnv, segment line types, ...) by temporarily pointing
+   dragCreatorMarker, segment line types, ...) by temporarily pointing
    the shared global ENVELOPE at the node's own envelope object. The overlay
    panel is drawn with this screen's dark theme and is partially transparent so
    the flow grid stays visible behind it. */
@@ -3698,6 +3721,123 @@ var flowEnvSyncOn = false; // hold↔release Y are synced (loop-smooth) → the 
 var flowEnvMarkerHold = null; // { key, t0 } press-and-hold on a HOLD/REL marker tab (fires sync in flowLoop)
 var flowEnvSegHold = null; // { idx, t0 } press-and-hold in a segment's section (long-press opens the segment editor)
 var flowEnvDrawArmed = false; // the ✏️ draw-mode toggle: armed → plot presses scribble freehand points
+// The envelope node carries BOTH curves on one shared timeline (the volume ADSR
+// owns the HOLD/CUT/REL markers; the pitch bend rides the same axis). 'vol'
+// edits the volume components; 'pitch' edits the pitch curve on the same plot
+// with the markers shown as read-only guides.
+var flowEnvMode = 'vol';
+// The mode toggle pills (top-left of the editor header, clear of Clear/Draw).
+function flowEnvModeToggle(p) {
+  const w = 46, h = 24, gap = 6;
+  const x = p.x + 16;
+  const y = p.y + 8;
+  return [
+    { mode: 'vol', label: 'Vol', x, y, w, h },
+    { mode: 'pitch', label: 'Pitch', x: x + w + gap, y, w, h },
+  ];
+}
+function flowEnvSetMode(m) {
+  if (m !== 'vol' && m !== 'pitch') return;
+  flowEnvMode = m;
+  // Reset both curves' drag/segment/draw state on the switch.
+  flowEnvPtr = null;
+  flowEnvMarker = null;
+  flowEnvSegFrom = null;
+  flowEnvSegTo = null;
+  flowEnvMarkerHold = null;
+  flowEnvSegHold = null;
+  flowEnvDrawArmed = false;
+  flowCurveIsPitch = m === 'pitch';
+  flowCurvePtr = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
+  flowCurveDirty = false;
+  flowCurveDrawArmed = false;
+  flowPushHistory();
+}
+function drawFlowEnvModeToggle(p) {
+  for (const pill of flowEnvModeToggle(p)) {
+    const active = flowEnvMode === pill.mode;
+    drawRoundRect(pill.x, pill.y, pill.w, pill.h, 7);
+    ctx.fillStyle = active ? '#ffffff' : '#2b2b2b';
+    ctx.fill();
+    ctx.strokeStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = active ? 1.5 : 1;
+    ctx.stroke();
+    ctx.fillStyle = active ? '#000000' : '#ffffff';
+    ctx.font = '800 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pill.label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+}
+// Read-only HOLD/CUT/REL guides over the pitch curve: the envelope's marker
+// positions on the shared timeline, derived live each frame so they can never
+// drift out of sync. The volume editor is where the markers are moved.
+function drawFlowPitchGuides(pl) {
+  const tl = designTimeline();
+  const defs = [
+    { key: 'hold', label: 'HOLD', color: '#7ecfff', t: tl.tHoldStart },
+    { key: 'cut', label: 'CUT', color: '#ffb37a', t: tl.tCut },
+    { key: 'rel', label: 'REL', color: '#ff9aa0', t: tl.tHoldEnd },
+  ];
+  ctx.setLineDash([4, 4]);
+  for (const m of defs) {
+    const x = tToX(clamp01(m.t), pl);
+    ctx.strokeStyle = m.color;
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, pl.top);
+    ctx.lineTo(x, pl.bottom);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = m.color;
+    ctx.font = '800 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.label, x, pl.top - 10);
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.setLineDash([]);
+}
+
+// Faint, dashed guides of the SIBLING curve on the volume/pitch node's shared
+// timeline: the Vol tab draws the note's pitch curve behind the editable volume
+// envelope, and the Pitch tab draws the volume envelope behind the editable
+// pitch curve. Both editors use the same plot rect, so the pitch amp axis and
+// the volume 0..1 axis line up (volume v sits at pitch amp 2v−1), letting the
+// user see how the two shapes relate without switching tabs.
+function drawFlowEnvPitchGuide(pl) {
+  const pitch = flowEnvelopePitch(ENVELOPE);
+  if (!pitch || !Array.isArray(pitch.points) || pitch.points.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.strokeStyle = '#8dd3ff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  strokeSegPath(flowCurveScreenPoints(pitch.points, +pitch.trim || 0, pl), 1, v => ampToY(clampSign(v), pl));
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+function drawFlowEnvVolumeGuide(pl) {
+  const eb = envBoundaries();
+  const trim = envTrim(ENVELOPE);
+  const vOf = v => clamp01(v + trim);
+  const pts = [];
+  for (let i = 0; i <= eb.n; i++) {
+    pts.push({ x: tToX(eb.tOf(eb.b[i]), pl), y: vToY(vOf(eb.vals[i]), pl), v: vOf(eb.vals[i]), el: i < eb.n ? eb.env.components[i] : null });
+  }
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  strokeSegPath(pts, 1, v => vToY(clamp01(v), pl));
+  ctx.setLineDash([]);
+  ctx.restore();
+}
 
 // The shared enlarged editor panel: the node's own widget, grown in place at
 // its position (centered on the node, clamped to stay on screen), so the rest
@@ -3793,6 +3933,13 @@ function openFlowEnvelopeEditor(id) {
   flowEnvSegHold = null;
   flowEnvDrawArmed = false;
   flowEnvSyncOn = false;   // sync mode is off until the user turns it on (long-press / toggle)
+  flowEnvMode = 'vol';     // start on the volume curve; the pitch tab reuses the curve editor
+  flowCurveIsPitch = false;
+  flowCurvePtr = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
+  flowCurveDirty = false;
+  flowCurveDrawArmed = false;
   flowAddMenu = null;
   flowMoveId = null;
   flowConnArm = null;
@@ -3812,6 +3959,13 @@ function closeFlowEnvelopeEditor() {
   flowEnvSegHold = null;
   flowEnvDrawArmed = false;
   flowEnvSyncOn = false;
+  flowEnvMode = 'vol';
+  flowCurveIsPitch = false;
+  flowCurvePtr = null;
+  flowCurveSegFrom = null;
+  flowCurveSegTo = null;
+  flowCurveDirty = false;
+  flowCurveDrawArmed = false;
   saveFlow();
 }
 // Wrap an edit: the first mutation of a session records one undo entry.
@@ -4132,6 +4286,15 @@ function flowEnvSegAtX(x, pl) {
 }
 
 function drawFlowEnvEditor() {
+  // The Pitch tab reuses the env-curve editor (points/draw/segments/trim)
+  // against ENVELOPE.pitch, then overlays the read-only HOLD/CUT/REL guides.
+  if (flowEnvMode === 'pitch') {
+    flowCurveIsPitch = true;
+    drawFlowCurveEditor();
+    drawFlowPitchGuides(flowEnvPlot(flowEnvPanel(), true));
+    drawFlowEnvModeToggle(flowEnvPanel());
+    return;
+  }
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p, true);
   // Partially transparent backdrop: the flow grid shows through.
@@ -4150,6 +4313,7 @@ function drawFlowEnvEditor() {
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '700 11px sans-serif';
   ctx.fillText('Shapes this node’s volume over its note', p.x + 86, p.y + 30);
+  drawFlowEnvModeToggle(p);
   // Dock the line-mode strip at the top while a segment is selected.
   if (flowEnvSegRange()) drawFlowSegStrip(p, { current: flowEnvSegCurrent, range: flowEnvSegRange, paramValue: flowEnvSegParamValue });
   // Clear pill.
@@ -4304,6 +4468,8 @@ function drawFlowEnvEditor() {
   ctx.textAlign = 'left';
   ctx.fillText('100%', pl.left + 2, pl.top + 10);
   ctx.fillText('0%', pl.left + 2, pl.bottom - 4);
+  // Faint pitch-curve guide (the curve the Pitch tab edits) behind the volume.
+  drawFlowEnvPitchGuide(pl);
   // Envelope curve + boundary dots (offset by the trim).
   const eb = envBoundaries();
   const trim = envTrim(ENVELOPE);
@@ -4379,7 +4545,8 @@ function drawFlowEnvEditor() {
   ctx.fillText('Tap + drag adds a point · drag a dot off the graph to delete (🗑) · ✏️ draws (' + flowEnvDrawCount() + ' pts · slider) · long-press a line to shape it', p.x + p.w / 2, p.y + p.h - 8);
 }
 
-// A fatter grab for boundary dots than hitTestEnv's 18px: fingers are imprecise,
+// A fatter grab for boundary dots than the envelope editor's usual 18px:
+// fingers are imprecise,
 // and the end dot sits exactly on the plot's right edge, so a tap that lands a
 // little past the border (or just off the dot) should still grab it rather than
 // spawning a new point.
@@ -4396,9 +4563,14 @@ function flowEnvHitBoundary(x, y, pl) {
 }
 function flowEnvHandleDown(x, y) {
   const p = flowEnvPanel();
-  const pl = flowEnvPlot(p, true);
   // Tap anywhere outside the panel to dismiss (no ✕ button).
   if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) { closeFlowEnvelopeEditor(); return; }
+  // Vol/Pitch mode toggle (shared with the Pitch tab's own editor).
+  for (const pill of flowEnvModeToggle(p)) {
+    if (x >= pill.x && x <= pill.x + pill.w && y >= pill.y && y <= pill.y + pill.h) { flowEnvSetMode(pill.mode); return; }
+  }
+  if (flowEnvMode === 'pitch') { flowCurveHandleDown(x, y); return; }
+  const pl = flowEnvPlot(p, true);
   // Clear pill: reset to a single straight line — a lone component holding the
   // full volume across the whole note (the flat "no shaping" envelope).
   const cp = flowEnvClearPill(p);
@@ -4526,6 +4698,7 @@ function flowEnvHandleDown(x, y) {
 }
 
 function flowEnvHandleMove(x, y) {
+  if (flowEnvMode === 'pitch') { flowCurveHandleMove(x, y); return; }
   if (!flowEnvPtr) return;
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p, true);
@@ -4610,6 +4783,7 @@ function flowEnvHandleMove(x, y) {
 }
 
 function flowEnvHandleUp(x, y) {
+  if (flowEnvMode === 'pitch') { flowCurveHandleUp(x, y); return; }
   const p = flowEnvPanel();
   const pl = flowEnvPlot(p, true);
   if (flowEnvPtr) {
@@ -5547,8 +5721,9 @@ function flowUnisonHandleMove(x, y) {
   if (!flowUnisonDrag) return;
   const p = flowUnisonPanel();
   if (flowUnisonDrag.key === 'stScale' || flowUnisonDrag.key === 'ctScale') {
-    const f = flowUnisonScaleRow(p, flowUnisonDrag.key === 'stScale' ? 'st' : 'ct');
-    if (f && connSlotGet(flowNodeById(flowUnisonEdit), { key: f.slot })) flowUnisonSetEnvScale(f.key, x, f);
+    const param = flowUnisonDrag.key === 'stScale' ? 'st' : 'ct';
+    const f = flowUnisonScaleRow(p, param);
+    if (f && !flowUnisonParamLocked(flowNodeById(flowUnisonEdit), param)) flowUnisonSetEnvScale(f.key, x, f);
     return;
   }
   const f = flowUnisonFaders(p).find(f => f.key === flowUnisonDrag.key);
@@ -5570,18 +5745,32 @@ var flowCurveDirty = false;   // any edit happened this session (coalesces undo)
 var flowCurvePtr = null;      // { kind: 'point'|'draw'|'segarm'|'trim'|'segparam', ... } active drag
 var flowCurveSegFrom = null, flowCurveSegTo = null;   // selected segment (point indexes)
 var flowCurveDrawArmed = false; // the ✏️ draw-mode toggle: armed → plot presses scribble freehand points
+// When true, the curve editor operates on the envelope editor's pitch curve
+// (ENVELOPE.pitch) instead of a standalone env node — the "Pitch" tab of the
+// volume envelope node. Set/cleared by flowEnvSetMode / open&closeFlowEnvelopeEditor.
+var flowCurveIsPitch = false;
 
 function flowCurvePanel() { return flowEnvPanel(); }
 function flowCurvePlot(p) { return flowEnvPlot(p, true); }
 function flowCurveClearPill(p) { return flowEnvClearPill(p); }
 function flowCurvePointsOf(node) {
+  if (flowCurveIsPitch) {
+    const pitch = flowEnvelopePitch(ENVELOPE);
+    return pitch ? pitch.points : null;
+  }
   const n = flowNodeById(node);
   if (!n) return null;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
   return n.env.points;
 }
-// The env node's curve object itself (ensured a default, with a trim).
+// The curve object being edited (env node's `env`, or the envelope's pitch when
+// the curve editor is in the envelope editor's Pitch tab).
 function flowCurveEnvOf(node) {
+  if (flowCurveIsPitch) {
+    const pitch = flowEnvelopePitch(ENVELOPE);
+    if (pitch && pitch.trim == null) pitch.trim = 0;
+    return pitch;
+  }
   const n = flowNodeById(node);
   if (!n) return null;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
@@ -5755,6 +5944,7 @@ function openFlowCurveEditor(id) {
   if (!n || n.type !== 'env') return;
   if (!n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) n.env = defaultEnvCurve();
   flowCurveEdit = id;
+  flowCurveIsPitch = false;   // a standalone env node, not the envelope's pitch tab
   flowCurveDirty = false;
   flowCurvePtr = null;
   flowCurveSegFrom = null;
@@ -5797,10 +5987,17 @@ function drawFlowCurveEditor() {
   ctx.font = '800 16px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('Env', p.x + 16, p.y + 30);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = '700 11px sans-serif';
-  ctx.fillText('Neutral curve · 0 = no change · consumers decide the meaning', p.x + 86, p.y + 30);
+  if (flowCurveIsPitch) {
+    ctx.fillText('Pitch', p.x + 16, p.y + 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('Bends the note’s pitch · full deflection = ±its pitch scale · guides = the note’s timeline', p.x + 70, p.y + 30);
+  } else {
+    ctx.fillText('Env', p.x + 16, p.y + 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px sans-serif';
+    ctx.fillText('Neutral curve · 0 = no change · consumers decide the meaning', p.x + 86, p.y + 30);
+  }
   // Dock the line-mode strip at the top while a segment is selected.
   if (flowCurveSegRange()) drawFlowSegStrip(p, { current: flowCurveSegCurrent, range: flowCurveSegRange, paramValue: flowCurveSegParamValue });
   // Clear pill (row 1, right): reset to the flat neutral line.
@@ -5893,14 +6090,18 @@ function drawFlowCurveEditor() {
     ctx.fillStyle = 'rgba(141,211,255,0.14)';
     ctx.fillRect(x0, pl.top, Math.max(1, x1 - x0), pl.ph);
   }
-  // Neutral (0) line highlighted.
-  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([5, 5]);
-  ctx.beginPath();
-  ctx.moveTo(pl.left, y0); ctx.lineTo(pl.right, y0);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Neutral (0) line highlighted — except on the volume/pitch node's Pitch tab,
+  // where the volume guide already provides the reference and a second line down
+  // the middle just reads as a redundant guide.
+  if (!flowCurveIsPitch) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(pl.left, y0); ctx.lineTo(pl.right, y0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   // Axis labels.
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '700 10px sans-serif';
@@ -5908,6 +6109,9 @@ function drawFlowCurveEditor() {
   ctx.fillText('+100%', pl.left + 2, pl.top + 10);
   ctx.fillText('0', pl.left + 2, y0 + 3);
   ctx.fillText('−100%', pl.left + 2, pl.bottom - 4);
+  // On the volume/pitch node's Pitch tab, overlay a faint guide of the volume
+  // envelope the Vol tab edits (a standalone env node has no volume sibling).
+  if (flowCurveIsPitch) drawFlowEnvVolumeGuide(pl);
   // Curve + dots: each span renders its own line type (Line/Stairs/Spring/
   // Pulse); the trim offsets the whole curve vertically like the envelope's.
   ctx.strokeStyle = '#8dd3ff';
@@ -6188,8 +6392,8 @@ function flowCurveHandleUp(x, y) {
    A note is the entry point of a sound: it aggregates its volume envelope, up
    to three Layers (each a wave + optional mix/pitch envs + static Mix/Pitch
    offsets), and the unison stacks hanging off each layer's wave. The note keeps
-   its own overall pitch env (the master, applied to any layer without a pitch
-   env of its own). compileFlowNote() builds the legacy globals (ENVELOPE,
+   its own overall pitch env (the master, summed ON TOP of each layer's own
+   static pitch / pitch env — see compileLayerPitchEnv). compileFlowNote() builds the legacy globals (ENVELOPE,
    OSC_STACK, per-layer pitch envs, per-voice envs) from the connected graph;
    playFlowNote() swaps them in, previews the note, and restores. */
 function compileFlowNote(note) {
@@ -6320,43 +6524,69 @@ function compileLayerPitchEnv(ln, master) {
   }
   if (!own) return null;
   if (!master || !master.points || master.points.length < 2) return { range: SCALE, points: own };
-  // Sum the note's master bend on top of the layer's own at the union of their
-  // knot times (a layer with only a static pitch still follows the master's
-  // whole shape, with the offset added everywhere).
+  // Sum the note's master bend on top of the layer's own. When both curves are
+  // plain lines the sum is exactly reproduced at the union of their knot times,
+  // so a compact 3-6 point curve is enough. Any Stairs/Spring/Pulse line type
+  // (on either curve) cannot be represented by a single summed curve — and
+  // stretching one curve's shape across the other's knots distorts it — so fall
+  // back to densely sampling the true sum, which the engine plays back linearly.
   const ownObj = { range: SCALE, points: own };
-  const ts = new Set();
-  own.forEach(p => ts.add(p.t));
-  master.points.forEach(p => ts.add(clamp01(p.t)));
-  const times = Array.from(ts).sort((a, b) => a - b);
-  const pts = times.map(t => ({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) }));
-  // Carry the layer's own seg line types onto spans that still stretch between
-  // two consecutive own points (an undivided piece of its curve).
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i].t, b = pts[i + 1].t;
-    for (let k = 0; k < own.length - 1; k++) {
-      if (own[k].seg && Math.abs(own[k].t - a) < 1e-6 && Math.abs(own[k + 1].t - b) < 1e-6) {
-        pts[i].seg = clone(own[k].seg);
-        break;
-      }
+  const hasSeg = own.some(p => p.seg) || master.points.some(p => p.seg);
+  let pts;
+  if (hasSeg) {
+    const N = 256;
+    pts = [];
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1);
+      pts.push({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) });
     }
+  } else {
+    const ts = new Set();
+    own.forEach(p => ts.add(p.t));
+    master.points.forEach(p => ts.add(clamp01(p.t)));
+    const times = Array.from(ts).sort((a, b) => a - b);
+    pts = times.map(t => ({ t, st: envValueAt(ownObj, t) + envValueAt(master, t) }));
   }
   return { range: SCALE, points: pts };
 }
-// The note's optional pitch-env connection, compiled to the legacy MASTER_PITCH_ENV
-// shape ({ range, points: [{ t, st }] }): an env curve's v ∈ −1..1 maps to a
-// semitone bend, full deflection = ±the note's pitch scale (default ±12 st, one
-// octave); the trim shifts the whole curve first, and each span's line type
-// rides along. Disconnected or missing → null (the note plays at its base pitch).
-// This is the OVERALL-note bend: it applies to every layer that has no pitch env
-// of its own (the layer's own env wins when both are connected).
+// A note's master pitch envelope, merged into its volume envelope: a curve on
+// the same 0..1 timeline as the volume (so the HOLD/CUT/REL structure is shared
+// and always in sync), v ∈ −1..1 with the note's pitchScale as full deflection.
+// Ensured a flat-0 default on first access so the pitch bend is opt-in.
+function flowEnvelopePitch(env) {
+  if (!env || typeof env !== 'object') return null;
+  if (!env.pitch || !Array.isArray(env.pitch.points) || env.pitch.points.length < 2) env.pitch = defaultEnvCurve();
+  if (env.pitch.trim == null) env.pitch.trim = 0;
+  return env.pitch;
+}
+// The volume envelope node's pitch curve, or null when the note has none.
+function flowNotePitchCurve(note) {
+  const envId = note && note.conn ? note.conn.volumeEnv : null;
+  const envNode = envId ? flowNodeById(envId) : null;
+  if (!envNode || envNode.type !== 'volumeEnv' || !envNode.envelope) return null;
+  return flowEnvelopePitch(envNode.envelope);
+}
+// Whether a note's pitch actually bends anything: its volume envelope's pitch
+// curve deviates from the flat-neutral line (or the trim is off zero).
+function flowNoteHasPitch(note) {
+  const pitch = flowNotePitchCurve(note);
+  if (!pitch) return false;
+  const trim = +pitch.trim || 0;
+  return pitch.points.some(pt => Math.abs((+pt.v || 0) + trim) > 1e-6);
+}
+// The note's optional pitch curve, compiled to the legacy MASTER_PITCH_ENV
+// shape ({ range, points: [{ t, st }] }): the volume envelope's pitch curve's
+// v ∈ −1..1 maps to a semitone bend, full deflection = ±the note's pitch scale
+// (default ±12 st, one octave); the trim shifts the whole curve first, and each
+// span's line type rides along. A flat curve → no bend. This is the
+// OVERALL-note bend: compileLayerPitchEnv sums it on top of every layer's own
+// pitch (static fader or pitch env), so layer- and note-level pitch stack.
 function compileMasterPitchEnv(note) {
-  const id = note && note.conn ? note.conn.pitchEnv : null;
-  const n = id ? flowNodeById(id) : null;
-  if (!n || n.type !== 'env' || !n.env || !Array.isArray(n.env.points) || n.env.points.length < 2) return null;
-  if (connSlotMuted(note, { key: 'pitchEnv' })) return null;   // muted pitch port → no bend
+  const pitch = flowNotePitchCurve(note);
+  if (!pitch || !Array.isArray(pitch.points) || pitch.points.length < 2) return null;
   const SCALE = flowPitchScale(note);
-  const trim = +n.env.trim || 0;
-  const points = n.env.points.map(pt => {
+  const trim = +pitch.trim || 0;
+  const points = pitch.points.map(pt => {
     const p = { t: clamp01(pt.t), st: ((+pt.v || 0) + trim) * SCALE };
     if (pt.seg && typeof pt.seg === 'object') p.seg = clone(pt.seg);
     return p;
@@ -6394,36 +6624,27 @@ function compileUnisonEnvs(uni) {
   out.vol = mk(c.volEnv, 2, 1, 1, { key: 'volEnv' });
   return (out.st || out.ct || out.vol) ? out : null;
 }
+// Play a note exactly the way the playing field does: build a synthetic gesture
+// (a single point at the preview pitch and preview base volume) and run it
+// through whichever scheduler the field is configured to use — the wait-mode
+// scheduler (schedulePathAudio) or the live one (initLivePathAudio). The compiled
+// globals are swapped in for the synchronous scheduling call, then restored —
+// same as the instrument selector applies them on the field.
 function playFlowNote(note) {
-  const compiled = compileFlowNote(note);
-  if (!compiled) return false;
-  initAudio();
-  resumeAudio();
-  if (!audioCtx || !masterGain) return false;
-  const saved = { ENVELOPE, OSC_STACK, MASTER_PITCH_ENV, MASTER_VOICE_ENVS };
-  ENVELOPE = compiled.envelope;
-  OSC_STACK = { layers: compiled.layers };
-  MASTER_PITCH_ENV = compiled.masterPitchEnv;
-  MASTER_VOICE_ENVS = compiled.masterVoiceEnvs;
-  try { previewNote(previewPitchName()); }
-  finally {
-    ENVELOPE = saved.ENVELOPE;
-    OSC_STACK = saved.OSC_STACK;
-    MASTER_PITCH_ENV = saved.MASTER_PITCH_ENV;
-    MASTER_VOICE_ENVS = saved.MASTER_VOICE_ENVS;
-  }
-  return true;
+  return previewFlowNote(note, 'full');
 }
 
 /* ---- Note play modes (tap / full length / live) ----
-   Beyond the one-shot full-length preview (playFlowNote above), a flow note can
-   also be played like a tap or held live. Both reuse the shared live-note
-   scheduler (initLivePathAudio / tickLiveHold / finishLivePathNote in audio.js)
-   driven by a minimal synthetic "gesture": a single point at the preview pitch
-   and preview base volume. Because they run the real live scheduler, every
-   connected envelope applies — volume, wave mix, and unison vol/st/ct/pitch.
-   The synthetic playback path is never drawn (gesture rendering only runs in
-   the main area), so no stray circles appear in flow mode. */
+   A flow note's tap / full previews run the playing field's wait-mode scheduler
+   (schedulePathAudio) over a synthetic released gesture — the field's one-pass
+   path, so every connected envelope applies the same way it does on the field.
+   (The live scheduler is not used for these one-shots: finishLivePathNote
+   assumes the body already played, so it would cancel the freshly-baked body
+   curves.) The live preview button still uses the live scheduler
+   (initLivePathAudio / tickLiveHold / finishLivePathNote), driven by a minimal
+   synthetic "gesture": a single point at the preview pitch and preview base
+   volume. The synthetic playback path is never drawn (gesture rendering only
+   runs in the main area), so no stray circles appear in flow mode. */
 var flowLive = null;    // { ds, nodeId } while a flow note's live button is held
 function flowSyntheticDs(savedGlobals) {
   // Same base volume as the full preview (previewNote clamps its base to 0.35),
@@ -6439,6 +6660,25 @@ function flowSyntheticDs(savedGlobals) {
     finished: false,
     playback: { pts: [], cumTime: [], totalMs: 0, relMs: 0, startedAt: performance.now(), released: false, looped: true },
     savedGlobals,
+  };
+}
+// The synthetic gesture for the one-shot (wait-mode) previews. The field's wait
+// mode schedules a whole released gesture at once (schedulePathAudio), so this
+// ds mirrors a released field gesture: a single point at the preview pitch and
+// preview base volume, `totalMs` = the body to play. Running it through
+// schedulePathAudio makes the tap / full previews bit-for-bit the same scheduler
+// the playing field uses in wait mode.
+function flowPreviewWaitDs(bodyMs) {
+  const y = yForBaseVolume(Math.max(0.35, baseVolumeFromY(H * 0.55)));
+  return {
+    startX: 0, startY: y,
+    pts: [{ x: 0, y }],
+    cumTime: [0],
+    totalMs: bodyMs,
+    pitchOverride: previewPitchName(),
+    lastMoveAt: 0,
+    finished: false,
+    playback: null,
   };
 }
 // Swap the shared sound globals in for the compiled flow note. They stay
@@ -6458,6 +6698,36 @@ function flowGlobalsRestore(saved) {
   OSC_STACK = saved.OSC_STACK;
   MASTER_PITCH_ENV = saved.MASTER_PITCH_ENV;
   MASTER_VOICE_ENVS = saved.MASTER_VOICE_ENVS;
+}
+// One-shot preview (tap / full): compile the note, swap in its globals for the
+// synchronous scheduling call, and run the playing field's wait-mode scheduler
+// (schedulePathAudio) over a synthetic released gesture. This is the field's
+// one-pass scheduler, so every connected envelope applies exactly as it does
+// when the field plays a released gesture in wait mode. (The live scheduler is
+// deliberately NOT used for these one-shots: finishLivePathNote assumes the
+// body has already played and would cancel the freshly-baked body curves.)
+// `mode` picks the body: 'tap' plays through the early-cut marker, 'full' the
+// whole hold end. Prior preview/gesture voices are faded first so repeats never
+// stack.
+function previewFlowNote(note, mode) {
+  const compiled = compileFlowNote(note);
+  if (!compiled) return false;
+  initAudio();
+  resumeAudio();
+  if (!audioCtx || !masterGain) return false;
+  stopGestureNote();
+  stopPreviewVoices();
+  if (flowLive) flowLiveEnd();
+  const saved = flowGlobalsSwap(compiled);
+  try {
+    // Body lengths are read off the compiled envelope, so compute them after the
+    // swap (earlyCutMs / designBodyMs read the shared ENVELOPE).
+    const bodyMs = mode === 'tap' ? Math.max(1, earlyCutMs()) : designBodyMs();
+    schedulePathAudio(flowPreviewWaitDs(bodyMs), bodyMs, null);
+  } finally {
+    flowGlobalsRestore(saved);
+  }
+  return true;
 }
 // Play a note "live": press-and-hold. Starts the note on press and sustains the
 // envelope body (tickLiveHold in flowLoop) until release, then the release tail.
@@ -6502,24 +6772,11 @@ function flowLiveEnd() {
   }
 }
 // Play a note like a tap in the main area: the body plays through the early-cut
-// marker, then the release section. Uses the same self-contained scheduler as
-// the full button (previewNote) with a shorter body, so the tap starts exactly
-// like the full preview — same onset, level, and every connected envelope.
+// marker, then the release section. Runs the playing field's own wait-mode
+// scheduler (schedulePathAudio) with a shorter body, so the tap is exactly the
+// same scheduler as the field — same onset, level, and every connected envelope.
 function tapFlowNote(note) {
-  const compiled = compileFlowNote(note);
-  if (!compiled) return false;
-  initAudio();
-  resumeAudio();
-  if (!audioCtx || !masterGain) return false;
-  stopPreviewVoices();
-  if (flowLive) flowLiveEnd();
-  const saved = flowGlobalsSwap(compiled);
-  try {
-    previewNote(previewPitchName(), Math.max(1, earlyCutMs()));
-  } finally {
-    flowGlobalsRestore(saved);
-  }
-  return true;
+  return previewFlowNote(note, 'tap');
 }
 
 /* ---- Note repeat (tap / full length) ----

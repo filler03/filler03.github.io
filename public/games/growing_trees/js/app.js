@@ -12,10 +12,8 @@ const statHud = document.getElementById('statHud');
 
 var playbacks = [];      // { pts, cumTime, totalMs, startedAt, released }
 var gestureNotes = [];   // { osc, gain, cleanupTimer } running gesture-note audio
-var previewPlayhead = null;   // { t0, bodyMs, relMs, totalMs, endAt } drives the sound-creator playhead
 
-var mode = 'plant';      // 'plant' | 'nav' | 'creator' (full-screen sound editor) | 'flow' (full-screen sound flow editor)
-var creatorActive = false;   // sound-creator mode is open (declared early: main.js reads it)
+var mode = 'plant';      // 'plant' | 'nav' | 'flow' (full-screen sound flow editor)
 var flowActive = false;      // sound-flow editor mode is open (declared early: main.js reads it)
 var navState = null;     // single-finger pan drag in nav mode
 var dragStates = new Map();  // plant gestures, one per pointer (multi-finger)
@@ -680,16 +678,36 @@ function designTimeline() {
   };
 }
 
-// Map an elapsed-ms position in a note to the drawn mix curve's normalized axis
-// (0..1). The body occupies [0, bodyFrac] and the release [bodyFrac, 1], where
-// bodyFrac comes from the DESIGN body (hold end) so curve features line up with
-// the HOLD/CUT/REL markers no matter how long the actual gesture body is.
+// Progress along the mix/pitch curve axis for a note's BODY at absolute time
+// `ms`: follow the design timeline (proportional, natural speed), and once past
+// the hold end LOOP the hold window of the curve — mirroring relValueBody's
+// volume loop — so a held note oscillates its mix/pitch/unison curves exactly
+// like the volume envelope loops.
+function mixBodyProg(ms, designBodyMs, relMs) {
+  const dBody = designBodyMs;
+  const bodyFrac = (dBody + relMs) > 0 ? dBody / (dBody + relMs) : 1;
+  const hs = holdStartTime(ENVELOPE), he = holdEndTime(ENVELOPE);
+  if (he > hs && ms >= he) {
+    const startFrac = dBody > 0 ? (hs / dBody) * bodyFrac : 0;
+    const into = (ms - hs) % (he - hs);
+    return startFrac + (into / (he - hs)) * (bodyFrac - startFrac);
+  }
+  return dBody > 0 ? Math.min(bodyFrac, (ms / dBody) * bodyFrac) : 0;
+}
+
+// Map an elapsed-ms position in a note to the drawn mix/pitch curve's
+// normalized axis (0..1). The body occupies [0, bodyFrac] and the release
+// [bodyFrac, 1], where bodyFrac comes from the DESIGN body (hold end). The body
+// plays the proportional section of the curve at its natural speed (never
+// speeding up/down), and loops the hold window once it passes the hold end; a
+// short tap therefore plays only the section up to its early cut at the same
+// rate as a full note. At the cut it jumps to the release marker and plays the
+// release section. A hold past the hold end loops the hold window of the curve
+// (see mixBodyProg), exactly like the volume envelope's hold loop.
 function mixProgForTimes(elapsedMs, actualBodyMs, relMs, designBodyMs) {
   const dBody = designBodyMs != null ? designBodyMs : actualBodyMs;
   const bodyFrac = (dBody + relMs) > 0 ? dBody / (dBody + relMs) : 1;
-  if (elapsedMs < actualBodyMs) {
-    return (actualBodyMs > 0 ? (elapsedMs / actualBodyMs) : 0) * bodyFrac;
-  }
+  if (elapsedMs < actualBodyMs) return mixBodyProg(elapsedMs, dBody, relMs);
   const relElapsed = elapsedMs - actualBodyMs;
   return Math.min(1, bodyFrac + (relMs > 0 ? (relElapsed / relMs) : 0) * (1 - bodyFrac));
 }
