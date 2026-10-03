@@ -638,9 +638,15 @@ function quickFadeNote(n, fadeMs) {
 // compressor). The old voice fades in ~35 ms and its green playback path
 // disappears; the new note starts its attack cycle fresh with its own path
 // intact. Different pitches stay polyphonic.
-function retriggerPitch(pitch, keep) {
+// `group` scopes the stealing: only notes in the same voice group restrike.
+// Manual field gestures carry no group (null) and steal only other group-null
+// notes; a looping clip passes its own id, so its repeated notes restrike each
+// other while different clips (and manual playing) can stack the same pitch.
+function retriggerPitch(pitch, keep, group) {
+  const g = group == null ? null : group;
   for (const n of gestureNotes.slice()) {
     if (n === keep || n.pitch !== pitch) continue;
+    if ((n.voiceGroup == null ? null : n.voiceGroup) !== g) continue;
     quickFadeNote(n, 35);
     // A live drag still drawing on this pitch is superseded: drop it so it
     // can't keep scheduling, and leave its pointer to come back up empty.
@@ -672,13 +678,16 @@ function retriggerPitch(pitch, keep) {
    fingertip's base volume. When the circle catches the fingertip the note keeps
    playing forward in real time over a short horizon. */
 
-function schedulePathAudio(ds, totalMs, pb) {
+// `when` schedules the note at an absolute AudioContext time (used by the clip
+// loop's lookahead scheduler to land events on future beats); omitted, it starts
+// now (the field's one-shot path).
+function schedulePathAudio(ds, totalMs, pb, when) {
   if (!audioCtx || !masterGain) return;
-  const t0 = audioCtx.currentTime;
+  const t0 = when != null ? Math.max(when, audioCtx.currentTime) : audioCtx.currentTime;
   // Retrigger: a new note on this pitch steals the voice already ringing there,
   // so rapid taps on one band restrike instead of stacking voices.
   const pitch = ds.pitchOverride || pitchFor(ds.startX, ds.startY);
-  retriggerPitch(pitch, null);
+  retriggerPitch(pitch, null, ds.voiceGroup);
   // The body always plays through the early-cut marker: a tap or short note is
   // extended so every component up to the cut point plays before the release
   // section starts.
@@ -722,12 +731,12 @@ function schedulePathAudio(ds, totalMs, pb) {
   scheduleLayerMix(stack, t0, tEnd, bodyDurMs, relMs);
   startLayerStack(stack, t0, noteToFreq(pitch), tEnd);
   scheduleLayerPitch(stack, t0, tEnd, noteToFreq(pitch), bodyDurMs, relMs);
-  const note = { oscs: stack.oscs, mixGains: stack.mixGains, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb };
+  const note = { oscs: stack.oscs, mixGains: stack.mixGains, gain, gainParam: g, cleanupTimer: null, pitch, playback: pb, voiceGroup: ds.voiceGroup || null };
   gestureNotes.push(note);
   setTimeout(() => {
     try { stack.oscs.forEach(o => o.disconnect()); stack.mixGains.forEach(x => x.disconnect()); gain.disconnect(); } catch (e) {}
     unregisterNote(note);
-  }, (tEnd - t0 + 0.5) * 1000);
+  }, (tEnd - audioCtx.currentTime + 0.5) * 1000);
 }
 
 // Run `fn` once the AudioContext is actually running. On the very first load the
@@ -758,7 +767,7 @@ function initLivePathAudio(ds) {
   // A new note on a pitch steals the voice already ringing there (retrigger),
   // so rapid taps on one band restrike instead of stacking voices.
   ds.pitch = ds.pitchOverride || pitchFor(ds.startX, ds.startY);
-  retriggerPitch(ds.pitch, ds);
+  retriggerPitch(ds.pitch, ds, ds.voiceGroup);
   const gain = audioCtx.createGain();
   const g = gain.gain;
   const baseVol0 = baseVolumeFromY(ds.pts[0].y);

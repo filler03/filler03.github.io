@@ -142,6 +142,9 @@ function syncLivePlaybackPath(ds) {
 // keep going.
 function finishPlantGesture(ds) {
   if (!ds) return;
+  // Hand the finished gesture to the loop recorder (defined in loop.js, loaded
+  // after this file). No-op unless a clip is currently recording.
+  if (typeof loopCaptureGesture === 'function') loopCaptureGesture(ds);
   if (ds.started) {
     ds.finished = true;
     finishLivePathNote(ds);

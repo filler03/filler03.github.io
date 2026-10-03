@@ -207,6 +207,141 @@
     border-color: #2e5d34;
     border-style: dashed;
   }
+  /* Loop clip bar: transport + record/clip controls along the bottom. */
+  #clipBar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 44;
+    box-sizing: border-box;
+    background: rgba(255,255,255,0.94);
+    border-top: 1px solid rgba(46,93,52,0.25);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.12);
+    padding: 6px calc(10px + env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-right));
+    color: #2e5d34;
+    touch-action: manipulation;
+  }
+  #clipBar.collapsed #clipBody { display: none; }
+  .clip-handle {
+    display: block;
+    margin: 0 auto 2px;
+    width: 40px; height: 18px;
+    border: 1px solid rgba(46,93,52,0.3);
+    border-radius: 9px;
+    background: rgba(243,251,234,0.9);
+    color: #2e5d34;
+    font-size: 11px; line-height: 1;
+    cursor: pointer;
+  }
+  #clipTransport {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  #clipTransport .clip-label { font-weight: 600; opacity: 0.75; }
+  #clipTransport button,
+  #clipTransport select,
+  #clipTransport input[type=number] {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    color: #2e5d34;
+    background: #f3fbea;
+    border: 1px solid #cdeab3;
+    border-radius: 9px;
+    padding: 6px 9px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #clipTransport input[type=number] { width: 54px; text-align: center; cursor: text; }
+  #clipTransport .clip-field { display: inline-flex; align-items: center; gap: 4px; }
+  #clipTransport button.on { background: #2e5d34; color: #fff; border-color: #2e5d34; }
+  #clipTransport button.rec-btn.rec { background: #b3462c; color: #fff; border-color: #b3462c; }
+  #clipTransport .clip-beat {
+    margin-left: auto;
+    min-width: 44px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    background: #2e5d34;
+    color: #fff;
+    border-radius: 8px;
+    padding: 5px 8px;
+  }
+  #clipPads {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  #clipPads::-webkit-scrollbar { display: none; }
+  .clip-empty {
+    color: rgba(46,93,52,0.6);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 18px 4px;
+  }
+  .clip-pad {
+    position: relative;
+    flex: 0 0 auto;
+    width: 100px;
+    height: 58px;
+    box-sizing: border-box;
+    padding: 8px 10px 10px;
+    border-radius: 10px;
+    border: 2px solid rgba(0,0,0,0.15);
+    color: #fff;
+    cursor: pointer;
+    overflow: hidden;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .clip-name {
+    font-weight: 700;
+    font-size: 12px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .clip-sub { font-size: 10px; font-weight: 600; opacity: 0.9; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+  .clip-fill {
+    position: absolute;
+    left: 0; bottom: 0;
+    height: 5px;
+    width: 0;
+    background: rgba(255,255,255,0.9);
+    pointer-events: none;
+  }
+  .clip-pad.playing { border-color: #2e5d34; box-shadow: 0 0 0 3px rgba(46,93,52,0.4), 0 2px 8px rgba(0,0,0,0.15); }
+  .clip-pad.armed { animation: clipBlink 0.4s steps(2) infinite; }
+  .clip-pad.stopping { opacity: 0.6; }
+  @keyframes clipBlink { 50% { opacity: 0.45; } }
+  .clip-del {
+    position: absolute;
+    top: 3px; right: 3px;
+    width: 17px; height: 17px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.28);
+    color: #fff;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  /* Keep the bottom-left/right controls clear of the clip bar (see the
+     #waitBtn / #flowBtn / #version bottom offsets further down). */
+  body.clip-collapsed #waitBtn,
+  body.clip-collapsed #flowBtn { bottom: calc(52px + env(safe-area-inset-bottom)); }
+  body.clip-collapsed #version { bottom: calc(108px + env(safe-area-inset-bottom)); }
   #settingsBtn {
     position: fixed;
     top: calc(76px + env(safe-area-inset-top));
@@ -228,7 +363,7 @@
   #flowBtn {
     position: fixed;
     right: calc(16px + env(safe-area-inset-right));
-    bottom: calc(16px + env(safe-area-inset-bottom));
+    bottom: calc(120px + env(safe-area-inset-bottom));
     width: 48px;
     height: 48px;
     background: rgba(255,255,255,0.85);
@@ -249,7 +384,8 @@
   body.flow #statHud,
   body.flow #version,
   body.flow #soundOverlay,
-  body.flow #instrumentBar { display: none; }
+  body.flow #instrumentBar,
+  body.flow #clipBar { display: none; }
   /* The flow editor is black; make the body behind the safe-area canvas black
      too, so notched/rounded-corner devices don't show white stripes at the
      screen edges. */
@@ -377,7 +513,7 @@
   #waitBtn {
     position: fixed;
     left: calc(16px + env(safe-area-inset-left));
-    bottom: calc(16px + env(safe-area-inset-bottom));
+    bottom: calc(120px + env(safe-area-inset-bottom));
     padding: 11px 16px;
     border: none;
     border-radius: 22px;
@@ -397,7 +533,7 @@
   #version {
     position: fixed;
     right: calc(16px + env(safe-area-inset-right));
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: calc(176px + env(safe-area-inset-bottom));
     color: rgba(46,93,52,0.75);
     font-size: 12px;
     font-weight: 600;
@@ -459,6 +595,7 @@
 <div id="rotateOverlay"><div class="rotate-msg"><span class="rot">📱🔄</span>Please rotate your device to landscape<div class="rotate-version" id="rotateVersion"></div></div></div>
 <div id="soundOverlay"><div class="sound-msg"><span class="snd">🔊</span>Tap to enable sound<div class="sound-sub">Tap anywhere to start · browsers only let your first note play after a tap</div></div></div>
 <div id="instrumentBar"></div>
+<div id="clipBar"></div>
 <div id="statHud"></div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
 <button id="flowBtn" title="Sound flow editor — arrange sound nodes on a grid">🧩</button>
@@ -567,7 +704,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.43.0</div>
+<div id="version">v1.44.0</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
@@ -583,6 +720,7 @@
     document.write('<script src="js/creator.js?t=' + t + '"></' + 'script>');
     document.write('<script src="js/flow.js?t=' + t + '"></' + 'script>');
     document.write('<script src="js/instrument.js?t=' + t + '"></' + 'script>');
+    document.write('<script src="js/loop.js?t=' + t + '"></' + 'script>');
   })();
 </script>
 </body>

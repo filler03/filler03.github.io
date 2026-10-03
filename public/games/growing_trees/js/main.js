@@ -47,6 +47,7 @@ canvas.addEventListener('pointerdown', e => {
     // sound holds until the finger lifts.
     const ds = {
       pointerId: e.pointerId,                 // lets a late audio init check if this drag is still alive
+      beganAt: performance.now(),             // when the touch landed (the loop recorder times notes from this)
       startX: stageX(e), startY: stageY(e),   // where the gesture started (drives pitch)
       pts: [{ x: stageX(e), y: stageY(e) }],  // recorded freehand path
       cumTime: [0],                           // ms of note time at each point

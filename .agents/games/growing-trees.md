@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.43.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.44.0` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -90,6 +90,7 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`pitchPositions`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
 | `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawPitchZones`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
 | `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring (incl. `syncPitchZonesUI`) |
+| `loop.js` | Loop clips: transport clock (`loopTick`/`loopCurBeat`/`loopBeatToAudio`/`loopNextBarBeat`), tap tempo (`loopTapTempo`/`loopSetBpm`), recording (`loopStartRecording`/`loopCaptureGesture`/`loopBuildEvent`/`loopFinalizeRecording`), clip playback (`loopToggleClip`/`loopScheduleClip`/`loopPlayEvent`/`loopEventDs`/`loopStopClipNow`), metronome (`loopClick`), UI (`loopBuildUI`/`loopBuildPads`/`loopRenderClipStates`/`loopRenderLive`), persistence (`loopSave`/`loopLoad`/`loopDeleteClip`) |
 | `creator.js` | Shared sound-editing helpers reused by the flow editor (the standalone 🎛️ sound creator was removed): envelope editing (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`/`envDeleteAt`/`envDrawAt`/`markerValidTimes`/`dragCreatorMarker`/`setNoteLifetime`), wave-spectrum helpers (`initLayerSpecPoints`/`insertSpecPoint`/`removeSpecPoint`/`syncLayerAmplitudes`), segment-line rendering (`strokeSegPath`/`segDrawSamples`), preview-pitch helper (`previewPitchName`), `drawRoundRect`, and shared constants (`HARM_PRESETS`/`SEGMENT_TYPE_*`/`VOICE_PARAM_DEFS`/`VOICE_INTERVALS`) |
 | `instrument.js` | Instrument selector strip (`#instrumentBar`): one chip per ready flow-editor note, one always selected while any note is ready ("no instrument" only shows when nothing is ready). Selecting swaps the shared sound globals (`ENVELOPE`/`OSC_STACK`/`MASTER_PITCH_ENV`/`MASTER_VOICE_ENVS`) to the compiled note, and `onFlowGraphChanged()` re-applies live / auto-picks the first ready note when the active one is deleted. No ready notes = silent (`OSC_STACK.layers = []`) |
 | `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
@@ -413,11 +414,62 @@ mode** — it pops the session's snapshot, restores, and reopens the same editor
 changed anything yet, pressing undo does nothing (no unrelated earlier snapshot
 is popped — `flowEditorPending` gates the pop).
 
+## Loop clips (v1.44.0)
+
+A live loop station layered over the playing field (`loop.js`, loaded last). It
+records freehand gestures into **clips** that can be looped and stacked while you
+keep playing.
+
+- **Transport** — a shared audio-clock clock (`loopTransport.originAudio` →
+  beat 0) with a **tap tempo** BPM (30–300: tap `beatsPerBar` beats; the button
+  lights up and counts 1…N, then the BPM is set from the total span and the run
+  resets. An idle gap >2 s or a tap on any other control abandons the run,
+  leaving the BPM unchanged), a time signature (`beatsPerBar` 2–12)
+  and an **optional metronome** (`loopClick`, accent on beat 1; **off until
+  explicitly toggled on**). A `setInterval` scheduler (`loopTick`, 25 ms) looks
+  ~200 ms ahead on the audio clock. The clock **freezes while the flow editor is
+  open** (real-time origin is shifted on close) so clips stay in phase.
+- **Recording** — the Record button runs a **1-bar count-in** then records
+  `barsToRecord` bars (1/2/4/8), auto-stopping. `gesture.js`'s
+  `finishPlantGesture` calls `loopCaptureGesture(ds)` (guarded by `typeof`) so
+  every finished gesture — tap or drag — is captured. **No quantization:** the
+  raw played timing is stored as fractional **beats**. Each event keeps its
+  absolute pitch and its **full drawn volume shape** as up to 32 resampled
+  `{cumBeats, vols}` points (volume normalized against the current volume range,
+  so `loopEventDs` reproduces it exactly via `yForBaseVolume` regardless of the
+  VOLUME sliders or screen size). Note duration is clamped to the clip length.
+- **Sound snapshots** — each event references a `soundId` whose compiled sound
+  (`envelope`/`layers`/`masterPitchEnv`/`masterVoiceEnvs`) is **snapshotted** from
+  the active instrument at capture time, so clips are self-contained and survive
+  later flow-editor edits/deletion. `loopPlayEvent` swaps the snapshot into the
+  shared globals (`flowGlobalsSwap`) and runs the field's one-shot scheduler
+  (`schedulePathAudio(ds, totalMs, null, at)` — a new optional `when` argument
+  places the note on a future beat), then restores.
+- **Playback** — `loopToggleClip` arms/stops a clip **quantized to the next bar**
+  (`loopNextBarBeat`); a launched clip loops at its own `bars` length. The
+  scheduler tracks a per-clip `_scheduledUntil` beat and schedules every event
+  occurrence in the lookahead window. **Auto-loop** after recording is a toggle
+  (`autoLoopAfterRecord`); when off the clip is saved stopped and launched by
+  tapping its pad.
+- **Voice-group retrigger** — `retriggerPitch(pitch, keep, group)` now scopes
+  stealing to the same voice group: manual field gestures (group `null`) no
+  longer cut clip loops, a clip's repeated same-pitch notes still restrike, and
+  different clips can stack the same pitch.
+- **UI** (`#clipBar`, bottom strip) — a transport row (TAP, BPM −/+, beats,
+  bars, Metro, Auto-loop, Record, Stop all, `bar.beat` readout) and a horizontally
+  scrollable pad row. Pads show name + bar length, a playhead fill and
+  playing/armed/stopping states; **tap toggles**, **long-press (600 ms) or ✕
+  deletes**. A handle collapses the strip (`body.clip-collapsed` shrinks it and
+  the `#waitBtn`/`#flowBtn`/`#version` offsets move down with it). The strip is
+  hidden in flow mode (`body.flow #clipBar`).
+- **Persistence** — `localStorage` key `growingTrees.clips.v1` stores the clips
+  (events + snapshots) plus the transport settings; loaded and validated on boot.
+
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.43.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.44.0`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
-- **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
+- **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` → `creator.js` → `flow.js` → `instrument.js` → `loop.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).
 - **No tree code:** tree planting/rendering was removed entirely (this is a gesture→note instrument now). Don't reintroduce trees without a design.
 - Keep this guide lean: if the game's internals outgrow it, split deep details into their own `.agents/games/` file rather than padding this one.
