@@ -259,7 +259,12 @@
   #clipTransport input[type=number] { width: 54px; text-align: center; cursor: text; }
   #clipTransport .clip-field { display: inline-flex; align-items: center; gap: 4px; }
   #clipTransport button.on { background: #2e5d34; color: #fff; border-color: #2e5d34; }
-  #clipTransport button.rec-btn.rec { background: #b3462c; color: #fff; border-color: #b3462c; }
+  #clipTransport button:disabled { opacity: 0.5; cursor: default; }
+  #clipTransport button.rec-icon { opacity: 1; background: #b3462c; color: #fff; border-color: #b3462c; }
+  /* Clip cut (song only): select measures on the timeline, then queue the cut. */
+  #cutGroup { display: none; align-items: center; gap: 5px; }
+  body.song-run #cutGroup { display: inline-flex; }
+  #cutGroup button.on { background: #b3462c; color: #fff; border-color: #b3462c; }
   #clipTransport .clip-beat {
     margin-left: auto;
     min-width: 44px;
@@ -337,11 +342,162 @@
     line-height: 1;
     cursor: pointer;
   }
+  /* Song arrangement: scrolling timeline ruler + per-clip tracks. Shown only
+     while a song runs, in place of the clip pads. */
+  #arrangePanel { display: none; flex-direction: column; gap: 5px; }
+  body.song-run #arrangePanel { display: flex; }
+  body.song-run #clipPads { display: none; }
+  #arrangeCanvas {
+    display: block;
+    position: relative;
+    inset: auto;
+    z-index: auto;
+    width: 100%;
+    height: 58px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid #cdeab3;
+    touch-action: none;
+    cursor: pointer;
+  }
+  #arrangeTracks {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 120px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+  .clip-track {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 5px;
+    background: #fff;
+    border: 1px solid #cdeab3;
+    border-radius: 7px;
+  }
+  .track-name {
+    flex: 0 0 auto;
+    min-width: 40px;
+    max-width: 72px;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .track-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background: #f7fdf1;
+    border-radius: 4px;
+    display: block;
+  }
+  .track-plot { position: relative; flex: 0 0 116px; min-width: 90px; height: 18px; }
+  .track-chips { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+  .track-chip { width: 8px; height: 8px; border-radius: 2px; }
+  .track-btn {
+    flex: 0 0 auto;
+    border: 1px solid #cdeab3;
+    border-radius: 7px;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 6px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .track-btn.ins { background: #2e5d34; color: #fff; border-color: #2e5d34; }
+  .track-btn.del { padding: 3px 5px; }
+  .track-empty { opacity: 0.6; font-weight: 600; font-size: 11px; padding: 6px 4px; }
   /* Keep the bottom-left/right controls clear of the clip bar (see the
      #waitBtn / #flowBtn / #version bottom offsets further down). */
   body.clip-collapsed #waitBtn,
   body.clip-collapsed #flowBtn { bottom: calc(52px + env(safe-area-inset-bottom)); }
   body.clip-collapsed #version { bottom: calc(108px + env(safe-area-inset-bottom)); }
+  /* Tempo controls grouped so a running song can hide them as one unit. */
+  #clipTransport .tempo-group { display: inline-flex; align-items: center; gap: 6px; }
+  #clipTransport.song-on .tempo-group { display: none; }
+  /* Big beat counter shown during a song's one-bar count-in. */
+  #countIn {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.7);
+    font-size: 150px;
+    font-weight: 800;
+    color: #2e5d34;
+    text-shadow: 0 6px 24px rgba(255,255,255,0.95);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 46;
+    transition: opacity 0.08s linear, transform 0.08s ease-out;
+  }
+  #countIn.show { opacity: 0.92; transform: translate(-50%, -50%) scale(1); }
+  /* Past-songs screen (replay library). */
+  #songScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: none;
+    flex-direction: column;
+    box-sizing: border-box;
+    background: #f3fbea;
+    color: #2e5d34;
+    padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+             calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+  }
+  body.songs #songScreen { display: flex; }
+  body.songs #clipBar,
+  body.songs #statHud,
+  body.songs #version,
+  body.songs #flowBtn,
+  body.songs #waitBtn,
+  body.songs #settingsBtn,
+  body.songs #instrumentBar { display: none; }
+  .song-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .song-title { font-size: 18px; font-weight: 800; }
+  #songClose {
+    width: 36px; height: 36px;
+    border: 1px solid #cdeab3;
+    border-radius: 50%;
+    background: #fff;
+    color: #2e5d34;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  #songList { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .song-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    border-left: 6px solid #4fc3f7;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .song-info { flex: 1; min-width: 0; }
+  .song-name { font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song-meta { font-size: 11px; font-weight: 600; opacity: 0.7; }
+  .song-play, .song-del {
+    flex: 0 0 auto;
+    width: 38px; height: 38px;
+    border: 1px solid #cdeab3;
+    border-radius: 50%;
+    background: #f3fbea;
+    color: #2e5d34;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .song-play.on { background: #2e5d34; color: #fff; border-color: #2e5d34; }
+  .song-empty { opacity: 0.6; font-weight: 600; padding: 20px 4px; }
   #settingsBtn {
     position: fixed;
     top: calc(76px + env(safe-area-inset-top));
@@ -596,6 +752,14 @@
 <div id="soundOverlay"><div class="sound-msg"><span class="snd">🔊</span>Tap to enable sound<div class="sound-sub">Tap anywhere to start · browsers only let your first note play after a tap</div></div></div>
 <div id="instrumentBar"></div>
 <div id="clipBar"></div>
+<div id="countIn"></div>
+<div id="songScreen">
+  <div class="song-head">
+    <span class="song-title">🎵 Songs</span>
+    <button id="songClose" title="Close">✕</button>
+  </div>
+  <div id="songList"></div>
+</div>
 <div id="statHud"></div>
 <button id="settingsBtn" title="Sound settings">⚙️</button>
 <button id="flowBtn" title="Sound flow editor — arrange sound nodes on a grid">🧩</button>
@@ -704,7 +868,7 @@
 
 <canvas id="scene"></canvas>
 <button id="waitBtn" title="When on, the sound does not begin until the whole gesture is complete">🎵 Live sound</button>
-<div id="version">v1.44.0</div>
+<div id="version">v1.51.0</div>
 
 <script>
   // Never cache the JS: each load appends a fresh timestamp, so the browser
