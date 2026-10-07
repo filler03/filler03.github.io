@@ -489,7 +489,7 @@ function previewNote(pitch, bodyMsOpt) {
   // scheduling is identical, just a shorter body.
   const bodyMs = bodyMsOpt == null ? designBodyMs() : Math.max(1, bodyMsOpt);
   const relMs = releaseMs();
-  const base = Math.max(0.35, baseVolumeFromY(H * 0.55));
+  const base = Math.max(0.35, baseVolumeFromY(playFieldH() * 0.55));
 
   // Amplitude envelope: the full body then the release.
   const gain = audioCtx.createGain();
@@ -649,8 +649,11 @@ function retriggerPitch(pitch, keep, group) {
     if ((n.voiceGroup == null ? null : n.voiceGroup) !== g) continue;
     quickFadeNote(n, 35);
     // A live drag still drawing on this pitch is superseded: drop it so it
-    // can't keep scheduling, and leave its pointer to come back up empty.
-    if (n.pointerId != null && dragStates.has(n.pointerId)) {
+    // can't keep scheduling, and leave its pointer to come back up empty. Only
+    // drop the map entry if it is still THIS note's (a same-pointer retrigger
+    // has already replaced it with the new gesture's state — deleting that would
+    // silently kill the new tap).
+    if (n.pointerId != null && dragStates.get(n.pointerId) === n) {
       dragStates.delete(n.pointerId);
       n.gain = null;
       n.finished = true;

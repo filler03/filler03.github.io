@@ -46,6 +46,7 @@ var loopSongs = [];               // saved whole-song takes (the Songs screen)
 var loopSong = null;              // active song session, or null
 var loopSongReplay = null;        // active song replay, or null
 var songViewActive = false;       // the Songs screen is open (freezes the transport)
+var loopSelClipId = null;         // arrangement tile currently selected for Insert
 var loopTicker = null;            // setInterval handle for the scheduler
 var loopTaps = [];                // performance.now() of the taps in the current tap-tempo run
 var loopTapTimer = null;          // visual reset timeout for an in-progress tap run
@@ -454,6 +455,7 @@ function loopStartSong() {
   }
   for (const c of loopClips) loopStopClipNow(c);
   loopClips = [];
+  loopSelClipId = null;
   loopSave();
   loopBuildPads();
 
@@ -530,6 +532,10 @@ function loopFinishSong() {
     loopSaveSongs();
   }
   loopStopAll();
+  // Cut clips belong to the song — don't leave them sitting as free-play pads.
+  loopClips = [];
+  loopSelClipId = null;
+  loopSave();
   loopBuildPads();
   loopUpdateTempoLock();
   loopRenderSongControls();
@@ -546,6 +552,9 @@ function loopUpdateTempoLock() {
 
 function loopRenderSongControls() {
   document.body.classList.toggle('song-run', !!loopSong);
+  // The bar is fixed (no collapse); its measured height feeds --clipbar-h so
+  // the floating controls keep clear of it as the layout changes.
+  if (typeof refreshClipBarMetrics === 'function') refreshClipBarMetrics();
   loopRenderRecordSongBtn();
   loopRenderCutControls();
   const b = document.getElementById('startSongBtn');
@@ -789,6 +798,7 @@ function loopDeleteClip(id) {
   if (!window.confirm('Delete "' + c.name + '"?\n\nThis removes the loop for good.')) return;
   loopStopClipNow(c);
   loopClips.splice(i, 1);
+  if (loopSelClipId === id) loopSelClipId = null;
   if (loopSong) loopSong.placements = loopSong.placements.filter(p => p.clipId !== id);
   loopSave();
   loopBuildPads();
@@ -808,19 +818,6 @@ function loopBuildUI() {
   const bar = document.getElementById('clipBar');
   if (!bar) return;
   bar.innerHTML = '';
-  bar.classList.remove('collapsed');
-  document.body.classList.remove('clip-collapsed');
-
-  const handle = loopEl('button', 'clip-handle', '▾');
-  handle.id = 'clipHandle';
-  handle.type = 'button';
-  handle.title = 'Show/hide the loop clips';
-  handle.addEventListener('click', () => {
-    const collapsed = bar.classList.toggle('collapsed');
-    document.body.classList.toggle('clip-collapsed', collapsed);
-    handle.textContent = collapsed ? '▸' : '▾';
-  });
-  bar.appendChild(handle);
 
   const body = loopEl('div');
   body.id = 'clipBody';
@@ -868,7 +865,7 @@ function loopBuildUI() {
 
   // Phrase length is part of the locked grid, so it lives in the tempo group
   // (hidden while a song runs).
-  tempo.appendChild(loopSelect('barsPerPhrase', 'Phrase', [[2, '2'], [3, '3'], [4, '4'], [6, '6'], [8, '8']],
+  tempo.appendChild(loopSelect('barsPerPhrase', 'Measures per phrase', [[2, '2'], [3, '3'], [4, '4'], [6, '6'], [8, '8']],
     v => { loopTransport.barsPerPhrase = +v; loopSave(); loopDrawTimeline(); }));
 
   const metro = loopEl('button', 'clip-btn', '🥁 Metro');
@@ -895,6 +892,16 @@ function loopBuildUI() {
   cutBtn.disabled = true;
   cutBtn.addEventListener('click', loopCutSelection);
   cutGroup.appendChild(cutBtn);
+
+  // Insert lives next to Cut (both are song-only) so the arrangement view needs
+  // one fewer control row.
+  const insertBtn = loopEl('button', 'track-btn ins', '⤓ Insert');
+  insertBtn.id = 'insertClipBtn';
+  insertBtn.type = 'button';
+  insertBtn.disabled = true;
+  insertBtn.title = 'Insert the selected clip at the nearest measure';
+  insertBtn.addEventListener('click', loopInsertSelectedClip);
+  cutGroup.appendChild(insertBtn);
   tr.appendChild(cutGroup);
 
   const recSong = loopEl('button', 'clip-btn', '🎵 Record Song');
@@ -946,6 +953,7 @@ function loopBuildUI() {
   arrangeCanvas.addEventListener('pointerup', loopTimelineUp);
   arrangeCanvas.addEventListener('pointercancel', loopTimelineCancel);
   arrange.appendChild(arrangeCanvas);
+
   const arrangeTracks = loopEl('div');
   arrangeTracks.id = 'arrangeTracks';
   arrange.appendChild(arrangeTracks);
@@ -1112,10 +1120,15 @@ function loopDeletePlacement(id) {
    the captured notes become a new track clip once the playhead reaches its end.
    Several cuts can be queued; tapping a queued region cancels it. */
 
-// Vertical bands of the timeline canvas (px).
-const TIMELINE_RULER_H = 14;   // ruler strip along the top
-const TIMELINE_LIVE_TOP = 14, TIMELINE_LIVE_BOT = 34;    // live gestures
-const TIMELINE_PLACE_TOP = 36, TIMELINE_PLACE_BOT = 56;  // inserted clips
+// Vertical composition of the timeline canvas, as fractions of its height, so
+// the canvas can be resized in CSS without touching the drawing code. Returns
+// the ruler strip, the live-gesture band, and the inserted-clip band.
+function timelineBands(h) {
+  const rH = Math.round(h * 0.24);
+  const liveTop = rH, liveBot = Math.round(h * 0.60);
+  const placeTop = Math.round(h * 0.62), placeBot = h;
+  return { rH, liveTop, liveBot, placeTop, placeBot };
+}
 
 // Which measure (0-based, song-relative) sits under a canvas x.
 function loopMeasureAtX(x) {
@@ -1158,8 +1171,9 @@ function loopTimelineUp(e) {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    if (y >= TIMELINE_PLACE_TOP && loopTapPlacement(x)) loopSong.sel = null;
-    else if (y < TIMELINE_PLACE_TOP && loopTapQueuedCut(x)) loopSong.sel = null;
+    const placeTop = timelineBands(e.currentTarget.clientHeight).placeTop;
+    if (y >= placeTop && loopTapPlacement(x)) loopSong.sel = null;
+    else if (y < placeTop && loopTapQueuedCut(x)) loopSong.sel = null;
   }
   loopRenderCutControls();
   loopDrawTimeline();
@@ -1279,8 +1293,6 @@ function loopSchedulePlacements(cur, to) {
       if (base < from - 1e-9 || base > songTo + 1e-9) continue;
       if (base >= pl.startBeat + len - 1e-9) continue;
       loopPlayEvent(c, ev, loopBeatToAudio(loopSong.startBeat + base));
-      loopAddBlip(base, base + ev.endBeat, ev.pitch,
-        (c.sounds[ev.soundId] && c.sounds[ev.soundId].color) || c.color);
       if (loopSong.rec && loopTransport.recordSong) loopSongCapturePlayed(c, ev, base);
     }
     pl._scheduledUntil = songTo;
@@ -1292,52 +1304,51 @@ function loopBuildArrangement() {
   if (!wrap) return;
   wrap.innerHTML = '';
   if (!loopClips.length) {
-    wrap.appendChild(loopEl('div', 'track-empty', 'Select measures and hit ✂ Cut Clip to make a track'));
+    wrap.appendChild(loopEl('div', 'track-empty', 'Select measures and hit ✂ Cut Clip to make a track, then tap it and hit ⤓ Insert to place it'));
+    loopRenderInsertBtn();
     requestAnimationFrame(loopDrawTimeline);
     return;
   }
   for (const c of loopClips) {
-    const row = loopEl('div', 'clip-track');
-    row.appendChild(loopEl('span', 'track-name', c.name));
+    const tile = loopEl('div', 'clip-tile' + (c.id === loopSelClipId ? ' selected' : ''));
+    tile.dataset.clip = c.id;
 
-    const plot = loopEl('span', 'track-plot');
+    tile.appendChild(loopEl('div', 'tile-name', c.name));
+
     const cv = document.createElement('canvas');
-    cv.className = 'track-canvas';
+    cv.className = 'tile-canvas';
     cv.dataset.clip = c.id;
-    plot.appendChild(cv);
-    row.appendChild(plot);
+    tile.appendChild(cv);
 
-    const chips = loopEl('span', 'track-chips');
+    const foot = loopEl('div', 'tile-foot');
+    const chips = loopEl('span', 'tile-chips');
     const seen = {};
     for (const ev of c.events) {
       const s = c.sounds[ev.soundId];
       const col = (s && s.color) || c.color;
       if (seen[col]) continue;
       seen[col] = 1;
-      const chip = loopEl('span', 'track-chip');
+      const chip = loopEl('span', 'tile-chip');
       chip.style.background = col;
       chips.appendChild(chip);
     }
-    row.appendChild(chips);
+    foot.appendChild(chips);
 
-    const ins = loopEl('button', 'track-btn ins', '⤓ Insert');
-    ins.type = 'button';
-    ins.title = 'Insert at the nearest measure';
-    ins.addEventListener('click', () => loopInsertClip(c.id));
-    row.appendChild(ins);
-
-    const del = loopEl('button', 'track-btn del', '✕');
+    const del = loopEl('button', 'tile-del', '✕');
     del.type = 'button';
-    del.title = 'Delete track';
-    del.addEventListener('click', () => loopDeleteClip(c.id));
-    row.appendChild(del);
+    del.title = 'Delete clip';
+    del.addEventListener('click', e => { e.stopPropagation(); loopDeleteClip(c.id); });
+    foot.appendChild(del);
+    tile.appendChild(foot);
 
-    wrap.appendChild(row);
+    tile.addEventListener('click', () => loopSelectClip(c.id));
+    wrap.appendChild(tile);
     loopDrawTrackCanvas(cv, c);
   }
-  // Redraw once laid out, so the canvases take their real flex width.
+  loopRenderInsertBtn();
+  // Redraw once laid out, so the canvases take their real width.
   requestAnimationFrame(() => {
-    for (const cv of wrap.querySelectorAll('.track-canvas')) {
+    for (const cv of wrap.querySelectorAll('.tile-canvas')) {
       const c = loopClipById(cv.dataset.clip);
       if (c) loopDrawTrackCanvas(cv, c);
     }
@@ -1345,10 +1356,32 @@ function loopBuildArrangement() {
   });
 }
 
+// Tap a tile to pick the clip that the single ⤓ Insert button will place.
+function loopSelectClip(id) {
+  loopSelClipId = (loopSelClipId === id) ? null : id;
+  for (const tile of document.querySelectorAll('#arrangeTracks .clip-tile')) {
+    tile.classList.toggle('selected', tile.dataset.clip === loopSelClipId);
+  }
+  loopRenderInsertBtn();
+}
+
+function loopRenderInsertBtn() {
+  const b = document.getElementById('insertClipBtn');
+  if (!b) return;
+  const ok = !!loopSong && loopSong.phase !== 'countin'
+    && !!loopSelClipId && !!loopClipById(loopSelClipId);
+  b.disabled = !ok;
+}
+
+function loopInsertSelectedClip() {
+  if (!loopSelClipId) return;
+  loopInsertClip(loopSelClipId);
+}
+
 // A track's whole clip drawn small: x = time within the clip, y = pitch, colour
 // = instrument.
 function loopDrawTrackCanvas(canvas, c) {
-  const cssW = canvas.clientWidth || 120, cssH = 18;
+  const cssW = canvas.clientWidth || 100, cssH = canvas.clientHeight || 26;
   const dpr = window.devicePixelRatio || 1;
   if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
     canvas.width = Math.round(cssW * dpr);
@@ -1379,7 +1412,7 @@ function loopDrawTrackCanvas(canvas, c) {
 function loopDrawTimeline() {
   const canvas = document.getElementById('arrangeCanvas');
   if (!canvas) return;
-  const cssW = canvas.clientWidth || 300, cssH = 58;
+  const cssW = canvas.clientWidth || 300, cssH = canvas.clientHeight || 46;
   const dpr = window.devicePixelRatio || 1;
   if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
     canvas.width = Math.round(cssW * dpr);
@@ -1401,9 +1434,7 @@ function loopDrawTimeline() {
   loopSong._view = { viewStart, pxPerBeat };
   const X = b => (b - viewStart) * pxPerBeat;
 
-  const rH = TIMELINE_RULER_H;
-  const liveTop = TIMELINE_LIVE_TOP, liveBot = TIMELINE_LIVE_BOT;
-  const placeTop = TIMELINE_PLACE_TOP, placeBot = TIMELINE_PLACE_BOT;
+  const { rH, liveTop, liveBot, placeTop, placeBot } = timelineBands(cssH);
   const pitchY = (pitch) => {
     let midi = (typeof noteToMidi === 'function') ? noteToMidi(pitch) : 60;
     if (!isFinite(midi)) midi = 60;
@@ -1485,20 +1516,32 @@ function loopDrawTimeline() {
   if (keep.length !== loopSong.live.length) loopSong.live = keep;
   ctx.globalAlpha = 1;
 
-  // Inserted clips, in the placement band below the live timeline.
+  // Inserted clips, in the placement band below the live timeline. Each block
+  // carries its own note visuals (nothing is drawn on the live band for them).
   for (const pl of loopSong.placements) {
     const c = loopClipById(pl.clipId);
     if (!c) continue;
     const len = Math.max(1e-6, c.bars * bpb);
     const x0 = X(pl.startBeat), x1 = X(pl.startBeat + len);
     if (x1 < -20 || x0 > cssW + 20) continue;
-    ctx.globalAlpha = 0.85;
+    const w = Math.max(2, x1 - x0);
+    ctx.globalAlpha = 0.22;
     ctx.fillStyle = c.color;
-    ctx.fillRect(x0, placeTop + 1, Math.max(2, x1 - x0), placeBot - placeTop - 2);
+    ctx.fillRect(x0, placeTop + 1, w, placeBot - placeTop - 2);
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.strokeStyle = c.color;
     ctx.lineWidth = 1;
-    ctx.strokeRect(x0 + 0.5, placeTop + 1.5, Math.max(1, x1 - x0 - 1), placeBot - placeTop - 3);
+    ctx.strokeRect(x0 + 0.5, placeTop + 1.5, Math.max(1, w - 1), placeBot - placeTop - 3);
+    for (const ev of c.events) {
+      const ex0 = X(pl.startBeat + ev.startBeat);
+      const ex1 = X(pl.startBeat + ev.startBeat + Math.max(ev.endBeat, 0.05));
+      let midi = (typeof noteToMidi === 'function') ? noteToMidi(ev.pitch) : 60;
+      if (!isFinite(midi)) midi = 60;
+      const f = clamp01((midi - 36) / (84 - 36));
+      const y = placeBot - 2 - f * (placeBot - placeTop - 4);
+      ctx.fillStyle = (c.sounds[ev.soundId] && c.sounds[ev.soundId].color) || c.color;
+      ctx.fillRect(ex0, y - 1, Math.max(2, ex1 - ex0), 2);
+    }
   }
 
   // Playhead across everything.

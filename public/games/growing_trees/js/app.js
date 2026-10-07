@@ -84,6 +84,7 @@ function resize() {
   W = canvas.width  = w2;
   H = canvas.height = h2;
   HORIZON = H * 0.56;              // where ground meets sky (matches CSS)
+  refreshClipBarMetrics();
   scheduleSizeVerify();
 }
 window.addEventListener('resize', resize);
@@ -91,6 +92,14 @@ window.addEventListener('resize', resize);
 // schedule an explicit re-check when the orientation flips.
 window.addEventListener('orientationchange', scheduleSizeVerify);
 resize();
+
+// The clip bar's height varies (free-play vs a running song's arrangement view,
+// and as track tiles wrap), so watch it and re-measure the volume play field and
+// the --clipbar-h offset whenever it changes.
+if (typeof ResizeObserver !== 'undefined') {
+  const clipBarEl = document.getElementById('clipBar');
+  if (clipBarEl) new ResizeObserver(refreshClipBarMetrics).observe(clipBarEl);
+}
 
 /* ---------- Small shared helpers ---------- */
 const mix = (a, b, t) => a + (b - a) * t;
@@ -138,19 +147,55 @@ function volumeTop() {
   return VOLUME.top;
 }
 
+// The bottom clip bar overlays the scene canvas, so the lowest point a user can
+// actually touch is the bar's top edge — not the canvas bottom. Volume is mapped
+// over this visible play field, so the bottom of the visible area is the lower
+// gain and the top is the upper gain (the same 10% flat zones, just compressed).
+// Refreshed whenever the bar's size changes; falls back to the full canvas
+// height when the bar is hidden (flow editor, Songs screen).
+var PLAY_FIELD_H = 0;
+var _clipBarH = -1;
+var _playFieldAt = -Infinity;
+function playFieldH() {
+  // Self-heal: re-measure periodically so a stale field (the bar measured before
+  // layout settled, or a height change with no resize event) can never leave the
+  // lower gain stranded below the bar.
+  if (performance.now() - _playFieldAt > 250) refreshClipBarMetrics();
+  return PLAY_FIELD_H > 0 ? PLAY_FIELD_H : H;
+}
+
+// Measure the clip bar: publish its height as --clipbar-h (so floating controls
+// clear it) and turn its top edge into the volume play field.
+function refreshClipBarMetrics() {
+  _playFieldAt = performance.now();
+  const bar = document.getElementById('clipBar');
+  if (!bar) return;
+  const rect = bar.getBoundingClientRect();
+  const barH = Math.round(rect.height);
+  if (barH !== _clipBarH) {
+    _clipBarH = barH;
+    document.documentElement.style.setProperty('--clipbar-h', barH + 'px');
+  }
+  if (barH === 0) { PLAY_FIELD_H = H; return; }   // bar hidden (flow editor, Songs)
+  const top = rect.top - canvas.getBoundingClientRect().top;
+  PLAY_FIELD_H = (top > 48 && top <= H) ? top : H;
+}
+
 function baseVolumeFromY(sy) {
-  const t = clamp01(1 - sy / H);   // 1 at the top of the screen, 0 at the bottom
+  const h = playFieldH();
+  const t = clamp01(1 - sy / h);   // 1 at the top of the field, 0 at the bottom
   return mix(VOLUME.bottom, volumeTop(), clamp01((t - 0.1) / 0.8));
 }
 function yForBaseVolume(v) {
+  const h = playFieldH();
   const span = volumeTop() - VOLUME.bottom;
-  if (span === 0) return H / 2;
+  if (span === 0) return h / 2;
   const r = clamp01((v - VOLUME.bottom) / span);
-  // The top/bottom 10% of the screen are flat full/low zones, so gains at the
+  // The top/bottom 10% of the field are flat full/low zones, so gains at the
   // top/bottom of the scale sit at the center of their zone.
-  if (r >= 1) return H * 0.05;
-  if (r <= 0) return H * 0.95;
-  return H * (1 - (0.1 + r * 0.8));
+  if (r >= 1) return h * 0.05;
+  if (r <= 0) return h * 0.95;
+  return h * (1 - (0.1 + r * 0.8));
 }
 
 // Top-left HUD emoji markers.
@@ -161,6 +206,7 @@ const EMOJI_VOL  = '🔊';   // speaker marks volume values
 const DEFAULT_GESTURE = {
   waitForGesture: false,   // when on, sound plays only after the whole gesture is drawn
   timeMult: 1,             // ÷ the base time rate (TIME_PER_W ms per % of width)
+  showNoteStats: true,     // top-left HUD cards for the notes currently playing
 };
 var GESTURE = clone(DEFAULT_GESTURE);
 

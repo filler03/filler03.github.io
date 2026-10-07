@@ -36,6 +36,10 @@ function gestureNoteCardHtml(now, p) {
 // Refresh the top-left display each frame: one card per active gesture
 // playback, stacked. Cards leave when their note is done.
 function refreshHud(now) {
+  if (!GESTURE.showNoteStats) {
+    statHud.style.opacity = '0';
+    return;
+  }
   const blocks = [];
   for (const p of playbacks) blocks.push(gestureNoteCardHtml(now, p));
   if (blocks.length) {
@@ -60,6 +64,17 @@ function syncWaitBtn() {
 waitBtn.addEventListener('click', () => {
   GESTURE.waitForGesture = !GESTURE.waitForGesture;
   syncWaitBtn();
+  saveSettings();
+});
+
+/* ---- Top-left note-stats HUD toggle ---- */
+const showNoteStatsEl = document.getElementById('showNoteStats');
+function syncNoteStatsUI() {
+  showNoteStatsEl.checked = !!GESTURE.showNoteStats;
+}
+showNoteStatsEl.addEventListener('change', () => {
+  GESTURE.showNoteStats = showNoteStatsEl.checked;
+  if (!GESTURE.showNoteStats) clearHud();
   saveSettings();
 });
 
@@ -156,6 +171,7 @@ function loadSavedSettings() {
     if (d.gesture) {
       if (d.gesture.waitForGesture != null) g.waitForGesture = !!d.gesture.waitForGesture;
       if (d.gesture.timeMult != null) g.timeMult = Math.max(0.1, Math.min(4, d.gesture.timeMult));
+      if (d.gesture.showNoteStats != null) g.showNoteStats = !!d.gesture.showNoteStats;
     }
     GESTURE = g;
     const env = clone(DEFAULT_ENVELOPE);
@@ -387,6 +403,7 @@ function resetToDefaults() {
   syncVolumeUI();
   clampOscSelection();
   syncWaitBtn();
+  syncNoteStatsUI();
 }
 
 /* ---------- Chime settings panel ---------- */
@@ -816,6 +833,7 @@ settingsBtn.addEventListener('click', () => {
     syncLineUI();
     syncPitchZonesUI();
     syncVolumeUI();
+    syncNoteStatsUI();
     clampOscSelection();
     populatePreviewPitch();
   } else {

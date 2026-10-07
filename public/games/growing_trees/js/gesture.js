@@ -230,9 +230,10 @@ function drawPitchZones() {
 // label shows the level name plus the actual gain (0-100) played there, so the
 // readout tracks the upper/lower gain settings live.
 function drawVolumeScale() {
+  const field = playFieldH();   // excludes the area hidden behind the clip bar
   const markers = [
-    { y: H * 0.05, label: 'full', gain: volumeTop() },
-    { y: H * 0.95, label: 'low',  gain: VOLUME.bottom },
+    { y: field * 0.05, label: 'full', gain: volumeTop() },
+    { y: field * 0.95, label: 'low',  gain: VOLUME.bottom },
   ];
   const cx = W / 2;
   ctx.save();

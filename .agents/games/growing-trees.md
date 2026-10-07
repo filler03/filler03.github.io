@@ -2,7 +2,7 @@
 
 > HTML5 canvas instrument: draw a freehand gesture and it **plays a synthesized note**. The path you draw IS the note — its horizontal travel sets the note's length, its screen Y sets the volume — and a small circle traces the path green while it plays. The name and folder are kept for URL stability, but tree planting/rendering was removed entirely — the page is now a gesture→note toy on a plain white background.
 >
-> Current version badge: `v1.51.0` (bottom-right of the page — **bump on every change**).
+> Current version badge: `v1.52.1` (bottom-right of the page — **bump on every change**).
 
 ## Overview
 
@@ -90,7 +90,7 @@ Screen X = pitch, so the canvas is overlaid with **faint vertical color bands**,
 | `audio.js` | `initAudio`/`resumeAudio`/`unlockAudio`, `chime`, `setOscWave`, `pitchFor`/`pitchPositions`/`noteToFreq`/`noteToMidi`/`midiToName`, tap ADSR (`startGestureNote`/`scheduleFixedRun`/`scheduleFixedSlot`/`endGestureNote`), gesture audio (`schedulePathAudio`/`initLivePathAudio`/`scheduleLivePoint`/`tickLiveHold`/`finishLivePathNote`), `stopGestureNote` |
 | `gesture.js` | `addPathPoint`/`pathStateAtTime`, `attackFactor`/`decayFactor`/`buildVolumeCurve`, `schedulePathPlayback`/`startLivePathNote`, `buildGesturePlaybackPath`/`drawPitchZones`/`drawGreenPath`/`drawDottedTail`/`drawPlaybackCircle`, `finishPlantGesture`/`cancelDragState` |
 | `ui.js` | HUD (`refreshHud`/`tapNoteCardHtml`/`gestureNoteCardHtml`), persistence (`saveSettings`/`loadSavedSettings`/`resetToDefaults`), settings panel wiring (incl. `syncPitchZonesUI`) |
-| `loop.js` | Loop clips & songs: transport clock (`loopTick`/`loopCurBeat`/`loopBeatToAudio`/`loopNextBarBeat`), tap tempo (`loopTapTempo`/`loopSetBpm`), live capture (`loopCaptureGesture`/`loopBuildEvent`/`loopSoundId`), clip playback (`loopToggleClip`/`loopScheduleClip`/`loopPlayEvent`/`loopEventDs`/`loopStopClipNow`/`loopStopAll`/`loopStop`), song mode (`loopStartSong`/`loopStopSong`/`loopFinishSong`/`loopSongCapturePlayed`/`loopRenderCountIn`/`loopUpdateTempoLock`), clip cuts (`loopTimelineDown`/`loopTimelineMove`/`loopTimelineUp`/`loopCutSelection`/`loopProcessCutQueue`/`loopCutClip`), arrangement (`loopBuildArrangement`/`loopDrawTimeline`/`loopInsertClip`/`loopSchedulePlacements`/`loopDeletePlacement`), songs screen + replay (`loopOpenSongs`/`loopBuildSongList`/`loopReplaySong`/`loopStopReplay`), metronome (`loopClick`), UI (`loopBuildUI`/`loopBuildPads`/`loopRenderClipStates`/`loopRenderLive`), persistence (`loopSave`/`loopLoad`/`loopDeleteClip`/`loopSaveSongs`/`loopLoadSongs`) |
+| `loop.js` | Loop clips & songs: transport clock (`loopTick`/`loopCurBeat`/`loopBeatToAudio`/`loopNextBarBeat`), tap tempo (`loopTapTempo`/`loopSetBpm`), live capture (`loopCaptureGesture`/`loopBuildEvent`/`loopSoundId`), clip playback (`loopToggleClip`/`loopScheduleClip`/`loopPlayEvent`/`loopEventDs`/`loopStopClipNow`/`loopStopAll`/`loopStop`), song mode (`loopStartSong`/`loopStopSong`/`loopFinishSong`/`loopSongCapturePlayed`/`loopRenderCountIn`/`loopUpdateTempoLock`), clip cuts (`loopTimelineDown`/`loopTimelineMove`/`loopTimelineUp`/`loopCutSelection`/`loopProcessCutQueue`/`loopCutClip`), arrangement (`loopBuildArrangement`/`loopDrawTimeline`/`loopSelectClip`/`loopRenderInsertBtn`/`loopInsertSelectedClip`/`loopInsertClip`/`loopSchedulePlacements`/`loopDeletePlacement`), songs screen + replay (`loopOpenSongs`/`loopBuildSongList`/`loopReplaySong`/`loopStopReplay`), metronome (`loopClick`), UI (`loopBuildUI`/`loopBuildPads`/`loopRenderClipStates`/`loopRenderLive`), persistence (`loopSave`/`loopLoad`/`loopDeleteClip`/`loopSaveSongs`/`loopLoadSongs`) |
 | `creator.js` | Shared sound-editing helpers reused by the flow editor (the standalone 🎛️ sound creator was removed): envelope editing (`envBoundaries`/`envSplitAtTime`/`envDragBoundary`/`envDeleteAt`/`envDrawAt`/`markerValidTimes`/`dragCreatorMarker`/`setNoteLifetime`), wave-spectrum helpers (`initLayerSpecPoints`/`insertSpecPoint`/`removeSpecPoint`/`syncLayerAmplitudes`), segment-line rendering (`strokeSegPath`/`segDrawSamples`), preview-pitch helper (`previewPitchName`), `drawRoundRect`, and shared constants (`HARM_PRESETS`/`SEGMENT_TYPE_*`/`VOICE_PARAM_DEFS`/`VOICE_INTERVALS`) |
 | `instrument.js` | Instrument selector strip (`#instrumentBar`): one chip per ready flow-editor note, one always selected while any note is ready ("no instrument" only shows when nothing is ready). Selecting swaps the shared sound globals (`ENVELOPE`/`OSC_STACK`/`MASTER_PITCH_ENV`/`MASTER_VOICE_ENVS`) to the compiled note, and `onFlowGraphChanged()` re-applies live / auto-picks the first ready note when the active one is deleted. No ready notes = silent (`OSC_STACK.layers = []`) |
 | `main.js` | Boot (apply saved settings, sound-overlay gate), pointer handlers, `loop()` render loop |
@@ -414,7 +414,7 @@ mode** — it pops the session's snapshot, restores, and reopens the same editor
 changed anything yet, pressing undo does nothing (no unrelated earlier snapshot
 is popped — `flowEditorPending` gates the pop).
 
-## Loop clips & songs (v1.51.0)
+## Loop clips & songs (v1.52.1)
 
 A live loop station layered over the playing field (`loop.js`, loaded last). It
 records freehand gestures into **clips** that can be looped and stacked while you
@@ -454,7 +454,11 @@ keep playing, and optionally captures a whole **song** take to replay later.
 - **Voice-group retrigger** — `retriggerPitch(pitch, keep, group)` now scopes
   stealing to the same voice group: manual field gestures (group `null`) no
   longer cut clip loops, a clip's repeated same-pitch notes still restrike, and
-  different clips can stack the same pitch.
+  different clips can stack the same pitch. When it steals a note it drops that
+  note's live drag **only if the `dragStates` entry is still its own**
+  (`dragStates.get(n.pointerId) === n`) — otherwise a same-pointer retrigger
+  (mouse always uses pointer id 1; touch ids are reused) would delete the *new*
+  tap's state and the tap would silently not register.
 - **UI** (`#clipBar`, bottom strip) — a transport row (TAP, BPM −/+ and Beats
   per measure in a `#clipTransport .tempo-group`, phrase length, Metro,
   Record Song, Start Song, Stop, Songs, `bar.beat` readout) and a horizontally
@@ -497,16 +501,20 @@ keep playing, and optionally captures a whole **song** take to replay later.
   several ranges up front. Cutting (`loopCutClip`) turns the captured notes across
   those measures into a track clip. Queued segments are drawn dashed on the ruler.
 - **Arrangement** — the timeline canvas has three bands: a **ruler** (measure /
-  phrase ticks, `P#` accents), a **live band** (live gesture blips only), and a
-  **placement band below it** where inserted clips appear as blocks at their song
-  position. It spans a fixed **32 measures** across the screen (`TIMELINE_MEASURES`,
+  phrase ticks, `P#` accents), a **live band** (live gesture blips only — inserted
+  clips never draw here), and a **placement band below it** where inserted clips
+  appear as blocks at their song position, each carrying its own note visuals. It
+  spans a fixed **32 measures** across the screen (`TIMELINE_MEASURES`,
   slow scroll, playhead at 30%); measure labels thin out to every 2–4 bars when
-  dense. Recorded clips appear as compact track rows with a **short** note strip
-  (fixed ~116 px) + instrument chips and an **⤓ Insert** button that drops a
-  one-shot placement at the nearest upcoming measure
-  (`loopInsertClip`/`loopSchedulePlacements`); the same clip can't be stacked on
+  dense. Recorded clips appear as compact **tiles** that wrap side by side
+  (short note strip ~104 px + instrument chips + ✕). **Tap a tile to select it**
+  (`loopSelectClip`); a single **⤓ Insert** button (`loopInsertSelectedClip`) drops
+  a one-shot placement of the selected clip at the nearest upcoming measure
+  (`loopInsertClip`/`loopSchedulePlacements`). The same clip can't be stacked on
   itself (overlapping placements are rejected). A plain tap on a placement block
-  removes it. The panel is shown only during a song (`body.song-run`).
+  removes it. The panel is shown only during a song (`body.song-run`). When the
+  song ends the cut clips are **cleared** (`loopFinishSong`) — they're a song
+  concept, so no free-play pad squares are left behind.
 - **Record Song** (`loopTransport.recordSong`) captures one take: live gestures
   land in `loopSong.rec` (beats relative to
   the downbeat), and every **loop occurrence** is merged in via
@@ -522,7 +530,7 @@ keep playing, and optionally captures a whole **song** take to replay later.
 
 ## Maintenance Notes
 
-- **Always bump the `#version` badge** (currently `v1.51.0`) after changes.
+- **Always bump the `#version` badge** (currently `v1.52.1`) after changes.
 - **Never serve stale JS:** `index.html` loads its modules through an inline bootstrap that appends a per-load timestamp to every `<script src>` (`?t=Date.now()` via `document.write`), so the browser can't reuse a cached copy of any JS file. Don't replace it with plain static `<script src>` tags. The HTML document itself is covered by the `no-cache`/`no-store` meta tags in `<head>`.
 - **Multi-file layout:** the page loads `js/app.js` → `audio.js` → `gesture.js` → `ui.js` → `main.js` → `creator.js` → `flow.js` → `instrument.js` → `loop.js` in order. Classic scripts share globals: cross-file shared state is declared with `var` in `app.js`; per-file `const`/`let` stay file-local. Don't switch to ES modules (breaks `file://` testing) and don't reorder the tags.
 - **Syntax check** each JS file after edits: `node --check js/*.js` (each file is plain JS).

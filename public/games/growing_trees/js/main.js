@@ -37,6 +37,9 @@ syncPitchZonesUI();
 canvas.addEventListener('pointerdown', e => {
   unlockAudio();
   if (mode === 'flow' || flowActive) return;   // the sound flow editor handles its own canvas input
+  // Re-measure the volume play field at the moment of touch, so the gain under
+  // the finger is always mapped against the current bar layout.
+  if (typeof refreshClipBarMetrics === 'function') refreshClipBarMetrics();
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: stageX(e), y: stageY(e) });
 
