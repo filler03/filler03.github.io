@@ -1,0 +1,16 @@
+[Unit]
+Description=Song Canvas AI render backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Users/FILLER-SITE-IO/apps/song-canvas
+ExecStart=/root/.nvm/versions/node/v26.3.0/bin/node server.js
+Restart=always
+RestartSec=3
+Environment=SONG_CANVAS_PORT=3300
+Environment=SONG_CANVAS_CHANNEL=1566066965951553548
+Environment=SONG_CANVAS_PUBLIC=https://filler03.duckdns.org/song-canvas
+
+[Install]
+WantedBy=multi-user.target

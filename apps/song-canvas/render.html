@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Song Canvas render</title>
+</head>
+<body>
+<script src="/engine.js"></script>
+<script>
+  window.renderSpec = async function (items) {
+    const E = window.SongEngine;
+    const res = await E.renderSong(items);
+    const blob = E.wavBlob(res.buffer);
+    const buf = await blob.arrayBuffer();
+    window.__wav = new Uint8Array(buf);
+    return { bytes: buf.byteLength, duration: res.duration, sampleRate: res.buffer.sampleRate, channels: res.buffer.numberOfChannels };
+  };
+</script>
+</body>
+</html>

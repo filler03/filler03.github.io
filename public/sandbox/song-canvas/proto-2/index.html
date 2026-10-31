@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Song Canvas — Prototype 2</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2.2.0">
 </head>
 <body>
 <header id="top">
@@ -29,7 +29,12 @@
   <a href="../">All prototypes</a>
 </footer>
 
-<script src="engine.js"></script>
-<script src="app.js"></script>
+<script>
+  window.SONGCANVAS_API = (location.hostname === 'filler03.duckdns.org')
+    ? '/song-canvas/api'
+    : 'https://filler03.duckdns.org/song-canvas/api';
+</script>
+<script src="engine.js?v=2.2.0"></script>
+<script src="app.js?v=2.2.0"></script>
 </body>
 </html>
