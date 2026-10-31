@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 1</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 1</em>
+  </a>
+  <div class="transport">
+    <button id="play" class="play" aria-label="Play">▶</button>
+    <div class="now"><span id="nowName">press play</span><span id="nowBar" class="bar"></span></div>
+  </div>
+  <nav class="modes" id="modes" aria-label="Editing lens">
+    <button data-mode="draw" class="on">Draw</button>
+    <button data-mode="map">Map</button>
+    <button data-mode="cards">Cards</button>
+  </nav>
+  <button id="ai" class="ghost">Ask for a song</button>
+</header>
+
+<main>
+  <section id="drawView" class="view">
+    <canvas id="draw"></canvas>
+    <p class="hint">Draw one line through each lane. Height is brightness, speed is pace, wobble is tension, length is busyness.</p>
+  </section>
+  <section id="mapView" class="view hidden">
+    <canvas id="map"></canvas>
+    <p class="hint">Drag each moment across the field. Left → right is calm → intense, bottom → top is dark → bright. Line order is song order.</p>
+  </section>
+  <section id="cardsView" class="view hidden">
+    <div id="cards" class="cards"></div>
+  </section>
+</main>
+
+<footer id="dock">
+  <div class="dockbar">
+    <div id="strip" class="strip" aria-label="Moments"></div>
+    <div class="docktools">
+      <button id="addSection" class="mini" title="Add a moment">+ moment</button>
+      <button id="loopBtn" class="mini" title="Restart loop">↺</button>
+    </div>
+  </div>
+  <div id="tiles" class="tiles" aria-label="Riff tiles"></div>
+</footer>
+
+<dialog id="aiDialog">
+  <form method="dialog" class="dialog-inner">
+    <header class="dialog-head">
+      <h2>Ask for a song</h2>
+      <button class="mini close" value="cancel" aria-label="Close">✕</button>
+    </header>
+    <p class="muted">Describe a feeling or a scene. Without the opencode backend connected this sketches locally; the same text plus the JSON below is what the AI would receive.</p>
+    <textarea id="brief" rows="4" placeholder="a slow, rainy late-night drive that slowly opens into something hopeful"></textarea>
+    <div class="dialog-actions">
+      <button type="button" id="sketch" class="accent">Sketch it</button>
+      <button type="button" id="copyBrief" class="ghost">Copy brief for opencode</button>
+      <button type="button" id="applyJson" class="ghost">Apply JSON</button>
+    </div>
+    <pre id="specView" class="spec" aria-label="Song spec"></pre>
+    <p class="muted small" id="aiNote"></p>
+  </form>
+</dialog>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Song Canvas — prototypes</title>
+<style>
+  :root {
+    --bg: #08090d;
+    --panel: rgba(255, 255, 255, 0.045);
+    --panel-2: rgba(255, 255, 255, 0.08);
+    --line: rgba(255, 255, 255, 0.1);
+    --text: #eceaf5;
+    --muted: #8d8ba3;
+    --accent: #7cf3d1;
+    --accent-2: #b39cff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 0 0 60px;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    background:
+      radial-gradient(36% 42% at 15% 6%, rgba(124, 243, 209, 0.14), transparent 70%),
+      radial-gradient(34% 40% at 86% 10%, rgba(179, 156, 255, 0.16), transparent 70%),
+      radial-gradient(52% 46% at 58% 108%, rgba(255, 140, 190, 0.1), transparent 70%);
+    filter: blur(30px);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  a { color: inherit; }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .topbar a {
+    text-decoration: none;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 999px;
+    padding: 7px 13px;
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+  .topbar a:hover { background: var(--panel-2); color: var(--text); }
+  .spacer { flex: 1; }
+
+  header.hero { padding: 34px 0 26px; }
+  .kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 10px;
+  }
+  .kicker i {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+  }
+  h1 {
+    margin: 16px 0 6px;
+    font-size: clamp(34px, 6vw, 58px);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  h1 .fade {
+    background: linear-gradient(100deg, var(--accent), var(--accent-2) 60%, #ff9ec8);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede { max-width: 620px; color: #b9b6cc; font-size: 16px; margin: 14px 0 0; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+    margin-top: 26px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--panel);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .card:hover { border-color: rgba(255, 255, 255, 0.24); transform: translateY(-2px); }
+  .thumb { position: relative; aspect-ratio: 16 / 9; background: #0b0c12; overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0.92; }
+  .thumb .tag {
+    position: absolute; top: 12px; left: 12px;
+    font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    background: rgba(8, 9, 13, 0.72);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 9px;
+    color: var(--text);
+    backdrop-filter: blur(6px);
+  }
+  .card-body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .card-body h2 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
+  .card-body p { margin: 0; color: #b3b0c6; font-size: 13.5px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .chips span {
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 9px;
+  }
+  .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: auto; padding-top: 8px;
+    text-decoration: none;
+    font-weight: 600; font-size: 13.5px;
+    color: #04120f;
+    background: linear-gradient(120deg, var(--accent), #9be8ff);
+    border-radius: 999px;
+    padding: 10px 16px;
+    align-self: flex-start;
+    transition: transform 0.15s ease, box-shadow 0.2s ease;
+  }
+  .cta:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124, 243, 209, 0.25); }
+
+  .card.soon {
+    border-style: dashed;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.025);
+  }
+  .card.soon:hover { transform: none; border-color: var(--line); }
+  .card.soon .card-body { justify-content: center; padding: 30px 22px; }
+  .card.soon .kicker { align-self: flex-start; margin-bottom: 6px; }
+  .card.soon ul { margin: 4px 0 0; padding-left: 18px; color: #b3b0c6; font-size: 13.5px; }
+  .card.soon li { margin: 5px 0; }
+
+  footer.foot {
+    margin-top: 34px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  footer.foot a { color: #cfccdd; text-decoration: none; }
+  footer.foot a:hover { text-decoration: underline; }
+
+  @media (max-width: 600px) {
+    header.hero { padding-top: 22px; }
+    .card-body { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="topbar">
+    <a href="../../index.html">← Game index</a>
+    <a href="../../games/growing_trees/">Growing Trees</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/filler03/filler03.github.io" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+
+  <header class="hero">
+    <span class="kicker"><i></i> Music lab · prototypes</span>
+    <h1>Song <span class="fade">Canvas</span></h1>
+    <p class="lede">
+      Gesture-first song sketching: shape a mood, a pace and a flow, and hear a band play it back.
+      These are working experiments — each one approaches the same idea from a different direction.
+    </p>
+  </header>
+
+  <section class="grid">
+    <article class="card">
+      <div class="thumb">
+        <img src="proto-1/preview.jpg" alt="Song Canvas prototype 1 — four section lanes with drawn mood contours">
+        <span class="tag">Prototype 01</span>
+      </div>
+      <div class="card-body">
+        <h2>Three lenses</h2>
+        <p>
+          Draw a contour per section, drag moments around a calm/intense field, or shape them with
+          abstract dials. Four sections loop with fills between them, riff tiles can be voiced by any
+          instrument, and a text brief can sketch a full arrangement.
+        </p>
+        <div class="chips">
+          <span>Web Audio</span><span>no build step</span><span>4 sections</span><span>local AI sketch</span>
+        </div>
+        <a class="cta" href="proto-1/">Open prototype →</a>
+      </div>
+    </article>
+
+    <article class="card soon">
+      <div class="card-body">
+        <span class="kicker"><i></i> Next experiments</span>
+        <h2>On the bench</h2>
+        <ul>
+          <li>Replace synth voices with CC0 samples and let riffs switch instruments</li>
+          <li>Wire the “Ask for a song” panel to an opencode backend</li>
+          <li>Save, share and remix songs from a URL</li>
+          <li>One continuous gesture path across the whole song</li>
+        </ul>
+      </div>
+    </article>
+  </section>
+
+  <footer class="foot">
+    <span>Built in the open — no accounts, no tracking, everything runs in your browser.</span>
+    <span class="spacer"></span>
+    <a href="../../index.html">Game index</a>
+    <a href="../../games/growing_trees/">Growing Trees</a>
+  </footer>
+</div>
+</body>
+</html>
