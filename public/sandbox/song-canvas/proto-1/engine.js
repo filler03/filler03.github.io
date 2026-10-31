@@ -346,6 +346,7 @@
   function scheduleBar(barIndex, t0) {
     const info = barInfo(barIndex);
     const sec = song.sections[info.si];
+    if (!sec) return 3; // nothing to play yet
     const nextSec = song.sections[(info.si + 1) % song.sections.length];
     const bpm = tempoFor(sec);
     const barDur = (4 * 60) / bpm;

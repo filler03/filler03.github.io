@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 2</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 2</em>
+  </a>
+  <div class="progress" aria-hidden="true"><i id="progressFill"></i></div>
+  <div class="stepname" id="stepName">feeling</div>
+  <div class="controls">
+    <button id="back" class="mini" title="Back" aria-label="Back">←</button>
+    <button id="play" class="play" aria-label="Play">▶</button>
+  </div>
+</header>
+
+<main id="stage" aria-live="polite"></main>
+
+<footer id="foot">
+  <span>Guided session · one question at a time</span>
+  <span class="dots" aria-hidden="true"></span>
+  <a href="../">All prototypes</a>
+</footer>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
