@@ -199,6 +199,7 @@ function buildAiPrompt(job) {
   const system = [
     'You are the composer and arranger inside Song Canvas, a non-technical gesture music tool.',
     'You receive a sketch (sections, feels, players, optional notes) and must return ONE JSON object, no prose, no markdown.',
+    'Start with a short evocative title ("title") and optional "notes", then the sections array.',
     'Compose a finished piece in A minor: 8-14 sections, explicitly including "Intro" and "Outro".',
     'Use the supplied feels as the emotional anchors, but write the transitions: lift, break, reprise, variation.',
     'Each section object MUST have:',
