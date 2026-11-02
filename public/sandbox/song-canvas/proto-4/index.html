@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 4</title>
+<link rel="stylesheet" href="style.css?v=5.4.3">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 4</em>
+  </a>
+  <div class="transport">
+    <button id="play" class="play" aria-label="Play the radio">▶</button>
+    <div class="now"><span id="nowName">taste radio</span><span id="nowBar" class="bar">press play — every phrase is new</span></div>
+  </div>
+  <button id="like" class="like" disabled title="Captures the last 5 seconds and the aspects playing">♥ I liked that part</button>
+  <button id="sendTop" class="mini">Send the vibes</button>
+  <button id="chaosBtn" class="mini" title="Control vs surprise per aspect"><span class="long">Randomness</span><span class="short">Rand</span></button>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="nowcard">
+      <canvas id="viz" width="600" height="60" aria-hidden="true"></canvas>
+      <div class="nowmeta">
+        <div id="phraseName" class="phrasename">—</div>
+        <div class="tags" id="phraseTags"></div>
+      </div>
+    </div>
+
+    <div class="streamblock">
+      <div class="blockhead"><h2>Stream</h2><span id="streamNote">random phrases, biased by what you like</span></div>
+      <div id="stream" class="stream"></div>
+    </div>
+
+    <div class="likedblock">
+      <div class="blockhead"><h2>Liked moments</h2><span id="likedNote">the last 5 s and the aspects inside it</span></div>
+      <div id="liked" class="liked"></div>
+    </div>
+
+    <div id="composer" class="composer">
+      <h2>Send the vibe to the composer</h2>
+      <p class="note">Pinned moments and the learned taste become the brief. opencode arranges, smooths and renders it, then posts to #music-testing.</p>
+      <textarea id="notes" placeholder="anything else? e.g. keep the drums out until the lift; let the bells ring at the end"></textarea>
+      <div class="actions">
+        <button id="generate" class="primary">Generate the final song</button>
+        <button id="copy" class="chip">Copy brief</button>
+        <span id="sendHint" class="note"></span>
+      </div>
+      <div id="result"></div>
+    </div>
+  </section>
+
+  <aside class="taste">
+    <h2>Taste</h2>
+    <p id="tasteSummary" class="note">Nothing learned yet. Like a few moments and the radio will lean your way.</p>
+    <div id="tasteBody"></div>
+    <button id="resetTaste" class="chip">Reset taste</button>
+  </aside>
+</main>
+
+<dialog id="chaosDialog" class="chaosdialog">
+  <div class="dialogInner">
+    <header class="dialogHead">
+      <h2>Control vs surprise</h2>
+      <button id="chaosClose" class="mini" aria-label="Close">✕</button>
+    </header>
+    <p class="note">0 keeps an aspect exactly as the previous phrase. Low values nudge it, high values redraw it. Human performance variation stays on even when everything is locked.</p>
+    <div id="chaosPresets" class="chaosPresets"></div>
+    <div id="chaosBody" class="chaosGrid"></div>
+  </div>
+</dialog>
+
+<footer id="foot">
+  <audio id="clip" controls hidden></audio>
+  <span id="status">Press play. When something catches your ear, hit ♥ within five seconds.</span>
+</footer>
+
+<script>
+  window.SONGCANVAS_API = (location.hostname === 'filler03.duckdns.org')
+    ? '/song-canvas/api'
+    : 'https://filler03.duckdns.org/song-canvas/api';
+</script>
+<script src="engine.js?v=5.4.3"></script>
+<script src="app.js?v=5.4.3"></script>
+</body>
+</html>

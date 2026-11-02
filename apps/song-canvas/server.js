@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '../..');
-const ENGINE_SRC = path.join(ROOT, 'public/sandbox/song-canvas/proto-2/engine.js');
+const ENGINE_SRC = path.join(ROOT, 'public/sandbox/song-canvas/proto-4/engine.js');
 const RENDER_HTML = path.join(__dirname, 'render.html');
 const BOT_DIR = process.env.DEPLOY_BOT_DIR || '/root/git-repos/Personal-Notes-Repo/deploy-bot-jf';
 const PORT = Number(process.env.SONG_CANVAS_PORT || 3300);
@@ -36,8 +36,9 @@ const JOB_COOLDOWN_MS = Number(process.env.SONG_CANVAS_COOLDOWN || 45000);
 const MAX_BODY = 96 * 1024;
 
 const PROGRESSIONS = ['bittersweet', 'dark', 'rising', 'floating', 'open', 'longing', 'hopeful', 'suspended', 'driving'];
-const RIFFS = ['lullaby', 'spark', 'drive', 'sparse', 'hook', 'drift', 'pulse', 'weave', 'call', 'run'];
-const INSTRUMENTS = ['pad', 'keys', 'strings', 'pluck', 'bells', 'bass', 'drums', 'perc'];
+const RIFFS = ['lullaby', 'spark', 'drive', 'sparse', 'hook', 'drift', 'pulse', 'weave', 'call', 'run', 'step', 'sigh', 'bounce'];
+const INSTRUMENTS = ['pad', 'keys', 'strings', 'pluck', 'bells', 'lead', 'bass', 'drums', 'perc', 'texture'];
+const CHORD_ROOTS = 12;
 const FLOWS = ['blend', 'lift', 'drift'];
 
 const jobs = new Map();
@@ -169,11 +170,60 @@ function sanitizeSection(raw, fallback, index) {
     space: round2(num(raw && raw.space, f.space ?? 0.4)),
     swing: round2(num(raw && raw.swing, f.swing ?? 0.1)),
     human: round2(num(raw && raw.human, f.human ?? 0.2)),
+    delay: round2(num(raw && raw.delay, f.delay ?? 0.15)),
+    shimmer: round2(num(raw && raw.shimmer, f.shimmer ?? 0.15)),
+    drive: round2(num(raw && raw.drive, f.drive ?? 0.1)),
+    drumTone: round2(num(raw && raw.drumTone, f.drumTone ?? 0.5)),
+    pattern: Math.max(0, Math.min(7, Math.round(num(raw && raw.pattern, f.pattern ?? 0)))),
     progression: PROGRESSIONS.includes(raw && raw.progression) ? raw.progression : (f.progression || 'bittersweet'),
     riff: RIFFS.includes(raw && raw.riff) ? raw.riff : (f.riff || 'lullaby'),
     flow: FLOWS.includes(raw && raw.flow) ? raw.flow : (f.flow || 'blend'),
-    instruments: instrumentObject(raw && raw.instruments, f.instruments)
+    instruments: instrumentObject(raw && raw.instruments, f.instruments),
+    chords: chordList(raw && raw.chords, f.chords),
+    register: Math.max(-24, Math.min(24, Math.round(num(raw && raw.register, f.register ?? 0)))),
+    padBank: bankOf(raw && raw.padBank, f.padBank, 'warm', ['warm', 'glass', 'pulse']),
+    keysBank: bankOf(raw && raw.keysBank, f.keysBank, 'ep', ['ep', 'bright', 'organ', 'bell']),
+    pluckBank: bankOf(raw && raw.pluckBank, f.pluckBank, 'nylon', ['nylon', 'steel', 'koto', 'muted']),
+    bellBank: bankOf(raw && raw.bellBank, f.bellBank, 'chime', ['chime', 'glass', 'tubular']),
+    bassBank: bankOf(raw && raw.bassBank, f.bassBank, 'finger', ['finger', 'pick', 'sub', 'growl']),
+    leadBank: bankOf(raw && raw.leadBank, f.leadBank, 'saw', ['saw', 'square', 'vocal', 'whistle']),
+    stringsBank: bankOf(raw && raw.stringsBank, f.stringsBank, 'warm', ['warm', 'cello', 'choir']),
+    textureBank: bankOf(raw && raw.textureBank, f.textureBank, 'air', ['air', 'vinyl', 'rumble']),
+    sub: !!(raw ? raw.sub : f.sub),
+    sparkle: !!(raw ? raw.sparkle : f.sparkle),
+    double: !!(raw ? raw.double : f.double),
+    chorus: round2(num(raw && raw.chorus, f.chorus ?? 0.15)),
+    padWave: waveOf(raw && raw.padWave, f.padWave, 'sawtooth'),
+    bassWave: waveOf(raw && raw.bassWave, f.bassWave, 'sawtooth'),
+    pluckWave: waveOf(raw && raw.pluckWave, f.pluckWave, 'triangle'),
+    leadWave: waveOf(raw && raw.leadWave, f.leadWave, 'sawtooth'),
+    keysRatio: Math.max(1, Math.min(4, Math.round(num(raw && raw.keysRatio, f.keysRatio ?? 2)))),
+    archetype: String((raw && raw.archetype) || f.archetype || '').slice(0, 40),
+    mode: String((raw && raw.mode) || f.mode || 'minor').slice(0, 20)
   };
+}
+
+function bankOf(v, fallback, def, allowed) {
+  const b = String(v || fallback || def);
+  return allowed.includes(b) ? b : def;
+}
+
+function waveOf(v, fallback, def) {
+  const w = String(v || fallback || def);
+  return ['sine', 'square', 'sawtooth', 'triangle'].includes(w) ? w : def;
+}
+
+function chordList(list, fallback) {
+  const src = Array.isArray(list) && list.length ? list : (Array.isArray(fallback) ? fallback : null);
+  if (!src) return null;
+  const out = [];
+  for (const c of src.slice(0, 8)) {
+    if (!c || typeof c !== 'object') continue;
+    const root = Math.round(Number(c.root));
+    if (!Number.isInteger(root) || root < 0 || root >= CHORD_ROOTS) continue;
+    out.push({ root, minor: !!c.minor, dim: !!c.dim, aug: !!c.aug });
+  }
+  return out.length ? out : null;
 }
 
 function sanitizeArrangement(obj, fallbackArrangement) {
@@ -204,8 +254,10 @@ function buildAiPrompt(job) {
     'Use the supplied feels as the emotional anchors, but write the transitions: lift, break, reprise, variation.',
     'Each section object MUST have:',
     'name (string), bars (1-16), pace (0-1), energy (0-1), brightness (0-1), tension (0-1), density (0-1), space (0-1),',
-    'swing (0-1), human (0-1), progression (one of the allowed ids), riff (one of the allowed ids),',
+    'swing (0-1), human (0-1), delay (0-1), shimmer (0-1), drive (0-1), drumTone (0-1), pattern (0-7), register (-24..24), progression/riff (allowed ids),',
+    'optional voice: padBank/keysBank/pluckBank/bellBank/bassBank/leadBank/stringsBank/textureBank, sub/sparkle/double booleans, chorus (0-1), padWave/bassWave/pluckWave/leadWave, keysRatio (1-4), archetype, mode.',
     'flow (one of the allowed flows), instruments (array of allowed ids).',
+    'Optional: chords — an array of up to 8 {root:0-11, minor:true|false}, one per bar (root 0 = A). Prefer chords when the sketch provides them.',
     'Allowed IDs: ' + JSON.stringify(allowed),
     'Rules: keep total length roughly 60-120 seconds; keep each section musically coherent;',
     'do NOT use tools, do NOT read or write files, do NOT run commands. Output JSON only.'

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 6 · Instrument lab</title>
+<link rel="stylesheet" href="style.css?v=6.0.0">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 6 · instrument lab</em>
+  </a>
+  <div class="namewrap">
+    <input id="name" class="nameinput" type="text" maxlength="48" value="Untitled instrument" aria-label="Instrument name" spellcheck="false">
+    <span id="saveState" class="savestate">unsaved</span>
+  </div>
+  <div class="topactions">
+    <button id="newBtn" class="mini" title="Start from the init voice">New</button>
+    <button id="saveBtn" class="primary" title="Save this instrument in this browser">Save instrument</button>
+  </div>
+</header>
+
+<main>
+  <section id="center">
+    <div class="scopecard">
+      <div class="scopetop">
+        <span class="listen"><i></i><span id="audioState">audio idle · play a key</span></span>
+        <span id="noteReadout" class="notereadout">—</span>
+      </div>
+      <canvas id="scope"></canvas>
+      <p class="intro">One instrument, no song yet. Build the voice from oscillators, envelopes, a filter, an LFO and effects. Play the keys; latch a chord while you shape it. Save the sound, then we sequence it next.</p>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Sources</h2><span>two oscillators + noise</span></div>
+      <div class="oscgrid">
+        <div class="osccard">
+          <div class="oschead">
+            <label class="onoff"><input id="osc1on" type="checkbox" checked><span>Oscillator 1</span></label>
+            <span class="oscmeta" id="osc1meta">sawtooth</span>
+          </div>
+          <div class="wavepick" id="osc1waves">
+            <button data-wave="sine" title="Sine">Sine</button>
+            <button data-wave="triangle" title="Triangle">Tri</button>
+            <button data-wave="sawtooth" title="Sawtooth">Saw</button>
+            <button data-wave="square" title="Square">Sqr</button>
+          </div>
+          <div class="paramrow">
+            <label for="osc1oct">Octave</label>
+            <select id="osc1oct">
+              <option value="-2">−2</option><option value="-1">−1</option>
+              <option value="0">0</option><option value="1">+1</option><option value="2">+2</option>
+            </select>
+          </div>
+          <div class="paramrow">
+            <label for="osc1detune">Detune</label>
+            <input id="osc1detune" type="range" min="-50" max="50" step="1">
+            <output id="osc1detuneVal">0 ct</output>
+          </div>
+          <div class="paramrow">
+            <label for="osc1level">Level</label>
+            <input id="osc1level" type="range" min="0" max="1" step="0.01">
+            <output id="osc1levelVal">60%</output>
+          </div>
+        </div>
+
+        <div class="osccard">
+          <div class="oschead">
+            <label class="onoff"><input id="osc2on" type="checkbox"><span>Oscillator 2</span></label>
+            <span class="oscmeta" id="osc2meta">sine</span>
+          </div>
+          <div class="wavepick" id="osc2waves">
+            <button data-wave="sine" title="Sine">Sine</button>
+            <button data-wave="triangle" title="Triangle">Tri</button>
+            <button data-wave="sawtooth" title="Sawtooth">Saw</button>
+            <button data-wave="square" title="Square">Sqr</button>
+          </div>
+          <div class="paramrow">
+            <label for="osc2oct">Octave</label>
+            <select id="osc2oct">
+              <option value="-2">−2</option><option value="-1">−1</option>
+              <option value="0">0</option><option value="1">+1</option><option value="2">+2</option>
+            </select>
+          </div>
+          <div class="paramrow">
+            <label for="osc2detune">Detune</label>
+            <input id="osc2detune" type="range" min="-50" max="50" step="1">
+            <output id="osc2detuneVal">0 ct</output>
+          </div>
+          <div class="paramrow">
+            <label for="osc2level">Level</label>
+            <input id="osc2level" type="range" min="0" max="1" step="0.01">
+            <output id="osc2levelVal">25%</output>
+          </div>
+        </div>
+
+        <div class="osccard noisecard">
+          <div class="oschead">
+            <label class="onoff"><input id="noiseOn" type="checkbox"><span>Noise</span></label>
+            <span class="oscmeta">white</span>
+          </div>
+          <p class="cardnote">A little air, breath or grit.</p>
+          <div class="paramrow">
+            <label for="noiseLevel">Level</label>
+            <input id="noiseLevel" type="range" min="0" max="1" step="0.01">
+            <output id="noiseLevelVal">0%</output>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Amplitude</h2><span>attack · decay · sustain · release</span></div>
+      <div class="envwrap">
+        <canvas id="env" aria-label="Amplitude envelope shape"></canvas>
+        <div class="envgrid">
+          <div class="paramrow"><label for="ampA">Attack</label><input id="ampA" type="range" min="0" max="2" step="0.001"><output id="ampAVal"></output></div>
+          <div class="paramrow"><label for="ampD">Decay</label><input id="ampD" type="range" min="0" max="2" step="0.001"><output id="ampDVal"></output></div>
+          <div class="paramrow"><label for="ampS">Sustain</label><input id="ampS" type="range" min="0" max="1" step="0.01"><output id="ampSVal"></output></div>
+          <div class="paramrow"><label for="ampR">Release</label><input id="ampR" type="range" min="0.02" max="4" step="0.01"><output id="ampRVal"></output></div>
+        </div>
+      </div>
+      <p class="note">Envelope shapes apply to new notes. Other controls update notes already sounding.</p>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Filter</h2><span>shape the tone</span></div>
+      <div class="filtergrid">
+        <div class="paramrow">
+          <label for="filterType">Type</label>
+          <select id="filterType">
+            <option value="lowpass">Lowpass</option>
+            <option value="highpass">Highpass</option>
+            <option value="bandpass">Bandpass</option>
+          </select>
+        </div>
+        <div class="paramrow"><label for="cutoff">Cutoff</label><input id="cutoff" type="range" min="0" max="100" step="0.1"><output id="cutoffVal"></output></div>
+        <div class="paramrow"><label for="resonance">Resonance</label><input id="resonance" type="range" min="0" max="20" step="0.1"><output id="resonanceVal"></output></div>
+        <div class="paramrow"><label for="filterEnv">Env amount</label><input id="filterEnv" type="range" min="-1" max="1" step="0.01"><output id="filterEnvVal"></output></div>
+      </div>
+      <p class="subhead">Filter envelope</p>
+      <div class="envgrid compact">
+        <div class="paramrow"><label for="fA">Attack</label><input id="fA" type="range" min="0" max="2" step="0.001"><output id="fAVal"></output></div>
+        <div class="paramrow"><label for="fD">Decay</label><input id="fD" type="range" min="0" max="2" step="0.001"><output id="fDVal"></output></div>
+        <div class="paramrow"><label for="fS">Sustain</label><input id="fS" type="range" min="0" max="1" step="0.01"><output id="fSVal"></output></div>
+        <div class="paramrow"><label for="fR">Release</label><input id="fR" type="range" min="0.02" max="4" step="0.01"><output id="fRVal"></output></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>LFO</h2><span>slow movement</span></div>
+      <div class="lfogrid">
+        <label class="onoff lfoswitch"><input id="lfoOn" type="checkbox"><span>On</span></label>
+        <div class="paramrow">
+          <label for="lfoWave">Shape</label>
+          <select id="lfoWave"><option value="sine">Sine</option><option value="triangle">Tri</option><option value="square">Square</option></select>
+        </div>
+        <div class="paramrow">
+          <label for="lfoTarget">Target</label>
+          <select id="lfoTarget"><option value="pitch">Pitch</option><option value="filter">Filter</option><option value="amp">Volume</option></select>
+        </div>
+        <div class="paramrow"><label for="lfoRate">Rate</label><input id="lfoRate" type="range" min="0" max="100" step="0.1"><output id="lfoRateVal"></output></div>
+        <div class="paramrow"><label for="lfoDepth">Depth</label><input id="lfoDepth" type="range" min="0" max="1" step="0.01"><output id="lfoDepthVal"></output></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Space &amp; motion</h2><span>the finish</span></div>
+      <div class="fxgrid">
+        <div class="fxcard">
+          <div class="fxtop"><span>Drive</span><output id="driveVal"></output></div>
+          <input id="drive" type="range" min="0" max="1" step="0.01" aria-label="Drive">
+          <p>Soft saturation and bite.</p>
+        </div>
+        <div class="fxcard">
+          <div class="fxtop"><span>Chorus</span><output id="chorusVal"></output></div>
+          <input id="chorus" type="range" min="0" max="1" step="0.01" aria-label="Chorus">
+          <p>Width and gentle movement.</p>
+        </div>
+        <div class="fxcard">
+          <div class="fxtop"><span>Echo</span><output id="delayVal"></output></div>
+          <input id="delay" type="range" min="0" max="1" step="0.01" aria-label="Echo">
+          <p>A short repeat at 0.32 s.</p>
+        </div>
+        <div class="fxcard">
+          <div class="fxtop"><span>Reverb</span><output id="reverbVal"></output></div>
+          <input id="reverb" type="range" min="0" max="1" step="0.01" aria-label="Reverb">
+          <p>Room behind the voice.</p>
+        </div>
+      </div>
+      <div class="paramrow masterrow"><label for="master">Output</label><input id="master" type="range" min="0" max="1" step="0.01"><output id="masterVal"></output></div>
+    </div>
+  </section>
+
+  <aside id="side">
+    <div class="block">
+      <div class="blockhead"><h2>Saved instruments</h2><span id="savedCount">0</span></div>
+      <div id="savedList" class="savedlist"></div>
+      <p class="note" id="savedNote">Saved locally in this browser. Nothing leaves the page.</p>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Spec</h2><span>for the next piece</span></div>
+      <pre id="specPreview" class="spec"></pre>
+      <div class="row">
+        <button id="copySpec" class="mini">Copy instrument JSON</button>
+      </div>
+      <p class="note" id="copyNote">The next step will read this spec, sequence it, and arrange the song.</p>
+    </div>
+
+    <div class="block pathblock">
+      <div class="blockhead"><h2>The path</h2><span>one piece at a time</span></div>
+      <ol class="path">
+        <li class="here"><b>Instrument</b><span>design a voice</span></li>
+        <li><b>Sequence</b><span>notes and rhythm</span></li>
+        <li><b>Song</b><span>parts and arrangement</span></li>
+      </ol>
+    </div>
+  </aside>
+</main>
+
+<footer id="keyboard">
+  <div class="keybar">
+    <button id="octDown" class="mini" aria-label="Octave down">−</button>
+    <span id="octLabel" class="octlabel">C3–C5</span>
+    <button id="octUp" class="mini" aria-label="Octave up">+</button>
+    <button id="latch" class="chip" title="Hold notes so you can shape the sound">Latch</button>
+    <button id="allOff" class="mini" title="Release every note">All off</button>
+    <span id="keyHint" class="keyhint">keys: A W S E D F T G Y H U J K</span>
+  </div>
+  <div id="keys" class="keys" aria-label="Instrument keyboard"></div>
+</footer>
+
+<script src="app.js?v=6.0.0"></script>
+</body>
+</html>

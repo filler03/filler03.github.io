@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 7 · Timbre drift</title>
+<link rel="stylesheet" href="style.css?v=7.0.0">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 7 · timbre drift</em>
+  </a>
+  <div class="seedrow">
+    <label for="seedSel">seed</label>
+    <select id="seedSel" aria-label="Starting instrument"></select>
+    <span class="tag">timbre only</span>
+  </div>
+  <div class="topright">
+    <span id="likedCount" class="likedcount">0 liked</span>
+    <a class="mini" href="../proto-6/" title="Create a new seed instrument">Instrument lab</a>
+  </div>
+</header>
+
+<main>
+  <section id="stage">
+    <div class="stagecard">
+      <div class="stagetop">
+        <span id="trialLabel">ready to start</span>
+        <span id="stateLabel" class="state">press play</span>
+      </div>
+
+      <div class="nameblock">
+        <h1 id="currentName">Timbre</h1>
+        <div id="changeRow" class="changerow"></div>
+      </div>
+
+      <div class="scopewrap">
+        <canvas id="scope" aria-label="Live waveform"></canvas>
+        <div class="scopeinfo">
+          <span id="noteLabel">C3 · one long note</span>
+          <span id="clock">—</span>
+        </div>
+      </div>
+      <div class="progress"><div id="progressFill"></div></div>
+
+      <div class="controls">
+        <button id="play" class="playbtn" aria-label="Play timbre stream">▶</button>
+        <button id="like" class="likebtn" disabled>♥ I like this timbre</button>
+        <button id="skip" class="skipbtn" disabled>Skip</button>
+      </div>
+
+      <div id="axes" class="axes"></div>
+      <p class="phasenote">Only the timbre is changing. The envelope is fixed for this phase — next we will explore the way the note is shaped.</p>
+    </div>
+  </section>
+
+  <aside id="side">
+    <div class="block">
+      <div class="blockhead"><h2>Timbre map</h2><span>small steps</span></div>
+      <canvas id="map"></canvas>
+      <div class="maplegend">
+        <span><i class="trialdot"></i> trial</span>
+        <span><i class="likedot">♥</i> liked</span>
+        <span><i class="currentdot"></i> now</span>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Liked timbres</h2><span id="likedSideCount">0</span></div>
+      <div id="likedList" class="likedlist"></div>
+      <p class="note">Liked timbres are saved in this browser for the envelope phase.</p>
+    </div>
+
+    <div class="block pathblock">
+      <div class="blockhead"><h2>The path</h2><span>one piece at a time</span></div>
+      <ol class="path">
+        <li class="here"><b>Timbre</b><span>the colour</span></li>
+        <li><b>Envelope</b><span>the shape</span></li>
+        <li><b>Sequence &amp; song</b><span>the use</span></li>
+      </ol>
+      <p class="note">Same voice, different envelopes later. One long note now.</p>
+    </div>
+  </aside>
+</main>
+
+<script src="engine.js?v=7.0.0"></script>
+<script src="app.js?v=7.0.0"></script>
+</body>
+</html>

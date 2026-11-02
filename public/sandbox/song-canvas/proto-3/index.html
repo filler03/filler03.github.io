@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 3</title>
+<link rel="stylesheet" href="style.css?v=3.0.0">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 3</em>
+  </a>
+  <div class="transport">
+    <button id="playAll" class="play" aria-label="Play all checkpoints">▶</button>
+    <div class="now"><span id="nowName">4 checkpoints</span><span id="nowBar" class="bar">build the vibe, clip by clip</span></div>
+  </div>
+  <div class="topActions">
+    <button id="previewBtn" class="mini">Preview checkpoint</button>
+    <a class="mini" href="#composer">Send to composer</a>
+  </div>
+</header>
+
+<main>
+  <aside id="rail">
+    <div class="railhead">
+      <span>Checkpoints</span>
+      <button id="addCp" class="mini" title="Add a checkpoint">+</button>
+    </div>
+    <div id="cpList" class="cplist"></div>
+    <p class="hint">Each checkpoint is a short clip: instruments, chords, figure, filters, tempo. The AI joins them.</p>
+  </aside>
+
+  <section id="editor"></section>
+</main>
+
+<footer id="clipbar">
+  <audio id="clip" controls hidden></audio>
+  <span id="clipStatus">Select a checkpoint. Audition instruments, then preview the clip.</span>
+</footer>
+
+<script>
+  window.SONGCANVAS_API = (location.hostname === 'filler03.duckdns.org')
+    ? '/song-canvas/api'
+    : 'https://filler03.duckdns.org/song-canvas/api';
+</script>
+<script src="engine.js?v=3.0.0"></script>
+<script src="app.js?v=3.0.0"></script>
+</body>
+</html>

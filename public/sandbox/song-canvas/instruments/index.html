@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Song Canvas — Instrument library</title>
+<style>
+  :root {
+    --bg: #08090d; --panel: rgba(255,255,255,0.045); --panel-2: rgba(255,255,255,0.08);
+    --line: rgba(255,255,255,0.1); --text: #eceaf5; --muted: #8d8ba3;
+    --accent: #7cf3d1; --accent-2: #b39cff; --heart: #ff7ab0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 0 0 56px;
+  }
+  body::before {
+    content: ""; position: fixed; inset: -20%; pointer-events: none; z-index: -1;
+    background:
+      radial-gradient(36% 40% at 14% 6%, rgba(124,243,209,0.12), transparent 70%),
+      radial-gradient(34% 40% at 86% 8%, rgba(179,156,255,0.14), transparent 70%),
+      radial-gradient(50% 44% at 55% 106%, rgba(255,140,190,0.08), transparent 70%);
+    filter: blur(30px);
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 16px 0; color: var(--muted); font-size: 13px; }
+  .topbar a { color: inherit; text-decoration: none; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 7px 12px; }
+  .topbar a:hover { background: var(--panel-2); color: var(--text); }
+  .spacer { flex: 1; }
+  header { padding: 26px 0 18px; }
+  .kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; }
+  .kicker i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  h1 { margin: 15px 0 7px; font-size: clamp(32px, 5.5vw, 52px); line-height: 1.04; letter-spacing: -0.02em; }
+  h1 span { background: linear-gradient(100deg, var(--accent), var(--accent-2) 60%, #ff9ec8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { max-width: 680px; color: #b9b6cc; font-size: 15px; margin: 10px 0 0; }
+  .statusline { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 18px 0 0; color: var(--muted); font-size: 12px; }
+  .statusline b { color: var(--text); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 20px; }
+  .card { border: 1px solid var(--line); background: var(--panel); border-radius: 18px; padding: 15px 16px 16px; display: flex; flex-direction: column; gap: 9px; }
+  .card.liked { border-color: rgba(255,122,176,0.35); }
+  .cardhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .name { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.2; }
+  .kind { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; white-space: nowrap; }
+  .source { font-size: 11px; color: var(--muted); line-height: 1.45; }
+  audio { width: 100%; height: 36px; margin-top: 2px; }
+  .cardfoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
+  .tag { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; }
+  .tag.candidate { color: #ffca8c; border-color: rgba(255,202,140,0.3); }
+  .tag.liked { color: var(--heart); border-color: rgba(255,122,176,0.4); }
+  .discord { margin-left: auto; font-size: 10.5px; color: #cfccdd; text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; }
+  .discord:hover { background: var(--panel-2); }
+  .empty { border: 1px dashed var(--line); border-radius: 18px; padding: 28px; color: var(--muted); font-size: 13px; margin-top: 20px; }
+  footer { margin-top: 30px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+  footer a { color: #cfccdd; text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  @media (max-width: 560px) { .wrap { padding: 0 12px; } .grid { grid-template-columns: 1fr; } .topbar { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="topbar">
+    <a href="../">← Song Canvas</a>
+    <a href="../../">Game index</a>
+    <span class="spacer"></span>
+    <a href="CREDITS.md">Credits</a>
+  </nav>
+
+  <header>
+    <span class="kicker"><i></i> Song Canvas · instrument library</span>
+    <h1>Sounds <span>kept</span>.</h1>
+    <p class="lede">20-second candidates from the sample instruments and sound sketches. React to the messages in #instrument-inception; the kept sounds move into the library disc folder with their specs and credits.</p>
+    <div class="statusline" id="statusline"><span>Loading manifest…</span></div>
+  </header>
+
+  <main id="grid" class="grid"></main>
+  <div id="empty" class="empty" hidden></div>
+
+  <footer>
+    <span>Preview audio is stored in <code>previews/</code>; kept audio in <code>audio/</code>.</span>
+    <span class="spacer"></span>
+    <a href="../">Prototypes</a>
+    <a href="CREDITS.md">Sources &amp; licenses</a>
+  </footer>
+</div>
+
+<script>
+(async () => {
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  const status = document.getElementById('statusline');
+  let manifest;
+  try {
+    const res = await fetch('manifest.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${res.status}`);
+    manifest = await res.json();
+  } catch (err) {
+    status.innerHTML = '<span>Could not load the manifest. Open this page from the site, not directly from disk.</span>';
+    return;
+  }
+  const items = Array.isArray(manifest.previews) ? manifest.previews : [];
+  if (!items.length) {
+    empty.hidden = false;
+    empty.textContent = 'No previews yet.';
+    status.innerHTML = '<span>0 candidates</span>';
+    return;
+  }
+  const liked = items.filter(x => x.liked).length;
+  status.innerHTML = `<span><b>${items.length}</b> candidates</span><span><b>${liked}</b> kept</span><span>React in #instrument-inception</span>`;
+  for (const item of items) {
+    const card = document.createElement('article');
+    card.className = 'card' + (item.liked ? ' liked' : '');
+    const head = document.createElement('div');
+    head.className = 'cardhead';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = item.label;
+    const kind = document.createElement('span');
+    kind.className = 'kind';
+    kind.textContent = item.kind === 'sketch' ? 'sound sketch' : 'instrument';
+    head.append(name, kind);
+    const source = document.createElement('div');
+    source.className = 'source';
+    source.textContent = item.source;
+    const cat = document.createElement('div');
+    cat.className = 'kind';
+    cat.textContent = [item.category, item.genre].filter(Boolean).join(' · ') || (item.kind === 'sketch' ? 'sound sketch' : 'instrument');
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'none';
+    audio.src = item.preview || item.file;
+    const foot = document.createElement('div');
+    foot.className = 'cardfoot';
+    const tag = document.createElement('span');
+    tag.className = 'tag ' + (item.liked ? 'liked' : 'candidate');
+    tag.textContent = item.liked ? 'kept' : 'candidate';
+    const dlink = document.createElement('a');
+    dlink.className = 'discord';
+    dlink.href = item.discordUrl || '#';
+    dlink.target = '_blank';
+    dlink.rel = 'noopener';
+    dlink.textContent = 'React in Discord';
+    foot.append(tag, cat, dlink);
+    card.append(head, source, audio, foot);
+    grid.appendChild(card);
+  }
+})();
+</script>
+</body>
+</html>

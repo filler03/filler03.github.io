@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 5</title>
+<link rel="stylesheet" href="style.css?v=5.4.2">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 5 · discover</em>
+  </a>
+  <div class="transport">
+    <button id="play" class="play" aria-label="Play">▶</button>
+    <div class="now"><span id="nowTempo">— bpm</span><span id="nowChord" class="bar">one continuous loop</span></div>
+  </div>
+  <button id="like" class="like" disabled title="Captures the last 5 seconds and the full context">♥ I liked that</button>
+  <button id="roll" class="primary">Roll isolated</button>
+  <button id="briefBtn" class="mini" title="Handoff brief for the LLM song builder">Taste brief</button>
+</header>
+
+<main>
+  <aside id="rail">
+    <div class="railhead"><span>Instruments</span><span id="activeCount">4 on</span></div>
+    <div id="instList" class="instlist"></div>
+    <p class="hint">Toggle an instrument to add or drop it; the others keep playing. Taste is kept when you drop one.</p>
+  </aside>
+
+  <section id="center">
+    <div class="nowcard">
+      <canvas id="viz" height="52" aria-hidden="true"></canvas>
+      <div id="nowTags" class="tags"></div>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Harmony</h2><span>Nashville numbers</span></div>
+      <div class="keyrow">
+        <select id="keySel" aria-label="Key"></select>
+        <input id="progInput" class="proginput" spellcheck="false" aria-label="Nashville progression" placeholder="1m b6 b3 b7">
+      </div>
+      <div id="progChords" class="progchords"></div>
+      <div id="progPresets" class="presets"></div>
+      <p class="note">Degrees 1–7 · b/# accidentals · m/dim/aug/maj qualities. The key sets the tonic; numbers transpose with it.</p>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Discovery controls</h2><span>only the switched-on aspects change on a roll</span></div>
+      <div id="aspects" class="aspects"></div>
+      <div id="presets" class="presets"></div>
+      <p id="isoNote" class="note"></p>
+      <div class="rollrow">
+        <button id="auto" class="chip on">Evolve: every loop</button>
+        <span id="rollNote" class="note">Riffs and beats alternate A/B every bar. Evolve redraws the switched-on aspects at its rate.</span>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Selected instrument</h2><span id="selMeta"></span></div>
+      <div id="selGrid" class="selgrid"></div>
+      <div class="row">
+        <button id="rollInst" class="chip">Roll this instrument</button>
+        <button id="toggleInst" class="chip">Drop</button>
+      </div>
+      <p class="note">Bank, level, octave and layer are the instrument's variables. Chords, melody and tempo keep playing underneath.</p>
+    </div>
+
+    <div class="block">
+      <div class="blockhead"><h2>Liked moments</h2><span>5 s + full context</span></div>
+      <div id="liked" class="liked"></div>
+    </div>
+
+    <div class="block createblock">
+      <h2>Song create · next</h2>
+      <p class="note">The taste profile and liked windows will be summarised by opencode into a plan, then the builder turns that into a full song. This is the next iteration.</p>
+    </div>
+  </section>
+
+  <aside id="taste">
+    <h2>Taste</h2>
+    <p id="tasteSummary" class="note">Nothing learned yet. Roll, listen, like.</p>
+    <p id="tastePersona" class="note"></p>
+    <button id="tasteBrief" class="chip" style="margin-bottom:10px">Brief for opencode</button>
+    <div id="tasteBody"></div>
+    <button id="resetTaste" class="chip">Reset taste</button>
+  </aside>
+</main>
+
+<dialog id="briefDialog" class="briefdialog">
+  <div class="dialogInner">
+    <header class="dialogHead">
+      <h2>Taste brief</h2>
+      <button id="briefClose" class="mini" aria-label="Close">✕</button>
+    </header>
+    <p class="note">The handoff for Song create: opencode reads this profile and the liked windows, proposes a plan, then the builder renders it.</p>
+    <div id="briefSummary"></div>
+    <div id="briefWindows"></div>
+    <pre id="briefJson" class="spec"></pre>
+    <div class="dialogActions">
+      <button id="copyBrief" class="primary">Copy brief for opencode</button>
+      <button id="downloadBrief" class="chip">Download JSON</button>
+      <button id="briefDone" class="chip">Close</button>
+    </div>
+    <p class="note" id="briefNote"></p>
+  </div>
+</dialog>
+
+<footer id="foot">
+  <audio id="clip" controls hidden></audio>
+  <span id="status">Press play, isolate what you want to explore, then roll.</span>
+</footer>
+
+<script src="engine.js?v=5.4.2"></script>
+<script src="app.js?v=5.4.2"></script>
+</body>
+</html>
