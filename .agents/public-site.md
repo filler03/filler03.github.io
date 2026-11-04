@@ -54,6 +54,7 @@ Experimental and work-in-progress files. These may not work properly.
 | `sandbox/googleDoc.html` | Google Doc embed experiment |
 | `sandbox/googlesheetfetch.html` | Google Sheets fetch experiment |
 | `sandbox/sounds_test.html` | Audio/sound testing |
+| `sandbox/song-canvas/` | Song Canvas prototypes 1–9, sampled instrument library, contextual taste studio, and section curve/discovery lab |
 | `sandbox/message.html`, `meta.html`, `test.html`, `two.html`, `trains.html` | Misc experiments |
 
 ## Tools (`public/tools/`)

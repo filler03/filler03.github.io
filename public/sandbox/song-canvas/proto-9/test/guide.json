@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "mode": "guide",
+  "exported_at": "2026-11-03T01:05:49.511Z",
+  "section": {
+    "id": "sec_001",
+    "title": "New section",
+    "bpm": 96,
+    "bars": 8,
+    "duration_sec": 20,
+    "sources": [
+      {
+        "key": "pad",
+        "label": "Pad"
+      },
+      {
+        "key": "texture",
+        "label": "Texture"
+      }
+    ]
+  },
+  "attributes": {
+    "energy": {
+      "label": "Energy",
+      "specified": true,
+      "locked": false,
+      "interpolation": "linear",
+      "range": [
+        0,
+        1
+      ],
+      "curve": [
+        {
+          "t": 0,
+          "v": 0.25
+        },
+        {
+          "t": 0.5,
+          "v": 0.5
+        },
+        {
+          "t": 0.84,
+          "v": 0.38
+        },
+        {
+          "t": 1,
+          "v": 0.75
+        }
+      ],
+      "ai_decides": false
+    },
+    "density": {
+      "label": "Density",
+      "specified": false,
+      "locked": false,
+      "interpolation": "linear",
+      "range": [
+        0,
+        1
+      ],
+      "curve": null,
+      "ai_decides": true
+    },
+    "brightness": {
+      "label": "Brightness",
+      "specified": false,
+      "locked": false,
+      "interpolation": "linear",
+      "range": [
+        0,
+        1
+      ],
+      "curve": null,
+      "ai_decides": true
+    },
+    "space": {
+      "label": "Space",
+      "specified": false,
+      "locked": false,
+      "interpolation": "linear",
+      "range": [
+        0,
+        1
+      ],
+      "curve": null,
+      "ai_decides": true
+    },
+    "grit": {
+      "label": "Grit",
+      "specified": false,
+      "locked": false,
+      "interpolation": "linear",
+      "range": [
+        0,
+        1
+      ],
+      "curve": null,
+      "ai_decides": true
+    },
+    "motion": {
+      "label": "Motion",
+      "specified": false,
+      "locked": false,
+      "interpolation": "linear",
+      "range": [
+        0,
+        1
+      ],
+      "curve": null,
+      "ai_decides": true
+    }
+  },
+  "discovery": {
+    "focus": "energy",
+    "effects_locked": true,
+    "auto_next": true,
+    "likes": [
+      {
+        "id": "like_mvzzl2eb_jon0nr",
+        "timestamp": "2026-11-03T01:05:48.131Z",
+        "mode": "guide",
+        "focus": "energy",
+        "offset": 0.024,
+        "cycle": 2,
+        "sources": [
+          {
+            "key": "pad",
+            "label": "Pad"
+          },
+          {
+            "key": "texture",
+            "label": "Texture"
+          }
+        ],
+        "attributes": {
+          "energy": {
+            "specified": true,
+            "locked": false,
+            "points": [
+              {
+                "t": 0,
+                "v": 0.25
+              },
+              {
+                "t": 0.5,
+                "v": 0.5
+              },
+              {
+                "t": 0.84,
+                "v": 0.38
+              },
+              {
+                "t": 1,
+                "v": 0.75
+              }
+            ]
+          },
+          "density": {
+            "specified": false,
+            "locked": false,
+            "points": []
+          },
+          "brightness": {
+            "specified": false,
+            "locked": false,
+            "points": []
+          },
+          "space": {
+            "specified": false,
+            "locked": false,
+            "points": []
+          },
+          "grit": {
+            "specified": false,
+            "locked": false,
+            "points": []
+          },
+          "motion": {
+            "specified": false,
+            "locked": false,
+            "points": []
+          }
+        },
+        "effective": {
+          "energy": [
+            0.274,
+            0.399,
+            0.524,
+            0.436,
+            0.774
+          ],
+          "density": [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "brightness": [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "space": [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "grit": [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "motion": [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      }
+    ]
+  },
+  "note": "Guide only. The final song should use these curves, locks, and liked variations as intent evidence; it should re-realize the section, not replay this preview."
+}

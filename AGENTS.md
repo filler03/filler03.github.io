@@ -36,6 +36,8 @@ A GitHub Pages site (`filler03.github.io`) plus two companion Node.js multiplaye
 | [`.agents/multiplayer-apps.md`](.agents/multiplayer-apps.md) | The `apps/` multiplayer servers — architecture, files, deployment |
 | [`.agents/deployment.md`](.agents/deployment.md) | How to deploy: GitHub Pages for static, nginx + pm2 for multiplayer |
 | [`.agents/development.md`](.agents/development.md) | Development workflow, testing, and coding conventions |
+| [`.agents/specs/context-aware-music-system.md`](.agents/specs/context-aware-music-system.md) | Imported context-aware music taste and song-building spec |
+| [`.agents/specs/context-aware-music-system-plan.md`](.agents/specs/context-aware-music-system-plan.md) | Implementation breakdown, review passes, and v0.1 scope |
 
 ## Game Guides Index
 

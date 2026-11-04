@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Song Canvas — Prototype 8 · Taste studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237cf3d1'/%3E%3Cpath d='M9 21V11h3.2l3.8 6.1 3.8-6.1H23v10h-2.8v-5.9L16 21l-4.2-5.9V21z' fill='%2308090d'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=8.2.0">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../" title="All Song Canvas prototypes">
+    <span class="mark" aria-hidden="true"></span>
+    <span>Song Canvas</span>
+    <em>prototype 8 · taste studio</em>
+  </a>
+  <nav>
+    <a href="../instruments/">Instrument library</a>
+    <a href="../../">Game index</a>
+  </nav>
+</header>
+
+<main class="shell">
+  <div class="primary">
+    <section class="hero">
+      <span class="kicker"><i></i> Context-aware music · v0.1</span>
+      <h1>Let the <span>context</span> speak.</h1>
+      <p class="lede">
+        Build a sound from the sampled instrument library, compare two controlled alternatives,
+        and keep the reaction with the musical situation that produced it. Raw evidence stays
+        raw; the summary is only a cache.
+      </p>
+      <div class="statusline">
+        <span id="status" aria-live="polite">Loading library…</span>
+        <span class="status-sep">·</span>
+        <span id="sourceCount">0 sources</span>
+        <span class="status-sep">·</span>
+        <span id="transportStatus">audio idle</span>
+      </div>
+    </section>
+
+    <section class="panel" id="deckPanel">
+      <div class="panelhead">
+        <div>
+          <h2>Deck</h2>
+          <p>One or two sampled sources with an editable processing chain. Click a layer to make it the target for the library.</p>
+        </div>
+        <div class="transport">
+          <button id="playDeck" class="primary">Play deck</button>
+          <button id="stopBtn" class="mini">Stop</button>
+          <label class="check"><input id="loopToggle" type="checkbox"> Loop</label>
+        </div>
+      </div>
+      <div id="layers" class="layers"></div>
+      <div class="deckfoot">
+        <button id="addLayer" class="mini" disabled>+ Add a second layer</button>
+        <span id="deckHint" class="hint">Click a source card in the library to load it into the active layer.</span>
+      </div>
+    </section>
+
+    <section class="panel" id="abPanel">
+      <div class="panelhead">
+        <div>
+          <h2>A/B comparison</h2>
+          <p>Capture the deck as two candidates, then audition the difference. Change one dimension at a time when possible.</p>
+        </div>
+        <div class="focuswrap">
+          <label for="focusSel">Suggest changes</label>
+          <select id="focusSel">
+            <option value="filter">Filter</option>
+            <option value="drive">Drive</option>
+            <option value="space">Space</option>
+            <option value="source">Source</option>
+          </select>
+        </div>
+      </div>
+      <div class="abgrid">
+        <div id="slotA" class="slot slot-a"><span class="slotletter">A</span><p class="slotempty">Not captured yet.</p></div>
+        <div id="slotB" class="slot slot-b"><span class="slotletter">B</span><p class="slotempty">Not captured yet.</p></div>
+      </div>
+      <div class="abactions">
+        <button id="captureA" class="mini">Capture deck as A</button>
+        <button id="captureB" class="mini">Capture deck as B</button>
+        <button id="suggestB" class="mini">Suggest B from A</button>
+        <button id="playA" class="mini">Play A</button>
+        <button id="playB" class="mini">Play B</button>
+      </div>
+
+      <div class="feedback">
+        <div class="feedbackhead">
+          <h3>What did you hear?</h3>
+          <span id="feedbackStatus" class="hint" aria-live="polite">Capture A/B or react to the deck.</span>
+        </div>
+        <div class="feedbackrow">
+          <button id="preferA" class="mini" disabled>Prefer A over B</button>
+          <button id="preferB" class="mini" disabled>Prefer B over A</button>
+          <button id="likeDeck" class="mini">Like deck</button>
+          <button id="dislikeDeck" class="mini">Dislike deck</button>
+          <button id="neutralDeck" class="mini">Neutral</button>
+        </div>
+        <div class="feedbackmeta">
+          <label class="strength">
+            <span>Strength <output id="strengthVal">70%</output></span>
+            <input id="strength" type="range" min="0.1" max="1" step="0.05" value="0.7">
+          </label>
+          <input id="notes" class="notes" type="text" maxlength="280" placeholder="Optional note: too bright, too sparse, nice transition…">
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="libraryPanel">
+      <div class="panelhead">
+        <div>
+          <h2>Source library</h2>
+          <p>Fifty clean candidates. Click a card to load it into the active layer; audition without leaving the page.</p>
+        </div>
+        <div class="librarytools">
+          <input id="searchInput" type="search" placeholder="Search instruments" aria-label="Search instruments">
+        </div>
+      </div>
+      <div id="familyFilters" class="filters" aria-label="Filter by family"></div>
+      <div id="libraryGrid" class="librarygrid"></div>
+      <p id="libraryStatus" class="hint"></p>
+    </section>
+  </div>
+
+  <aside class="side">
+    <section class="panel">
+      <div class="panelhead">
+        <div>
+          <h2>Context</h2>
+          <p>This is saved with every reaction. It is not a universal preference.</p>
+        </div>
+      </div>
+      <div class="contextgrid">
+        <label>Section role
+          <select id="roleSel"></select>
+        </label>
+        <label>Mood
+          <select id="moodSel"></select>
+        </label>
+        <label>Genre influence
+          <select id="genreSel"></select>
+        </label>
+        <label class="strength">
+          <span>Mood strength <output id="moodStrengthVal">70%</output></span>
+          <input id="moodStrength" type="range" min="0" max="1" step="0.05" value="0.7">
+        </label>
+        <label class="strength">
+          <span>Genre strength <output id="genreStrengthVal">50%</output></span>
+          <input id="genreStrength" type="range" min="0" max="1" step="0.05" value="0.5">
+        </label>
+        <label class="strength">
+          <span>Energy <output id="energyVal">40%</output></span>
+          <input id="energy" type="range" min="0" max="1" step="0.05" value="0.4">
+        </label>
+        <label class="strength">
+          <span>Density <output id="densityVal">40%</output></span>
+          <input id="density" type="range" min="0" max="1" step="0.05" value="0.4">
+        </label>
+      </div>
+      <p id="contextSummary" class="hint"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panelhead">
+        <div>
+          <h2>Evidence</h2>
+          <p>Raw observations first; compact preference rules second.</p>
+        </div>
+        <span id="obsCount" class="count">0 observations</span>
+      </div>
+      <div id="preferences" class="preferences"></div>
+      <div class="divider"></div>
+      <h3 class="smallhead">Recent observations</h3>
+      <div id="observations" class="observations"></div>
+      <p id="prefNote" class="hint">No observations yet.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panelhead">
+        <div>
+          <h2>Saved variants</h2>
+          <p>Source references and processing parameters; no rendered audio is duplicated.</p>
+        </div>
+      </div>
+      <div class="saverow">
+        <input id="variantName" type="text" maxlength="48" placeholder="Variant name" aria-label="Variant name">
+        <button id="saveVariant" class="mini">Save deck</button>
+      </div>
+      <div id="variantList" class="variantlist"></div>
+      <div class="divider"></div>
+      <div class="exportrow">
+        <button id="exportBtn" class="mini">Export project JSON</button>
+        <button id="importBtn" class="mini">Import JSON</button>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+      </div>
+    </section>
+
+    <section class="panel scopenote">
+      <h2>v0.1 scope</h2>
+      <p>
+        Sample audition, variants, contextual A/B feedback, and evidence. The timeline,
+        automation curves, sections, transitions, composition engine, and generation
+        ranking are the next slices. This page does not claim to generate a song yet.
+      </p>
+      <p>
+        Sources are 20-second previews, not multisample production libraries. Processing
+        them is useful for auditioning, but pitch/time stretching beyond that is out of scope.
+      </p>
+      <p class="hint">
+        Preview audio and licenses live in <a href="../instruments/">the instrument library</a>.
+      </p>
+    </section>
+  </aside>
+</main>
+
+<footer class="pagefoot">
+  <span>Song Canvas · prototype 8 · taste studio</span>
+  <span class="spacer"></span>
+  <a href="../">All prototypes</a>
+  <a href="../instruments/CREDITS.md">Sources &amp; licenses</a>
+</footer>
+
+<script src="library.js?v=8.2.0"></script>
+<script src="model.js?v=8.2.0"></script>
+<script src="engine.js?v=8.3.0"></script>
+<script src="app.js?v=8.2.0"></script>
+</body>
+</html>

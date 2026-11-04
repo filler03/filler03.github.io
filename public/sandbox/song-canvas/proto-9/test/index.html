@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Song Canvas Section Lab — Playwright screen test</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237cf3d1'/%3E%3Cpath d='M9 21V11h3.2l3.8 6.1 3.8-6.1H23v10h-2.8v-5.9L16 21l-4.2-5.9V21z' fill='%2308090d'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #08090d; --panel: rgba(255,255,255,.045); --line: rgba(255,255,255,.1);
+    --text: #eceaf5; --muted: #9290a6; --accent: #7cf3d1; --accent-2: #b39cff; --heart: #ff7ab0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 0 0 48px;
+  }
+  body::before {
+    content: ""; position: fixed; inset: -20%; pointer-events: none; z-index: -1;
+    background:
+      radial-gradient(34% 38% at 12% 0%, rgba(124,243,209,.13), transparent 72%),
+      radial-gradient(34% 42% at 88% 0%, rgba(179,156,255,.15), transparent 72%),
+      radial-gradient(44% 40% at 52% 108%, rgba(255,122,176,.08), transparent 70%);
+    filter: blur(34px);
+  }
+  a { color: #d5d2e3; }
+  a:hover { color: #fff; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+  .topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 16px 0; color: var(--muted); font-size: 12px; }
+  .topbar a { color: var(--muted); text-decoration: none; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 10px; }
+  .topbar a:hover { color: var(--text); background: rgba(255,255,255,.08); }
+  .spacer { flex: 1; }
+  header { padding: 26px 0 20px; }
+  .kicker { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; letter-spacing: .15em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; }
+  .kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  h1 { margin: 14px 0 8px; font-size: clamp(34px, 6vw, 60px); line-height: 1.02; letter-spacing: -.035em; }
+  h1 span { background: linear-gradient(100deg, var(--accent), var(--accent-2) 58%, #ff9ec8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { max-width: 720px; color: #b9b6cc; font-size: 15px; margin: 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+  .meta span { border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; background: var(--panel); }
+  .videoPanel { border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.028)); border-radius: 18px; padding: 10px; box-shadow: 0 18px 50px rgba(0,0,0,.18); }
+  video { display: block; width: 100%; border-radius: 12px; background: #000; }
+  .videoFoot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 4px 2px; color: var(--muted); font-size: 11px; }
+  .download { margin-left: auto; color: #d5d2e3; text-decoration: none; border: 1px solid rgba(124,243,209,.45); background: rgba(124,243,209,.08); border-radius: 8px; padding: 6px 9px; }
+  .download:hover { background: rgba(124,243,209,.16); }
+  .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 18px; padding: 16px 18px; margin-top: 14px; }
+  .panel h2 { margin: 0 0 8px; font-size: 16px; }
+  .panel p { margin: 0; color: var(--muted); font-size: 12px; }
+  .checks { columns: 2; column-gap: 28px; margin: 10px 0 0; padding-left: 18px; color: #b9b6cc; font-size: 12px; }
+  .checks li { break-inside: avoid; margin: 0 0 6px; padding-left: 2px; }
+  .checks li::marker { color: var(--accent); }
+  .note { margin-top: 12px; border-left: 2px solid var(--accent-2); padding-left: 10px; color: var(--muted); font-size: 11px; }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .links a { color: #cfccdd; text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; font-size: 11px; }
+  .links a:hover { background: rgba(255,255,255,.08); }
+  footer { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; display: flex; flex-wrap: wrap; gap: 10px; }
+  footer .spacer { flex: 1; }
+  @media (max-width: 680px) { .checks { columns: 1; } .videoPanel { padding: 7px; } .wrap { padding: 0 12px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="topbar">
+    <a href="../">Section lab</a>
+    <a href="../../instruments/">Instrument library</a>
+    <span class="spacer"></span>
+    <a href="../../">Song Canvas</a>
+  </nav>
+
+  <header>
+    <span class="kicker"><i></i> Playwright screen test · prototype 9</span>
+    <h1>Watch the <span>section lab</span>.</h1>
+    <p class="lede">
+      A recorded Playwright pass through the Section Lab: draw a curve, run the loop,
+      focus discovery, lock the effects, keep a loop, export the guide, and reload
+      to verify persistence.
+    </p>
+    <div class="meta">
+      <span>126 seconds</span>
+      <span>1280 × 720</span>
+      <span>32 checks passed</span>
+      <span>No page errors</span>
+      <span>Desktop + phone layout</span>
+    </div>
+  </header>
+
+  <section class="videoPanel">
+    <video controls preload="metadata" playsinline poster="poster.jpg?v=4" src="section-lab-playwright-test.mp4?v=4">
+      Your browser cannot play this MP4. <a href="section-lab-playwright-test.mp4?v=4">Download it here.</a>
+    </video>
+    <div class="videoFoot">
+      <span>Natural Edge neural male narration (en-US-AndrewNeural), plus the application audio captured from the Web Audio output. Captions and cursor are part of the recording.</span>
+      <a class="download" href="section-lab-playwright-test.mp4?v=4" download>Download MP4</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>What was checked</h2>
+    <ul class="checks">
+      <li>50 sampled sources loaded</li>
+      <li>6 curve lanes and 6 focus chips</li>
+      <li>Default Pad + Texture layers</li>
+      <li>All attributes start auto</li>
+      <li>Energy curve specified through the UI</li>
+      <li>Point added and dragged</li>
+      <li>Section loop starts and playhead advances</li>
+      <li>Space selected as discovery focus</li>
+      <li>Effects locked</li>
+      <li>Focus moves off locked effects</li>
+      <li>Four effect focus chips disabled</li>
+      <li>Next variation and like saved</li>
+      <li>Application audio recorder started</li>
+      <li>Application audio captured into the video</li>
+      <li>Guide exports with Energy curve</li>
+      <li>Auto attributes marked AI decides</li>
+      <li>Guide notes re-realisation, not replay</li>
+      <li>Curve, lock, and like survive reload</li>
+      <li>Playback stops on reload</li>
+      <li>390 px phone layout has no overflow</li>
+      <li>No page exceptions</li>
+      <li>No console errors</li>
+    </ul>
+    <p class="note">
+      The video uses the 20-second source previews as a listening sketch, with both the
+      narration and the app loop in the soundtrack. The guide JSON is intent evidence for
+      a later composition pass; this is not the final song render.
+    </p>
+    <div class="links">
+      <a href="guide.json">Guide JSON</a>
+      <a href="../">Back to Section Lab</a>
+      <a href="../../instruments/CREDITS.md">Sources &amp; licenses</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>Song Canvas · Section Lab · Playwright screen test</span>
+    <span class="spacer"></span>
+    <span>Recorded 2026-11-02</span>
+  </footer>
+</div>
+</body>
+</html>
